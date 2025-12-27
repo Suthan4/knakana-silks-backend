@@ -1,0 +1,218 @@
+{
+  "modules": {
+    "auth": {
+      "entity": "User",
+      "useCases": [
+        "Register",
+        "Login",
+        "RefreshToken",
+        "Logout",
+        "GetMe",
+        "UpdateProfile"
+      ]
+    },
+    "category": {
+      "entity": "Category",
+      "useCases": [
+        "CreateCategory",
+        "UpdateCategory",
+        "DeleteCategory",
+        "GetCategories",
+        "GetCategoryTree"
+      ]
+    },
+    "product": {
+      "entity": "Product",
+      "useCases": [
+        "CreateProduct",
+        "UpdateProduct",
+        "DeleteProduct",
+        "GetProducts",
+        "GetProduct",
+        "AddVariant",
+        "UploadImages"
+      ]
+    },
+    "cart": {
+      "entity": "Cart",
+      "useCases": [
+        "AddToCart",
+        "UpdateCartItem",
+        "RemoveFromCart",
+        "GetCart",
+        "ClearCart",
+        "MergeCart"
+      ]
+    },
+    "wishlist": {
+      "entity": "Wishlist",
+      "useCases": [
+        "AddToWishlist",
+        "RemoveFromWishlist",
+        "GetWishlist",
+        "MoveToCart"
+      ]
+    },
+    "order": {
+      "entity": "Order",
+      "useCases": [
+        "CreateOrder",
+        "UpdateOrderStatus",
+        "GetOrders",
+        "GetOrder",
+        "CancelOrder",
+        "GenerateInvoice"
+      ]
+    },
+    "payment": {
+      "entity": "Payment",
+      "useCases": [
+        "InitiatePayment",
+        "VerifyPayment",
+        "RefundPayment",
+        "GetPaymentHistory"
+      ]
+    },
+    "stock": {
+      "entity": "Stock",
+      "useCases": [
+        "UpdateStock",
+        "AdjustStock",
+        "GetStockLevels",
+        "GetLowStockProducts"
+      ]
+    },
+    "shipment": {
+      "entity": "Shipment",
+      "useCases": [
+        "CreateShipment",
+        "TrackShipment",
+        "UpdateShipmentStatus",
+        "CalculateShipping"
+      ]
+    },
+    "address": {
+      "entity": "Address",
+      "useCases": [
+        "CreateAddress",
+        "UpdateAddress",
+        "DeleteAddress",
+        "GetAddresses",
+        "SetDefaultAddress"
+      ]
+    },
+    "coupon": {
+      "entity": "Coupon",
+      "useCases": [
+        "CreateCoupon",
+        "UpdateCoupon",
+        "DeleteCoupon",
+        "ValidateCoupon",
+        "ApplyCoupon"
+      ]
+    },
+    "review": {
+      "entity": "Review",
+      "useCases": [
+        "CreateReview",
+        "UpdateReview",
+        "DeleteReview",
+        "GetReviews",
+        "ApproveReview",
+        "VoteHelpful"
+      ]
+    },
+    "return": {
+      "entity": "Return",
+      "useCases": [
+        "RequestReturn",
+        "ApproveReturn",
+        "RejectReturn",
+        "ProcessRefund",
+        "GetReturns"
+      ]
+    },
+    "consultation": {
+      "entity": "Consultation",
+      "useCases": [
+        "RequestConsultation",
+        "ApproveConsultation",
+        "RejectConsultation",
+        "GetConsultations",
+        "AddMeetingLink"
+      ]
+    },
+    "notification": {
+      "entity": "Notification",
+      "useCases": [
+        "CreateNotification",
+        "GetNotifications",
+        "MarkAsRead",
+        "DeleteNotification"
+      ]
+    },
+    "search": {
+      "entity": "Search",
+      "useCases": [
+        "SearchProducts",
+        "GetSearchSuggestions",
+        "GetPopularSearches",
+        "SaveSearchHistory"
+      ]
+    },
+    "filter": {
+      "entity": "Filter",
+      "useCases": [
+        "FilterProducts",
+        "SortProducts",
+        "GetFilterOptions"
+      ]
+    },
+    "recommendation": {
+      "entity": "Recommendation",
+      "useCases": [
+        "GetRelatedProducts",
+        "GetRecentlyViewed",
+        "GetPopularProducts",
+        "TrackProductView"
+      ]
+    },
+    "analytics": {
+      "entity": "Analytics",
+      "useCases": [
+        "GetSalesReport",
+        "GetProductAnalytics",
+        "GetUserAnalytics",
+        "GetRevenueReport"
+      ]
+    },
+    "seo": {
+      "entity": "SeoMeta",
+      "useCases": [
+        "UpdateSeoMeta",
+        "GetSeoMeta",
+        "GenerateSitemap",
+        "GenerateSchemaMarkup"
+      ]
+    },
+    "banner": {
+      "entity": "Banner",
+      "useCases": [
+        "CreateBanner",
+        "UpdateBanner",
+        "DeleteBanner",
+        "GetBanners",
+        "ToggleBannerStatus"
+      ]
+    }
+  },
+  "totalModules": 21,
+  "estimatedFiles": 284,
+  "architecture": "DDD (Domain-Driven Design)",
+  "patterns": [
+    "Repository",
+    "Use Case",
+    "DTO",
+    "Dependency Injection"
+  ]
+}
