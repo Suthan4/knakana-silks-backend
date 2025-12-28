@@ -80,6 +80,15 @@ enum DiscountType {
   FIXED
 }
 
+enum SectionType {
+  HERO_SLIDER       
+  NEW_ARRIVALS      
+  FEATURED          
+  COLLECTIONS     
+  CATEGORIES        
+  CUSTOM           
+}
+
 model User {
   id             BigInt           @id @default(autoincrement())
   email          String           @unique
@@ -158,6 +167,7 @@ model Category {
 
   parent              Category?            @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children            Category[]           @relation("CategoryHierarchy")
+  homeSections        HomeSection[]        @relation("SectionCategories")
   products            Product[]
   consultationConfigs ConsultationConfig[]
 
@@ -188,6 +198,7 @@ model Product {
   updatedAt           DateTime              @updatedAt
 
   category            Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  homeSections        HomeSection[]        @relation("SectionProducts")
   specifications      Specification[]
   variants            ProductVariant[]
   images              ProductImage[]
@@ -641,7 +652,23 @@ model Banner {
 
   @@map("banners")
 }
+model HomeSection {
+  id          BigInt      @id @default(autoincrement())
+  type        SectionType
+  title       String                    // "New Sarees", "Our Collections"
+  subtitle    String?                   // Optional subtitle
+  isActive    Boolean     @default(true)
+  order       Int         @default(0)   // Display order
+  limit       Int         @default(8)   // How many items to show
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
+  products    Product[]   @relation("SectionProducts")
+  categories  Category[]  @relation("SectionCategories")
+
+  @@index([isActive, order])
+  @@map("home_sections")
+}
 model SeoMeta {
   id           BigInt    @id @default(autoincrement())
   pageType     String
