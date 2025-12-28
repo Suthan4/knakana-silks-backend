@@ -18,10 +18,15 @@ export class ProductController {
 
   async createProduct(req: Request, res: Response) {
     try {
-      console.log("🎯 Controller reached!"); // Add this
-      console.log("Request body:", req.body); // Add this
+      console.log("🎯 Controller reached!");
+      console.log("Request body:", JSON.stringify(req.body, null, 2));
+      console.log("User:", req.user);
+
       const data = CreateProductDTOSchema.parse(req.body);
+      console.log("✅ Validation passed:", JSON.stringify(data, null, 2));
+
       const product = await this.productService.createProduct(data);
+      console.log("✅ Product created:", product?.id);
 
       res.status(201).json({
         success: true,
@@ -29,7 +34,17 @@ export class ProductController {
         data: product,
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      console.error("❌ Error in createProduct:", error);
+      console.error("Error stack:", error.stack);
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+
+      res.status(400).json({
+        success: false,
+        message: error.message,
+        details:
+          process.env.NODE_ENV === "development" ? error.stack : undefined,
+      });
     }
   }
 
@@ -51,6 +66,7 @@ export class ProductController {
         data: product,
       });
     } catch (error: any) {
+      console.error("❌ Error in updateProduct:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -71,6 +87,7 @@ export class ProductController {
         message: "Product deleted successfully",
       });
     } catch (error: any) {
+      console.error("❌ Error in deleteProduct:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -91,6 +108,7 @@ export class ProductController {
         data: product,
       });
     } catch (error: any) {
+      console.error("❌ Error in getProduct:", error);
       res.status(404).json({ success: false, message: error.message });
     }
   }
@@ -111,6 +129,7 @@ export class ProductController {
         data: product,
       });
     } catch (error: any) {
+      console.error("❌ Error in getProductBySlug:", error);
       res.status(404).json({ success: false, message: error.message });
     }
   }
@@ -145,6 +164,7 @@ export class ProductController {
         data: result,
       });
     } catch (error: any) {
+      console.error("❌ Error in getProducts:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -172,6 +192,7 @@ export class ProductController {
         data: spec,
       });
     } catch (error: any) {
+      console.error("❌ Error in addSpecification:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -195,6 +216,7 @@ export class ProductController {
         data: spec,
       });
     } catch (error: any) {
+      console.error("❌ Error in updateSpecification:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -216,6 +238,7 @@ export class ProductController {
         message: "Specification deleted successfully",
       });
     } catch (error: any) {
+      console.error("❌ Error in deleteSpecification:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -245,6 +268,7 @@ export class ProductController {
         data: image,
       });
     } catch (error: any) {
+      console.error("❌ Error in addImage:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -266,6 +290,7 @@ export class ProductController {
         message: "Image deleted successfully",
       });
     } catch (error: any) {
+      console.error("❌ Error in deleteImage:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -290,6 +315,7 @@ export class ProductController {
         data: variant,
       });
     } catch (error: any) {
+      console.error("❌ Error in addVariant:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -311,6 +337,7 @@ export class ProductController {
         message: "Variant deleted successfully",
       });
     } catch (error: any) {
+      console.error("❌ Error in deleteVariant:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -333,6 +360,7 @@ export class ProductController {
         data: stock,
       });
     } catch (error: any) {
+      console.error("❌ Error in getStock:", error);
       res.status(404).json({ success: false, message: error.message });
     }
   }
@@ -360,6 +388,7 @@ export class ProductController {
         data: stock,
       });
     } catch (error: any) {
+      console.error("❌ Error in updateStock:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }

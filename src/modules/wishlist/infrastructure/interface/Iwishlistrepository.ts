@@ -41,4 +41,5 @@ export interface IWishlistRepository {
   getWishlistWithItems(userId: bigint): Promise<WishlistWithItems | null>;
   clearWishlist(wishlistId: bigint): Promise<void>;
   getItemCount(wishlistId: bigint): Promise<number>;
+  updateVisibility(wishlistId: bigint, isPublic: boolean): Promise<Wishlist>;
 }

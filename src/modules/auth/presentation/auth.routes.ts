@@ -83,41 +83,5 @@ router.put(
   (req, res) => getAdminController().toggleUserStatus(req, res)
 );
 
-// ============ Example: Module Permission Routes ============
-router.post(
-  "/products",
-  authenticate,
-  checkPermission("products", "create"),
-  (req, res) => {
-    res.json({ message: "Create product - permission granted" });
-  }
-);
-
-router.get(
-  "/products",
-  authenticate,
-  checkPermission("products", "read"),
-  (req, res) => {
-    res.json({ message: "Read products - permission granted" });
-  }
-);
-
-router.put(
-  "/products/:id",
-  authenticate,
-  checkPermission("products", "update"),
-  (req, res) => {
-    res.json({ message: "Update product - permission granted" });
-  }
-);
-
-router.delete(
-  "/products/:id",
-  authenticate,
-  checkPermission("products", "delete"),
-  (req, res) => {
-    res.json({ message: "Delete product - permission granted" });
-  }
-);
 
 export default router;

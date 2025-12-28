@@ -1,6 +1,9 @@
 import { inject, injectable } from "tsyringe";
 import { Cart, CartItem, PrismaClient } from "@/generated/prisma/client.js";
-import { CartWithItems, ICartRepository } from "../interface/Icartrepository.js";
+import {
+  CartWithItems,
+  ICartRepository,
+} from "../interface/Icartrepository.js";
 
 @injectable()
 export class CartRepository implements ICartRepository {
@@ -28,7 +31,7 @@ export class CartRepository implements ICartRepository {
       data: {
         cartId: data.cartId,
         productId: data.productId,
-        variantId: data.variantId,
+        variantId: data.variantId ?? null, // Use nullish coalescing
         quantity: data.quantity,
       },
       include: {
@@ -66,15 +69,27 @@ export class CartRepository implements ICartRepository {
     productId: bigint,
     variantId?: bigint
   ): Promise<CartItem | null> {
-    return this.prisma.cartItem.findUnique({
-      where: {
-        cartId_productId_variantId: {
+    if (variantId !== undefined) {
+      // Variant provided - use unique constraint
+      return this.prisma.cartItem.findUnique({
+        where: {
+          cartId_productId_variantId: {
+            cartId,
+            productId,
+            variantId, // ✅ All fields present
+          },
+        },
+      });
+    } else {
+      // No variant - use findFirst with null check
+      return this.prisma.cartItem.findFirst({
+        where: {
           cartId,
           productId,
-          variantId: variantId as bigint,
+          variantId: null, // ✅ Explicitly null in where clause
         },
-      },
-    });
+      });
+    }
   }
 
   async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {

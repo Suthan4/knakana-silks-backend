@@ -30,10 +30,19 @@ export class WishlistRepository implements IWishlistRepository {
     wishlistId: bigint;
     productId: bigint;
   }): Promise<WishlistItemWithProduct> {
-    return this.prisma.wishlistItem.create({
+    const { wishlistId, productId } = data;
+
+    console.log("🔧 Repository addItem called with:", {
+      wishlistId: wishlistId.toString(),
+      productId: productId.toString(),
+      wishlistIdType: typeof wishlistId,
+      productIdType: typeof productId,
+    });
+
+    const result = await this.prisma.wishlistItem.create({
       data: {
-        wishlistId: data.wishlistId,
-        productId: data.productId,
+        wishlistId,
+        productId,
       },
       include: {
         product: {
@@ -44,6 +53,9 @@ export class WishlistRepository implements IWishlistRepository {
         },
       },
     });
+
+    console.log("✅ Repository addItem successful");
+    return result;
   }
 
   async removeItem(id: bigint): Promise<void> {
@@ -91,5 +103,15 @@ export class WishlistRepository implements IWishlistRepository {
 
   async getItemCount(wishlistId: bigint): Promise<number> {
     return this.prisma.wishlistItem.count({ where: { wishlistId } });
+  }
+
+  async updateVisibility(
+    wishlistId: bigint,
+    isPublic: boolean
+  ): Promise<Wishlist> {
+    return this.prisma.wishlist.update({
+      where: { id: wishlistId },
+      data: { isPublic },
+    });
   }
 }

@@ -1,6 +1,8 @@
 # 1. Create migration
 npx prisma migrate dev --name add_artisan_details_to_products
 
+npx prisma generate
+
 # 2. For production database
 npx prisma migrate deploy
 

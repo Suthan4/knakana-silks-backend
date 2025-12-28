@@ -95,16 +95,64 @@ export class ProductRepository implements IProductRepository {
     metaDesc?: string;
     schemaMarkup?: string;
   }): Promise<Product> {
-    return this.prisma.product.create({
-      data,
-      include: {
-        category: true,
-        specifications: true,
-        variants: true,
-        images: true,
-        stock: true,
-      },
+    console.log("🔵 ProductRepository.create called with:", {
+      name: data.name,
+      sku: data.sku,
+      categoryId: data.categoryId.toString(),
+      artisanName: data.artisanName,
+      artisanAbout: data.artisanAbout?.substring(0, 50),
+      artisanLocation: data.artisanLocation,
     });
+
+    try {
+      // Handle optional artisan fields - convert empty strings to undefined/null
+      const createData: any = {
+        name: data.name,
+        slug: data.slug,
+        description: data.description,
+        categoryId: data.categoryId,
+        basePrice: data.basePrice,
+        sellingPrice: data.sellingPrice,
+        sku: data.sku,
+        isActive: data.isActive,
+        metaTitle: data.metaTitle || undefined,
+        metaDesc: data.metaDesc || undefined,
+        schemaMarkup: data.schemaMarkup || undefined,
+      };
+
+      // Only add artisan fields if they have actual values
+      if (data.artisanName && data.artisanName.trim()) {
+        createData.artisanName = data.artisanName;
+      }
+      if (data.artisanAbout && data.artisanAbout.trim()) {
+        createData.artisanAbout = data.artisanAbout;
+      }
+      if (data.artisanLocation && data.artisanLocation.trim()) {
+        createData.artisanLocation = data.artisanLocation;
+      }
+
+      console.log(
+        "🔵 Prisma create data:",
+        JSON.stringify(createData, null, 2)
+      );
+
+      const product = await this.prisma.product.create({
+        data: createData,
+        include: {
+          category: true,
+          specifications: true,
+          variants: true,
+          images: true,
+          stock: true,
+        },
+      });
+
+      console.log("✅ Product created in database:", product.id);
+      return product;
+    } catch (error) {
+      console.error("❌ Error in ProductRepository.create:", error);
+      throw error;
+    }
   }
 
   async update(id: bigint, data: Partial<Product>): Promise<Product> {

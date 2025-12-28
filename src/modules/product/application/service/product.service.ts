@@ -36,110 +36,173 @@ export class ProductService {
     }>;
     stock?: { quantity: number; lowStockThreshold?: number };
   }): Promise<Product | null> {
-    // Validate category
-    const category = await this.categoryRepository.findById(
-      BigInt(data.categoryId)
-    );
-    if (!category) {
-      throw new Error("Category not found");
-    }
-
-    // Generate slug and SKU
-    const slug = SlugUtil.generateSlug(data.name);
-    const sku = this.generateSKU(data.name);
-
-    // Check if slug or SKU exists
-    const [existingSlug, existingSku] = await Promise.all([
-      this.productRepository.findBySlug(slug),
-      this.productRepository.findBySku(sku),
-    ]);
-
-    if (existingSlug) {
-      throw new Error("Product with this name already exists");
-    }
-
-    if (existingSku) {
-      // Regenerate SKU if collision (very rare)
-      return this.createProduct({
-        ...data,
-        name: data.name + "-" + Math.random().toString(36).substring(7),
+    try {
+      console.log("🔵 ProductService.createProduct called with:", {
+        name: data.name,
+        categoryId: data.categoryId,
+        basePrice: data.basePrice,
+        sellingPrice: data.sellingPrice,
       });
-    }
 
-    // Create product
-    const product = await this.productRepository.create({
-      name: data.name,
-      slug,
-      description: data.description,
-      categoryId: BigInt(data.categoryId),
-      basePrice: data.basePrice,
-      sellingPrice: data.sellingPrice,
-      sku,
-      isActive: data.isActive ?? true,
-      artisanName: data.artisanName,
-      artisanAbout: data.artisanAbout,
-      artisanLocation: data.artisanLocation,
-      metaTitle: data.metaTitle,
-      metaDesc: data.metaDesc,
-      schemaMarkup: data.schemaMarkup,
-    });
-
-    // Add specifications
-    if (data.specifications && data.specifications.length > 0) {
-      await Promise.all(
-        data.specifications.map((spec) =>
-          this.productRepository.addSpecification(
-            product.id,
-            spec.key,
-            spec.value
-          )
-        )
+      // Validate category
+      const category = await this.categoryRepository.findById(
+        BigInt(data.categoryId)
       );
-    }
+      if (!category) {
+        throw new Error("Category not found");
+      }
+      console.log("✅ Category validated:", category.name);
 
-    // Add images
-    if (data.images && data.images.length > 0) {
-      await Promise.all(
-        data.images.map((img) =>
-          this.productRepository.addImage(
-            product.id,
-            img.url,
-            img.altText,
-            img.order
+      // Generate slug and SKU
+      const slug = SlugUtil.generateSlug(data.name);
+      const sku = this.generateSKU(data.name);
+      console.log("✅ Generated slug:", slug, "SKU:", sku);
+
+      // Check if slug or SKU exists
+      const [existingSlug, existingSku] = await Promise.all([
+        this.productRepository.findBySlug(slug),
+        this.productRepository.findBySku(sku),
+      ]);
+
+      if (existingSlug) {
+        throw new Error("Product with this name already exists");
+      }
+
+      if (existingSku) {
+        // Regenerate SKU with timestamp to avoid collision
+        const newSku = this.generateSKU(data.name + "-" + Date.now());
+        console.log("⚠️ SKU collision detected, using new SKU:", newSku);
+        return this.createProductWithSku(data, slug, newSku);
+      }
+
+      return this.createProductWithSku(data, slug, sku);
+    } catch (error) {
+      console.error("❌ Error in ProductService.createProduct:", error);
+      throw error;
+    }
+  }
+
+  private async createProductWithSku(
+    data: {
+      name: string;
+      description: string;
+      categoryId: string;
+      basePrice: number;
+      sellingPrice: number;
+      isActive?: boolean;
+      artisanName?: string;
+      artisanAbout?: string;
+      artisanLocation?: string;
+      metaTitle?: string;
+      metaDesc?: string;
+      schemaMarkup?: string;
+      specifications?: Array<{ key: string; value: string }>;
+      images?: Array<{ url: string; altText?: string; order?: number }>;
+      variants?: Array<{
+        size?: string;
+        color?: string;
+        fabric?: string;
+        price: number;
+      }>;
+      stock?: { quantity: number; lowStockThreshold?: number };
+    },
+    slug: string,
+    sku: string
+  ): Promise<Product | null> {
+    try {
+      console.log("🔵 Creating product with slug:", slug, "sku:", sku);
+
+      // Create product
+      const product = await this.productRepository.create({
+        name: data.name,
+        slug,
+        description: data.description,
+        categoryId: BigInt(data.categoryId),
+        basePrice: data.basePrice,
+        sellingPrice: data.sellingPrice,
+        sku,
+        isActive: data.isActive ?? true,
+        artisanName: data.artisanName || "",
+        artisanAbout: data.artisanAbout || "",
+        artisanLocation: data.artisanLocation || "",
+        metaTitle: data.metaTitle,
+        metaDesc: data.metaDesc,
+        schemaMarkup: data.schemaMarkup,
+      });
+
+      console.log("✅ Product created with ID:", product.id);
+
+      // Add specifications
+      if (data.specifications && data.specifications.length > 0) {
+        console.log("🔵 Adding specifications:", data.specifications.length);
+        await Promise.all(
+          data.specifications.map((spec) =>
+            this.productRepository.addSpecification(
+              product.id,
+              spec.key,
+              spec.value
+            )
           )
-        )
-      );
-    }
+        );
+        console.log("✅ Specifications added");
+      }
 
-    // Add variants
-    if (data.variants && data.variants.length > 0) {
-      await Promise.all(
-        data.variants.map((variant) =>
-          this.productRepository.addVariant({
-            productId: product.id,
-            size: variant.size,
-            color: variant.color,
-            fabric: variant.fabric,
-            price: variant.price,
-            sku: this.generateSKU(
-              `${data.name}-${variant.size}-${variant.color}`
-            ),
+      // Add images
+      if (data.images && data.images.length > 0) {
+        console.log("🔵 Adding images:", data.images.length);
+        await Promise.all(
+          data.images.map((img) =>
+            this.productRepository.addImage(
+              product.id,
+              img.url,
+              img.altText,
+              img.order
+            )
+          )
+        );
+        console.log("✅ Images added");
+      }
+
+      // Add variants
+      if (data.variants && data.variants.length > 0) {
+        console.log("🔵 Adding variants:", data.variants.length);
+        await Promise.all(
+          data.variants.map((variant) => {
+            const variantSku = this.generateSKU(
+              `${data.name}-${variant.size || ""}-${variant.color || ""}`
+            );
+            return this.productRepository.addVariant({
+              productId: product.id,
+              size: variant.size,
+              color: variant.color,
+              fabric: variant.fabric,
+              price: variant.price,
+              sku: variantSku,
+            });
           })
-        )
-      );
-    }
+        );
+        console.log("✅ Variants added");
+      }
 
-    // Initialize stock
-    if (data.stock) {
-      await this.productRepository.updateStock(
-        product.id,
-        data.stock.quantity,
-        "Initial stock"
-      );
-    }
+      // Initialize stock
+      if (data.stock) {
+        console.log("🔵 Initializing stock:", data.stock.quantity);
+        await this.productRepository.updateStock(
+          product.id,
+          data.stock.quantity,
+          "Initial stock"
+        );
+        console.log("✅ Stock initialized");
+      }
 
-    // Return product with all relations
-    return this.productRepository.findById(product.id);
+      // Return product with all relations
+      const finalProduct = await this.productRepository.findById(product.id);
+      console.log("✅ Product creation complete:", finalProduct?.id);
+      return finalProduct;
+    } catch (error) {
+      console.error("❌ Error in createProductWithSku:", error);
+      throw error;
+    }
   }
 
   async updateProduct(
