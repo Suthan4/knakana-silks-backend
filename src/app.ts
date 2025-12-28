@@ -9,6 +9,11 @@ import { setupContainer } from "./config/container.js";
 
 setupContainer();
 import authRoutes from "./modules/auth/presentation/auth.routes.js";
+import categoryRoutes from "./modules/category/presentation/routes/category.routes.js";
+import productRoutes from "./modules/product/presentation/routes/product.routes.js";
+import addressRoutes from "./modules/address/presentation/routes/address.routes.js";
+import cartRoutes from "./modules/cart/presentation/routes/cart.routes.js";
+import wishlistRoutes from "./modules/wishlist/presentation/routes/wishlist.routes.js";
 
 export const createApp = (): Application => {
 
@@ -33,6 +38,11 @@ export const createApp = (): Application => {
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
   app.use("/api", authRoutes);
+  app.use("/api", categoryRoutes);
+  app.use("/api", productRoutes);
+  app.use("/api", addressRoutes);
+  app.use("/api", cartRoutes);
+  app.use("/api", wishlistRoutes);
 
   app.get("/health", (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });

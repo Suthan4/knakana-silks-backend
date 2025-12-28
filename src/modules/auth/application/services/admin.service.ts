@@ -81,6 +81,7 @@ export class AdminService {
     module: string,
     action: "create" | "read" | "update" | "delete"
   ) {
+    console.log("🔍 Checking permission:", { userId, module, action }); // Add this
     const permission = await this.permissionRepository.findByUserIdAndModule(
       userId,
       module
