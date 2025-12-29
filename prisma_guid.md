@@ -5,7 +5,8 @@ npx prisma generate
 
 # 2. For production database
 npx prisma migrate deploy
-
+# 3.
+npx prisma migrate reset
 What happens:
 
 Migration: Adds the new columns (artisanName, artisanAbout, artisanImage, artisanLocation) to your products table in the database
