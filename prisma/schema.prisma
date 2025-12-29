@@ -186,6 +186,8 @@ model Product {
   sellingPrice        Decimal               @db.Decimal(10, 2)
   sku                 String                @unique
   isActive            Boolean               @default(true)
+  hsnCode             String?
+  hasVariants         Boolean
    // Artisan details
   artisanName      String?
   artisanAbout     String?    @db.Text
@@ -213,6 +215,7 @@ model Product {
   @@index([slug])
   @@index([categoryId])
   @@index([sku])
+  @@index([hasVariants])
   @@map("products")
 }
 
@@ -283,9 +286,9 @@ model Warehouse {
 
 model Stock {
   id                BigInt             @id @default(autoincrement())
-  productId         BigInt?            
+  productId         BigInt            
   variantId         BigInt?            
-  warehouseId       BigInt?            
+  warehouseId       BigInt            
   quantity          Int                @default(0)
   lowStockThreshold Int                @default(10)
   updatedAt         DateTime           @updatedAt

@@ -14,6 +14,14 @@ import productRoutes from "./modules/product/presentation/routes/product.routes.
 import addressRoutes from "./modules/address/presentation/routes/address.routes.js";
 import cartRoutes from "./modules/cart/presentation/routes/cart.routes.js";
 import wishlistRoutes from "./modules/wishlist/presentation/routes/wishlist.routes.js";
+import bannerRoutes from "./modules/banner/presentation/routes/banner.routes.js";
+import home_sectionRoutes from "./modules/home_section/presentation/routes/home_section.routes.js";
+import orderRoutes from "./modules/order/presentation/routes/order.routes.js";
+import paymentRoutes from "./modules/payment/presentation/routes/payment.routes.js";
+import shipmentRoutes from "./modules/shipment/presentation/routes/shipment.routes.js";
+import couponRoutes from "./modules/coupon/presentation/routes/coupon.routes.js";
+import consultationRoutes from "./modules/consultation/presentation/routes/consultation.routes.js";
+import warehouseRoutes from "./modules/warehouse/presentation/routes/warehouse.routes.js";
 
 export const createApp = (): Application => {
 
@@ -43,6 +51,14 @@ export const createApp = (): Application => {
   app.use("/api", addressRoutes);
   app.use("/api", cartRoutes);
   app.use("/api", wishlistRoutes);
+  app.use("/api", bannerRoutes);
+  app.use("/api", home_sectionRoutes);
+  app.use("/api", orderRoutes);
+  app.use("/api", paymentRoutes);
+  app.use("/api", shipmentRoutes);
+  app.use("/api", couponRoutes);
+  app.use("/api", consultationRoutes);
+  app.use("/api", warehouseRoutes);
 
   app.get("/health", (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });

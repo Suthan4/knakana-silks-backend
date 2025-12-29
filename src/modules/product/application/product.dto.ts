@@ -8,6 +8,7 @@ export const CreateProductDTOSchema = z.object({
   basePrice: z.number().positive("Base price must be positive"),
   sellingPrice: z.number().positive("Selling price must be positive"),
   isActive: z.boolean().default(true),
+  hsnCode: z.string().optional(),
   artisanName:z.string().max(60).optional(),
   artisanAbout:z.string().max(160).optional(),  
   artisanLocation: z.string().max(60).optional(),

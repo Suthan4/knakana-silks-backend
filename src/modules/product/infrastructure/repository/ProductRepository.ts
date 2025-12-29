@@ -88,9 +88,11 @@ export class ProductRepository implements IProductRepository {
     sellingPrice: number;
     sku: string;
     isActive: boolean;
-    artisanName: string;
-    artisanAbout: string;
-    artisanLocation: string;
+    hasVariants: boolean; // ADD THIS
+    hsnCode?: string;
+    artisanName?: string; // Make optional
+    artisanAbout?: string; // Make optional
+    artisanLocation?: string; // Make optional
     metaTitle?: string;
     metaDesc?: string;
     schemaMarkup?: string;
@@ -99,45 +101,29 @@ export class ProductRepository implements IProductRepository {
       name: data.name,
       sku: data.sku,
       categoryId: data.categoryId.toString(),
-      artisanName: data.artisanName,
-      artisanAbout: data.artisanAbout?.substring(0, 50),
-      artisanLocation: data.artisanLocation,
+      hasVariants: data.hasVariants,
     });
 
     try {
-      // Handle optional artisan fields - convert empty strings to undefined/null
-      const createData: any = {
-        name: data.name,
-        slug: data.slug,
-        description: data.description,
-        categoryId: data.categoryId,
-        basePrice: data.basePrice,
-        sellingPrice: data.sellingPrice,
-        sku: data.sku,
-        isActive: data.isActive,
-        metaTitle: data.metaTitle || undefined,
-        metaDesc: data.metaDesc || undefined,
-        schemaMarkup: data.schemaMarkup || undefined,
-      };
-
-      // Only add artisan fields if they have actual values
-      if (data.artisanName && data.artisanName.trim()) {
-        createData.artisanName = data.artisanName;
-      }
-      if (data.artisanAbout && data.artisanAbout.trim()) {
-        createData.artisanAbout = data.artisanAbout;
-      }
-      if (data.artisanLocation && data.artisanLocation.trim()) {
-        createData.artisanLocation = data.artisanLocation;
-      }
-
-      console.log(
-        "🔵 Prisma create data:",
-        JSON.stringify(createData, null, 2)
-      );
-
       const product = await this.prisma.product.create({
-        data: createData,
+        data: {
+          name: data.name,
+          slug: data.slug,
+          description: data.description,
+          categoryId: data.categoryId,
+          basePrice: data.basePrice,
+          sellingPrice: data.sellingPrice,
+          sku: data.sku,
+          isActive: data.isActive,
+          hasVariants: data.hasVariants, // ADD THIS
+          hsnCode: data.hsnCode,
+          artisanName: data.artisanName || "", // Default to empty string
+          artisanAbout: data.artisanAbout || "", // Default to empty string
+          artisanLocation: data.artisanLocation || "", // Default to empty string
+          metaTitle: data.metaTitle,
+          metaDesc: data.metaDesc,
+          schemaMarkup: data.schemaMarkup,
+        },
         include: {
           category: true,
           specifications: true,
@@ -250,24 +236,64 @@ export class ProductRepository implements IProductRepository {
   }
 
   // Stock
-  async getStock(productId: bigint): Promise<Stock | null> {
+  async getStock(
+    productId: bigint,
+    variantId: bigint,
+    warehouseId: bigint
+  ): Promise<Stock | null> {
     return this.prisma.stock.findUnique({
-      where: { productId },
+      where: {
+        productId_variantId_warehouseId: {
+          productId,
+          variantId,
+          warehouseId,
+        },
+      },
     });
   }
 
   async updateStock(
     productId: bigint,
+    variantId: bigint | null,
+    warehouseId: bigint,
     quantity: number,
+    lowStockThreshold: number,
     reason: string
-  ): Promise<Stock> {
-    const stock = await this.prisma.stock.upsert({
-      where: { productId },
-      update: { quantity },
-      create: { productId, quantity },
+  ) {
+    // Find existing stock record
+    const existingStock = await this.prisma.stock.findFirst({
+      where: {
+        productId,
+        variantId, // null will match null
+        warehouseId,
+      },
     });
 
-    // Record adjustment
+    let stock;
+
+    if (existingStock) {
+      // Update existing
+      stock = await this.prisma.stock.update({
+        where: { id: existingStock.id },
+        data: {
+          quantity,
+          lowStockThreshold,
+        },
+      });
+    } else {
+      // Create new
+      stock = await this.prisma.stock.create({
+        data: {
+          productId,
+          variantId, // null is fine here
+          warehouseId,
+          quantity,
+          lowStockThreshold,
+        },
+      });
+    }
+
+    // Create adjustment record
     await this.prisma.stockAdjustment.create({
       data: {
         stockId: stock.id,

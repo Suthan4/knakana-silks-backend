@@ -20,6 +20,7 @@ export class ProductService {
     basePrice: number;
     sellingPrice: number;
     isActive?: boolean;
+    hsnCode?: string;
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
@@ -33,15 +34,23 @@ export class ProductService {
       color?: string;
       fabric?: string;
       price: number;
+      stock?: {
+        warehouseId: string;
+        quantity: number;
+        lowStockThreshold?: number;
+      };
     }>;
-    stock?: { quantity: number; lowStockThreshold?: number };
+    stock?: {
+      warehouseId: string;
+      quantity: number;
+      lowStockThreshold?: number;
+    };
   }): Promise<Product | null> {
     try {
       console.log("🔵 ProductService.createProduct called with:", {
         name: data.name,
         categoryId: data.categoryId,
-        basePrice: data.basePrice,
-        sellingPrice: data.sellingPrice,
+        hasVariants: !!data.variants?.length,
       });
 
       // Validate category
@@ -51,12 +60,23 @@ export class ProductService {
       if (!category) {
         throw new Error("Category not found");
       }
-      console.log("✅ Category validated:", category.name);
+
+      // Validate product type
+      const hasVariants = !!(data.variants && data.variants.length > 0);
+
+      if (hasVariants && data.stock) {
+        throw new Error(
+          "Cannot provide both variants and direct stock. Use variant-level stock for variable products."
+        );
+      }
+
+      if (!hasVariants && !data.stock) {
+        throw new Error("Simple products must have stock information.");
+      }
 
       // Generate slug and SKU
       const slug = SlugUtil.generateSlug(data.name);
       const sku = this.generateSKU(data.name);
-      console.log("✅ Generated slug:", slug, "SKU:", sku);
 
       // Check if slug or SKU exists
       const [existingSlug, existingSku] = await Promise.all([
@@ -69,13 +89,11 @@ export class ProductService {
       }
 
       if (existingSku) {
-        // Regenerate SKU with timestamp to avoid collision
         const newSku = this.generateSKU(data.name + "-" + Date.now());
-        console.log("⚠️ SKU collision detected, using new SKU:", newSku);
-        return this.createProductWithSku(data, slug, newSku);
+        return this.createProductWithSku(data, slug, newSku, hasVariants);
       }
 
-      return this.createProductWithSku(data, slug, sku);
+      return this.createProductWithSku(data, slug, sku, hasVariants);
     } catch (error) {
       console.error("❌ Error in ProductService.createProduct:", error);
       throw error;
@@ -90,6 +108,7 @@ export class ProductService {
       basePrice: number;
       sellingPrice: number;
       isActive?: boolean;
+      hsnCode?: string;
       artisanName?: string;
       artisanAbout?: string;
       artisanLocation?: string;
@@ -103,16 +122,26 @@ export class ProductService {
         color?: string;
         fabric?: string;
         price: number;
+        stock?: {
+          warehouseId: string;
+          quantity: number;
+          lowStockThreshold?: number;
+        };
       }>;
-      stock?: { quantity: number; lowStockThreshold?: number };
+      stock?: {
+        warehouseId: string;
+        quantity: number;
+        lowStockThreshold?: number;
+      };
     },
     slug: string,
-    sku: string
+    sku: string,
+    hasVariants: boolean
   ): Promise<Product | null> {
     try {
-      console.log("🔵 Creating product with slug:", slug, "sku:", sku);
+      console.log("🔵 Creating product:", { slug, sku, hasVariants });
 
-      // Create product
+      // Create product with hasVariants flag
       const product = await this.productRepository.create({
         name: data.name,
         slug,
@@ -122,6 +151,8 @@ export class ProductService {
         sellingPrice: data.sellingPrice,
         sku,
         isActive: data.isActive ?? true,
+        hasVariants, // NEW FIELD
+        hsnCode: data.hsnCode,
         artisanName: data.artisanName || "",
         artisanAbout: data.artisanAbout || "",
         artisanLocation: data.artisanLocation || "",
@@ -130,11 +161,10 @@ export class ProductService {
         schemaMarkup: data.schemaMarkup,
       });
 
-      console.log("✅ Product created with ID:", product.id);
+      console.log("✅ Product created:", product.id);
 
       // Add specifications
-      if (data.specifications && data.specifications.length > 0) {
-        console.log("🔵 Adding specifications:", data.specifications.length);
+      if (data.specifications?.length) {
         await Promise.all(
           data.specifications.map((spec) =>
             this.productRepository.addSpecification(
@@ -148,8 +178,7 @@ export class ProductService {
       }
 
       // Add images
-      if (data.images && data.images.length > 0) {
-        console.log("🔵 Adding images:", data.images.length);
+      if (data.images?.length) {
         await Promise.all(
           data.images.map((img) =>
             this.productRepository.addImage(
@@ -163,36 +192,55 @@ export class ProductService {
         console.log("✅ Images added");
       }
 
-      // Add variants
-      if (data.variants && data.variants.length > 0) {
-        console.log("🔵 Adding variants:", data.variants.length);
-        await Promise.all(
-          data.variants.map((variant) => {
-            const variantSku = this.generateSKU(
-              `${data.name}-${variant.size || ""}-${variant.color || ""}`
-            );
-            return this.productRepository.addVariant({
-              productId: product.id,
-              size: variant.size,
-              color: variant.color,
-              fabric: variant.fabric,
-              price: variant.price,
-              sku: variantSku,
-            });
-          })
-        );
-        console.log("✅ Variants added");
-      }
+      // Handle stock based on product type
+      if (hasVariants) {
+        // Variable product - add variants with their stock
+        console.log("🔵 Adding variants with stock:", data.variants!.length);
 
-      // Initialize stock
-      if (data.stock) {
-        console.log("🔵 Initializing stock:", data.stock.quantity);
+        for (const variant of data.variants!) {
+          const variantSku = this.generateSKU(
+            `${data.name}-${variant.size || ""}-${variant.color || ""}-${
+              variant.fabric || ""
+            }`
+          );
+
+          const createdVariant = await this.productRepository.addVariant({
+            productId: product.id,
+            size: variant.size,
+            color: variant.color,
+            fabric: variant.fabric,
+            price: variant.price,
+            sku: variantSku,
+          });
+
+          // Add stock for this variant if provided
+          if (variant.stock) {
+            await this.productRepository.updateStock(
+              product.id,
+              createdVariant.id, // variantId provided
+              BigInt(variant.stock.warehouseId),
+              variant.stock.quantity,
+              variant.stock.lowStockThreshold || 10,
+              "Initial variant stock"
+            );
+          }
+        }
+
+        console.log("✅ Variants and stock added");
+      } else {
+        // Simple product - add stock directly to product
+        console.log("🔵 Adding direct product stock");
+
         await this.productRepository.updateStock(
           product.id,
-          data.stock.quantity,
-          "Initial stock"
+          null, // No variantId - this is key!
+          BigInt(data.stock!.warehouseId),
+          data.stock!.quantity,
+          data.stock!.lowStockThreshold || 10,
+          "Initial product stock"
         );
-        console.log("✅ Stock initialized");
+
+        console.log("✅ Direct stock added");
       }
 
       // Return product with all relations
@@ -214,6 +262,7 @@ export class ProductService {
       basePrice?: number;
       sellingPrice?: number;
       isActive?: boolean;
+      hsnCode?: string;
       metaTitle?: string;
       metaDesc?: string;
       schemaMarkup?: string;
@@ -259,9 +308,8 @@ export class ProductService {
     if (data.sellingPrice !== undefined) {
       updateData.sellingPrice = new Decimal(data.sellingPrice);
     }
-    const updated = await this.productRepository.update(productId, updateData);
 
-    return updated;
+    return await this.productRepository.update(productId, updateData);
   }
 
   async deleteProduct(id: string) {
@@ -290,6 +338,7 @@ export class ProductService {
     search?: string;
     categoryId?: string;
     isActive?: boolean;
+    hasVariants?: boolean; // NEW FILTER
     minPrice?: number;
     maxPrice?: number;
     sortBy?: string;
@@ -313,6 +362,10 @@ export class ProductService {
 
     if (params.isActive !== undefined) {
       where.isActive = params.isActive;
+    }
+
+    if (params.hasVariants !== undefined) {
+      where.hasVariants = params.hasVariants;
     }
 
     if (params.minPrice !== undefined || params.maxPrice !== undefined) {
@@ -353,13 +406,57 @@ export class ProductService {
     };
   }
 
+  // Stock methods - updated to handle both types
+  async getStock(productId: string,warehouseId:string,variantId?: string,) {
+    return this.productRepository.getStock(
+      BigInt(productId),
+      BigInt(warehouseId),
+      variantId ? BigInt(variantId) : null,
+    );
+  }
+
+  async updateStock(
+    productId: string,
+    variantId: string | null,
+    warehouseId: string,
+    quantity: number,
+    lowStockThreshold: number,
+    reason: string
+  ) {
+    const product = await this.productRepository.findById(BigInt(productId));
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    // Validate stock operation matches product type
+    if (product.hasVariants && !variantId) {
+      throw new Error(
+        "This product has variants. You must specify a variantId."
+      );
+    }
+
+    if (!product.hasVariants && variantId) {
+      throw new Error(
+        "This product has no variants. Do not specify a variantId."
+      );
+    }
+
+    return this.productRepository.updateStock(
+      BigInt(productId),
+      variantId ? BigInt(variantId) : null,
+      BigInt(warehouseId),
+      quantity,
+      lowStockThreshold,
+      reason
+    );
+  }
+
   // Specification methods
   async addSpecification(productId: string, key: string, value: string) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new Error("Product not found");
     }
-
     return this.productRepository.addSpecification(
       BigInt(productId),
       key,
@@ -386,7 +483,6 @@ export class ProductService {
     if (!product) {
       throw new Error("Product not found");
     }
-
     return this.productRepository.addImage(
       BigInt(productId),
       url,
@@ -407,11 +503,20 @@ export class ProductService {
       color?: string;
       fabric?: string;
       price: number;
+      stock?: {
+        warehouseId: string;
+        quantity: number;
+        lowStockThreshold?: number;
+      };
     }
   ) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new Error("Product not found");
+    }
+
+    if (!product.hasVariants) {
+      throw new Error("Cannot add variants to a simple product");
     }
 
     const sku = this.generateSKU(
@@ -420,33 +525,29 @@ export class ProductService {
       }`
     );
 
-    return this.productRepository.addVariant({
+    const variant = await this.productRepository.addVariant({
       productId: BigInt(productId),
       ...data,
       sku,
     });
+
+    // Add stock for the variant if provided
+    if (data.stock) {
+      await this.productRepository.updateStock(
+        BigInt(productId),
+        variant.id,
+        BigInt(data.stock.warehouseId),
+        data.stock.quantity,
+        data.stock.lowStockThreshold || 10,
+        "Initial variant stock"
+      );
+    }
+
+    return variant;
   }
 
   async deleteVariant(id: string) {
     await this.productRepository.deleteVariant(BigInt(id));
-  }
-
-  // Stock methods
-  async getStock(productId: string) {
-    return this.productRepository.getStock(BigInt(productId));
-  }
-
-  async updateStock(productId: string, quantity: number, reason: string) {
-    const product = await this.productRepository.findById(BigInt(productId));
-    if (!product) {
-      throw new Error("Product not found");
-    }
-
-    return this.productRepository.updateStock(
-      BigInt(productId),
-      quantity,
-      reason
-    );
   }
 
   // Helper method to generate SKU

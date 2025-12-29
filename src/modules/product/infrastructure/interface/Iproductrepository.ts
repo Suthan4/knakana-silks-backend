@@ -1,23 +1,6 @@
-import {
-  Product,
-  ProductVariant,
-  Specification,
-  ProductImage,
-  Stock,
-} from "@/generated/prisma/client.js";
+import { Product } from "@/generated/prisma/client.js";
 
 export interface IProductRepository {
-  findById(id: bigint): Promise<Product | null>;
-  findBySlug(slug: string): Promise<Product | null>;
-  findBySku(sku: string): Promise<Product | null>;
-  findAll(params: {
-    skip: number;
-    take: number;
-    where?: any;
-    orderBy?: any;
-    include?: any;
-  }): Promise<Product[]>;
-  count(where?: any): Promise<number>;
   create(data: {
     name: string;
     slug: string;
@@ -27,6 +10,8 @@ export interface IProductRepository {
     sellingPrice: number;
     sku: string;
     isActive: boolean;
+    hasVariants: boolean; // NEW FIELD
+    hsnCode?: string;
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
@@ -34,16 +19,19 @@ export interface IProductRepository {
     metaDesc?: string;
     schemaMarkup?: string;
   }): Promise<Product>;
-  update(id: bigint, data: Partial<Product>): Promise<Product>;
+
+  update(id: bigint, data: any): Promise<Product>;
   delete(id: bigint): Promise<void>;
 
+  findById(id: bigint): Promise<Product | null>;
+  findBySlug(slug: string): Promise<Product | null>;
+  findBySku(sku: string): Promise<Product | null>;
+  findAll(params: any): Promise<Product[]>;
+  count(where: any): Promise<number>;
+
   // Specifications
-  addSpecification(
-    productId: bigint,
-    key: string,
-    value: string
-  ): Promise<Specification>;
-  updateSpecification(id: bigint, value: string): Promise<Specification>;
+  addSpecification(productId: bigint, key: string, value: string): Promise<any>;
+  updateSpecification(id: bigint, value: string): Promise<any>;
   deleteSpecification(id: bigint): Promise<void>;
 
   // Images
@@ -52,8 +40,7 @@ export interface IProductRepository {
     url: string,
     altText?: string,
     order?: number
-  ): Promise<ProductImage>;
-  updateImage(id: bigint, data: Partial<ProductImage>): Promise<ProductImage>;
+  ): Promise<any>;
   deleteImage(id: bigint): Promise<void>;
 
   // Variants
@@ -64,18 +51,17 @@ export interface IProductRepository {
     fabric?: string;
     price: number;
     sku: string;
-  }): Promise<ProductVariant>;
-  updateVariant(
-    id: bigint,
-    data: Partial<ProductVariant>
-  ): Promise<ProductVariant>;
+  }): Promise<any>;
   deleteVariant(id: bigint): Promise<void>;
 
-  // Stock
-  getStock(productId: bigint): Promise<Stock | null>;
+  // Stock - UPDATED SIGNATURE
+  getStock(productId: bigint,warehouseId:bigint, variantId: bigint|null): Promise<any>;
   updateStock(
     productId: bigint,
+    variantId: bigint | null, // Can be null for simple products
+    warehouseId: bigint,
     quantity: number,
+    lowStockThreshold: number,
     reason: string
-  ): Promise<Stock>;
+  ): Promise<any>;
 }

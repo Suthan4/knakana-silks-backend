@@ -18,7 +18,6 @@ export class ShiprocketService {
         "https://apiv2.shiprocket.in/v1/external",
     });
 
-    // Add interceptor for authentication
     this.api.interceptors.request.use(async (config) => {
       const token = await this.getToken();
       config.headers.Authorization = `Bearer ${token}`;
@@ -26,11 +25,7 @@ export class ShiprocketService {
     });
   }
 
-  /**
-   * Get authentication token
-   */
   private async getToken(): Promise<string> {
-    // Return cached token if still valid
     if (this.auth && this.auth.expiresAt > Date.now()) {
       return this.auth.token;
     }
@@ -49,7 +44,7 @@ export class ShiprocketService {
 
       this.auth = {
         token: response.data.token,
-        expiresAt: Date.now() + 9 * 24 * 60 * 60 * 1000, // 9 days
+        expiresAt: Date.now() + 9 * 24 * 60 * 60 * 1000,
       };
 
       return this.auth.token;
@@ -59,62 +54,16 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Create order in Shiprocket
-   */
-  async createOrder(data: {
-    orderNumber: string;
-    orderDate: string;
-    billingCustomerName: string;
-    billingAddress: string;
-    billingAddress2?: string;
-    billingCity: string;
-    billingPincode: string;
-    billingState: string;
-    billingCountry: string;
-    billingEmail: string;
-    billingPhone: string;
-    shippingIsBilling: boolean;
-    shippingCustomerName?: string;
-    shippingAddress?: string;
-    shippingAddress2?: string;
-    shippingCity?: string;
-    shippingPincode?: string;
-    shippingState?: string;
-    shippingCountry?: string;
-    shippingEmail?: string;
-    shippingPhone?: string;
-    orderItems: Array<{
-      name: string;
-      sku: string;
-      units: number;
-      sellingPrice: number;
-      discount?: number;
-      tax?: number;
-      hsn?: number;
-    }>;
-    paymentMethod: string;
-    subTotal: number;
-    length: number;
-    breadth: number;
-    height: number;
-    weight: number;
-  }) {
+  async createOrder(data: any) {
     try {
       const response = await this.api.post("/orders/create/adhoc", data);
       return response.data;
     } catch (error: any) {
-      console.error(
-        "Shiprocket order creation failed:",
-        error.response?.data || error
-      );
+      console.error("Shiprocket order creation failed:", error.response?.data || error);
       throw new Error("Failed to create Shiprocket order");
     }
   }
 
-  /**
-   * Generate AWB (Air Waybill) for shipment
-   */
   async generateAwb(params: { shipmentId: number; courierId: number }) {
     try {
       const response = await this.api.post("/courier/assign/awb", params);
@@ -125,15 +74,7 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Get available couriers for shipment
-   */
-  async getAvailableCouriers(params: {
-    pickupPostcode: string;
-    deliveryPostcode: string;
-    weight: number;
-    cod?: number;
-  }) {
+  async getAvailableCouriers(params: any) {
     try {
       const response = await this.api.get("/courier/serviceability", {
         params: {
@@ -150,9 +91,6 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Schedule pickup
-   */
   async schedulePickup(shipmentIds: number[]) {
     try {
       const response = await this.api.post("/courier/generate/pickup", {
@@ -165,14 +103,9 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Track shipment
-   */
   async trackShipment(shipmentId: number) {
     try {
-      const response = await this.api.get(
-        `/courier/track/shipment/${shipmentId}`
-      );
+      const response = await this.api.get(`/courier/track/shipment/${shipmentId}`);
       return response.data;
     } catch (error: any) {
       console.error("Shipment tracking failed:", error.response?.data || error);
@@ -180,9 +113,6 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Track by AWB number
-   */
   async trackByAwb(awbCode: string) {
     try {
       const response = await this.api.get(`/courier/track/awb/${awbCode}`);
@@ -193,9 +123,6 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Cancel shipment
-   */
   async cancelShipment(orderIds: number[]) {
     try {
       const response = await this.api.post("/orders/cancel", {
@@ -203,17 +130,11 @@ export class ShiprocketService {
       });
       return response.data;
     } catch (error: any) {
-      console.error(
-        "Shipment cancellation failed:",
-        error.response?.data || error
-      );
+      console.error("Shipment cancellation failed:", error.response?.data || error);
       throw new Error("Failed to cancel shipment");
     }
   }
 
-  /**
-   * Generate label
-   */
   async generateLabel(shipmentIds: number[]) {
     try {
       const response = await this.api.post("/courier/generate/label", {
@@ -226,9 +147,6 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Generate manifest
-   */
   async generateManifest(shipmentIds: number[]) {
     try {
       const response = await this.api.post("/manifests/generate", {
@@ -236,17 +154,11 @@ export class ShiprocketService {
       });
       return response.data;
     } catch (error: any) {
-      console.error(
-        "Manifest generation failed:",
-        error.response?.data || error
-      );
+      console.error("Manifest generation failed:", error.response?.data || error);
       throw new Error("Failed to generate manifest");
     }
   }
 
-  /**
-   * Get order details
-   */
   async getOrderDetails(orderId: string) {
     try {
       const response = await this.api.get(`/orders/show/${orderId}`);
@@ -257,15 +169,7 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Check pincode serviceability
-   */
-  async checkPincodeServiceability(params: {
-    pickupPostcode: string;
-    deliveryPostcode: string;
-    cod?: number;
-    weight?: number;
-  }) {
+  async checkPincodeServiceability(params: any) {
     try {
       const response = await this.api.get("/courier/serviceability", {
         params: {
@@ -286,44 +190,12 @@ export class ShiprocketService {
     }
   }
 
-  /**
-   * Return order
-   */
-  async createReturnOrder(data: {
-    orderId: string;
-    orderDate: string;
-    channelId: string;
-    pickupCustomerName: string;
-    pickupAddress: string;
-    pickupCity: string;
-    pickupPincode: string;
-    pickupState: string;
-    pickupCountry: string;
-    pickupEmail: string;
-    pickupPhone: string;
-    shippingCustomerName: string;
-    shippingAddress: string;
-    shippingCity: string;
-    shippingPincode: string;
-    shippingState: string;
-    shippingCountry: string;
-    shippingEmail: string;
-    shippingPhone: string;
-    orderItems: Array<{
-      name: string;
-      sku: string;
-      units: number;
-      sellingPrice: number;
-    }>;
-  }) {
+  async createReturnOrder(data: any) {
     try {
       const response = await this.api.post("/orders/create/return", data);
       return response.data;
     } catch (error: any) {
-      console.error(
-        "Return order creation failed:",
-        error.response?.data || error
-      );
+      console.error("Return order creation failed:", error.response?.data || error);
       throw new Error("Failed to create return order");
     }
   }

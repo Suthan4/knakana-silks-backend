@@ -2,9 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { IOrderRepository } from "../../infrastructure/interface/Iorderrepository.js";
 import { ICartRepository } from "@/modules/cart/infrastructure/interface/Icartrepository.js";
 import { IPaymentRepository } from "@/modules/payment/infrastructure/interface/Ipaymentrepository.js";
-import { IShipmentRepository } from "@/modules/shipment/presentation/repository/shipmentRepository.js";
 import { RazorpayService } from "@/modules/payment/application/service/razorpay.service.js";
-import { ShiprocketService } from "@/modules/shipment/application/service/shiprocket.service.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
 import { NumberUtil } from "@/shared/utils/index.js";
 import {
@@ -12,6 +10,8 @@ import {
   PaymentStatus,
   PaymentMethod,
 } from "@/generated/prisma/enums.js";
+import { IShipmentRepository } from "@/modules/shipment/infrastructure/interface/Ishipmentrepository.js";
+import { ShiprocketService } from "@/modules/shipment/infrastructure/services/shiprocket.service.js";
 
 @injectable()
 export class OrderService {
