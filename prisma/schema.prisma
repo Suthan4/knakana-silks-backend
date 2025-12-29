@@ -43,13 +43,6 @@ enum PaymentMethod {
   NET_BANKING
 }
 
-enum ReturnStatus {
-  REQUESTED
-  APPROVED
-  REJECTED
-  COMPLETED
-}
-
 enum ConsultationPlatform {
   ZOOM
   WHATSAPP
@@ -88,6 +81,37 @@ enum SectionType {
   CATEGORIES        
   CUSTOM           
 }
+enum ReturnReason {
+  DEFECTIVE
+  WRONG_ITEM
+  SIZE_ISSUE
+  COLOR_DIFFERENCE
+  QUALITY_ISSUE
+  NOT_AS_DESCRIBED
+  DAMAGED_IN_TRANSIT
+  CHANGED_MIND
+  OTHER
+}
+
+enum ReturnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  IN_TRANSIT
+  RECEIVED
+  INSPECTED
+  REFUND_INITIATED
+  REFUND_COMPLETED
+  CLOSED
+}
+
+enum RefundMethod {
+  ORIGINAL_PAYMENT
+  STORE_CREDIT
+  BANK_TRANSFER
+}
 
 model User {
   id             BigInt           @id @default(autoincrement())
@@ -113,6 +137,8 @@ model User {
   searches       SearchHistory[]
   viewedProducts ProductView[]
   refreshTokens  RefreshToken[]
+  reviewHelpfulVotes  ReviewHelpfulVote[]
+  returns             Return[]
 
   @@index([email])
   @@index([role])
@@ -211,6 +237,8 @@ model Product {
   reviews             Review[]
   viewHistory         ProductView[]
   consultationConfigs ConsultationConfig[]
+  returnItems         ReturnItem[]
+
 
   @@index([slug])
   @@index([categoryId])
@@ -247,6 +275,8 @@ model ProductVariant {
   stock      Stock[]
   cartItems  CartItem[]
   orderItems OrderItem[]
+  returnItems ReturnItem[]
+
 
   @@index([productId])
   @@index([sku])
@@ -425,7 +455,10 @@ model Order {
   items             OrderItem[]
   payment           Payment?
   shipment          Shipment?
-  returnRequest     Return?
+  reviews           Review[]
+  returns           Return[]
+
+
 
   @@index([userId])
   @@index([orderNumber])
@@ -445,6 +478,7 @@ model OrderItem {
   order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product         @relation(fields: [productId], references: [id])
   variant   ProductVariant? @relation(fields: [variantId], references: [id])
+  returnItem  ReturnItem?
 
   @@index([orderId])
   @@map("order_items")
@@ -511,55 +545,112 @@ model Coupon {
 }
 
 model Review {
-  id                 BigInt         @id @default(autoincrement())
-  productId          BigInt
+  id                 BigInt @id @default(autoincrement())
   userId             BigInt
+  productId          BigInt
+  orderId            BigInt?
   rating             Int
-  comment            String?
-  isVerifiedPurchase Boolean        @default(false)
-  helpfulCount       Int            @default(0)
-  isApproved         Boolean        @default(false)
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  comment            String?  @db.Text
+  images             String[]
+  isVerifiedPurchase Boolean  @default(false)
+  isApproved         Boolean  @default(false)
+  helpfulCount       Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  product            Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
-  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  images             ReviewImage[]
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order              Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  helpfulVotes       ReviewHelpfulVote[]
 
-  @@index([productId])
+  @@index([productId, isApproved])
   @@index([userId])
+  @@index([rating])
   @@map("reviews")
 }
 
-model ReviewImage {
-  id        BigInt    @id @default(autoincrement())
+model ReviewHelpfulVote {
+  id        BigInt   @id @default(autoincrement())
   reviewId  BigInt
-  url       String
-  createdAt DateTime  @default(now())
+  userId    BigInt
+  createdAt DateTime @default(now())
 
   review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([reviewId])
-  @@map("review_images")
+  @@unique([reviewId, userId])
+  @@map("review_helpful_votes")
 }
 
 model Return {
-  id              BigInt        @id @default(autoincrement())
-  orderId         BigInt        @unique
-  reason          String
-  status          ReturnStatus  @default(REQUESTED)
-  refundAmount    Decimal       @db.Decimal(10, 2)
-  refundType      String?
-  approvedBy      String?
-  rejectionReason String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                  BigInt       @id @default(autoincrement())
+  returnNumber        String       @unique
+  userId              BigInt
+  orderId             BigInt
+  reason              ReturnReason
+  reasonDetails       String       @db.Text
+  images              String[]
+  status              ReturnStatus @default(PENDING)
+  refundAmount        Float
+  refundMethod        RefundMethod @default(ORIGINAL_PAYMENT)
+  bankDetails         Json?
+  adminNotes          String?      @db.Text
+  rejectionReason     String?      @db.Text
+  returnShipmentId    BigInt?      @unique
+  razorpayRefundId    String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  returnItems         ReturnItem[]
+  returnShipment      ReturnShipment? @relation(fields: [returnShipmentId], references: [id])
 
+  @@index([userId])
   @@index([orderId])
+  @@index([status])
+  @@index([returnNumber])
   @@map("returns")
 }
+
+model ReturnItem {
+  id           BigInt   @id @default(autoincrement())  
+  returnId     BigInt
+  orderItemId  BigInt   @unique
+  productId    BigInt
+  variantId    BigInt?
+  quantity     Int
+  price        Float
+  createdAt    DateTime @default(now())
+
+  return       Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant      ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([returnId])
+  @@map("return_items")
+}
+
+model ReturnShipment {
+  id                BigInt   @id @default(autoincrement())
+  shiprocketOrderId String   @unique
+  awb               String   @unique
+  courierName       String
+  pickupDate        DateTime
+  trackingUrl       String?
+  status            String
+  currentLocation   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  return            Return?
+
+  @@index([awb])
+  @@map("return_shipments")
+}
+
+
 
 model ConsultationConfig {
   id         BigInt     @id @default(autoincrement())
