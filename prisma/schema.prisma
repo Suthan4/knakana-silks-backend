@@ -81,6 +81,15 @@ enum SectionType {
   CATEGORIES        
   CUSTOM           
 }
+
+// NEW: MediaType enum for supporting different file types
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  OTHER
+}
+
 enum ReturnReason {
   DEFECTIVE
   WRONG_ITEM
@@ -230,7 +239,7 @@ model Product {
   homeSections        HomeSection[]        @relation("SectionProducts")
   specifications      Specification[]
   variants            ProductVariant[]
-  images              ProductImage[]
+  media               ProductMedia[]       // UPDATED: Changed from images to media
   stock               Stock[]
   cartItems           CartItem[]
   wishlistItems       WishlistItem[]
@@ -284,18 +293,33 @@ model ProductVariant {
   @@map("product_variants")
 }
 
-model ProductImage {
-  id        BigInt    @id @default(autoincrement())
-  productId BigInt
-  url       String
-  altText   String?
-  order     Int       @default(0)
-  createdAt DateTime  @default(now())
+// UPDATED: Renamed from ProductImage to ProductMedia with enhanced media support
+model ProductMedia {
+  id          BigInt     @id @default(autoincrement())
+  productId   BigInt
+  type        MediaType  @default(IMAGE)          // NEW: Media type (IMAGE, VIDEO, DOCUMENT, OTHER)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key for deletion/management
+  thumbnailUrl String?                            // Optional thumbnail for videos
+  altText     String?
+  title       String?                             // NEW: Title for better SEO and accessibility
+  description String?    @db.Text                 // NEW: Description for media
+  mimeType    String?                             // NEW: MIME type (image/jpeg, video/mp4, etc.)
+  fileSize    BigInt?                             // NEW: File size in bytes
+  duration    Int?                                // NEW: Duration in seconds (for videos)
+  width       Int?                                // NEW: Width in pixels (for images/videos)
+  height      Int?                                // NEW: Height in pixels (for images/videos)
+  order       Int        @default(0)
+  isActive    Boolean    @default(true)           // NEW: Soft delete capability
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
-  @@map("product_images")
+  @@index([type])                                 // NEW: Index for filtering by media type
+  @@index([isActive])                             // NEW: Index for active media
+  @@map("product_media")
 }
 
 model Warehouse {
@@ -552,7 +576,7 @@ model Review {
   orderId            BigInt?
   rating             Int
   comment            String?  @db.Text
-  images             String[]
+  images             String[] // UPDATED: Consider migrating to ReviewMedia table
   isVerifiedPurchase Boolean  @default(false)
   isApproved         Boolean  @default(false)
   helpfulCount       Int      @default(0)
@@ -563,11 +587,35 @@ model Review {
   product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   order              Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
   helpfulVotes       ReviewHelpfulVote[]
+  media              ReviewMedia[]        // NEW: Support for review media
 
   @@index([productId, isApproved])
   @@index([userId])
   @@index([rating])
   @@map("reviews")
+}
+
+// NEW: ReviewMedia table for better media management in reviews
+model ReviewMedia {
+  id          BigInt     @id @default(autoincrement())
+  reviewId    BigInt
+  type        MediaType  @default(IMAGE)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for videos
+  mimeType    String?
+  fileSize    BigInt?
+  duration    Int?                                // For videos
+  width       Int?
+  height      Int?
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  review      Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([type])
+  @@map("review_media")
 }
 
 model ReviewHelpfulVote {
@@ -590,7 +638,7 @@ model Return {
   orderId             BigInt
   reason              ReturnReason
   reasonDetails       String       @db.Text
-  images              String[]
+  images              String[]     // UPDATED: Consider migrating to ReturnMedia table
   status              ReturnStatus @default(PENDING)
   refundAmount        Float
   refundMethod        RefundMethod @default(ORIGINAL_PAYMENT)
@@ -606,12 +654,37 @@ model Return {
   order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   returnItems         ReturnItem[]
   returnShipment      ReturnShipment? @relation(fields: [returnShipmentId], references: [id])
+  media               ReturnMedia[]   // NEW: Support for return media
 
   @@index([userId])
   @@index([orderId])
   @@index([status])
   @@index([returnNumber])
   @@map("returns")
+}
+
+// NEW: ReturnMedia table for better media management in returns
+model ReturnMedia {
+  id          BigInt     @id @default(autoincrement())
+  returnId    BigInt
+  type        MediaType  @default(IMAGE)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for videos
+  mimeType    String?
+  fileSize    BigInt?
+  duration    Int?                                // For videos
+  width       Int?
+  height      Int?
+  order       Int        @default(0)
+  description String?    @db.Text                 // Description of the issue shown
+  createdAt   DateTime   @default(now())
+
+  return      Return    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@index([type])
+  @@map("return_media")
 }
 
 model ReturnItem {
@@ -734,19 +807,31 @@ model ProductView {
   @@map("product_views")
 }
 
+// UPDATED: Enhanced Banner model with media support
 model Banner {
-  id        BigInt    @id @default(autoincrement())
-  title     String
-  image     String
-  link      String?
-  text      String?
-  isActive  Boolean   @default(true)
-  order     Int       @default(0)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id          BigInt     @id @default(autoincrement())
+  title       String
+  type        MediaType  @default(IMAGE)          // NEW: Support for image/video banners
+  url         String                              // Media URL (Cloudflare R2)
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for video banners
+  link        String?                             // Click-through URL
+  text        String?                             // Banner text overlay
+  mimeType    String?                             // NEW: MIME type
+  fileSize    BigInt?                             // NEW: File size
+  duration    Int?                                // NEW: Duration for video banners
+  width       Int?                                // NEW: Width
+  height      Int?                                // NEW: Height
+  isActive    Boolean    @default(true)
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
+  @@index([isActive, order])
+  @@index([type])
   @@map("banners")
 }
+
 model HomeSection {
   id          BigInt      @id @default(autoincrement())
   type        SectionType
@@ -764,6 +849,7 @@ model HomeSection {
   @@index([isActive, order])
   @@map("home_sections")
 }
+
 model SeoMeta {
   id           BigInt    @id @default(autoincrement())
   pageType     String
