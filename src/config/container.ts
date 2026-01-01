@@ -22,6 +22,7 @@ export function setupContainer() {
   container.registerInstance(PrismaClient, getPrismaClient);
 
   registerAuthModule();
+  registerWarehouseModule()
   registerCategoryModule();
   registerProductModule();
   registerAddressModule();
@@ -35,6 +36,5 @@ export function setupContainer() {
   registerEmailModule()
   registerCouponModule()
   registerConsultationModule()
-  registerWarehouseModule()
   console.log("🎉 All modules registered successfully");
 }

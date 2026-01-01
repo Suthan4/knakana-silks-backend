@@ -25,6 +25,7 @@ export class ProductController {
       const data = CreateProductDTOSchema.parse(req.body);
       console.log("✅ Validation passed:", JSON.stringify(data, null, 2));
 
+      // Pass the validated data directly - it already contains the complete stock object with warehouseId
       const product = await this.productService.createProduct(data);
       console.log("✅ Product created:", product?.id);
 
@@ -342,10 +343,12 @@ export class ProductController {
     }
   }
 
-  // Stock endpoints
+  // Stock endpoints - FIXED
   async getStock(req: Request, res: Response) {
     try {
       const { id } = req.params;
+      const { warehouseId, variantId } = req.query;
+
       if (!id) {
         res.status(400).json({
           success: false,
@@ -353,7 +356,20 @@ export class ProductController {
         });
         return;
       }
-      const stock = await this.productService.getStock(id);
+
+      if (!warehouseId) {
+        res.status(400).json({
+          success: false,
+          message: "Warehouse ID is required",
+        });
+        return;
+      }
+
+      const stock = await this.productService.getStock(
+        id,
+        warehouseId as string,
+        variantId as string | undefined
+      );
 
       res.json({
         success: true,
@@ -369,6 +385,7 @@ export class ProductController {
     try {
       const { id } = req.params;
       const data = UpdateStockDTOSchema.parse(req.body);
+
       if (!id) {
         res.status(400).json({
           success: false,
@@ -376,9 +393,13 @@ export class ProductController {
         });
         return;
       }
+
       const stock = await this.productService.updateStock(
         id,
+        data.variantId || null,
+        data.warehouseId,
         data.quantity,
+        data.lowStockThreshold || 10,
         data.reason
       );
 

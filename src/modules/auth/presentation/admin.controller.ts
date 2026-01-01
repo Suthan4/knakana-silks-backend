@@ -1,5 +1,5 @@
 import { Response,Request } from "express";
-import { injectable } from "tsyringe";
+import { injectable, inject } from "tsyringe";
 import { z } from "zod";
 import { AdminService } from "../application/services/admin.service.js";
 import { UserRole } from "@/generated/prisma/enums.js";
@@ -23,7 +23,7 @@ const setPermissionSchema = z.object({
 
 @injectable()
 export class AdminController {
-  constructor(private adminService: AdminService) {}
+  constructor(@inject(AdminService) private adminService: AdminService) {}
 
   async createAdmin(req: Request, res: Response) {
     try {

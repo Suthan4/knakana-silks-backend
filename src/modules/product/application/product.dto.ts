@@ -1,67 +1,95 @@
 import { z } from "zod";
 
-// Create Product DTO
-export const CreateProductDTOSchema = z.object({
-  name: z.string().min(1, "Name is required").max(200),
-  description: z.string().min(1, "Description is required"),
-  categoryId: z.string(),
-  basePrice: z.number().positive("Base price must be positive"),
-  sellingPrice: z.number().positive("Selling price must be positive"),
-  isActive: z.boolean().default(true),
-  hsnCode: z.string().optional(),
-  artisanName:z.string().max(60).optional(),
-  artisanAbout:z.string().max(160).optional(),  
-  artisanLocation: z.string().max(60).optional(),
-  metaTitle: z.string().max(60).optional(),
-  metaDesc: z.string().max(160).optional(),
-  schemaMarkup: z.string().optional(),
-  specifications: z
-    .array(
-      z.object({
-        key: z.string(),
-        value: z.string(),
-      })
-    )
-    .optional(),
-  images: z
-    .array(
-      z.object({
-        url: z.string().url(),
-        altText: z.string().optional(),
-        order: z.number().int().default(0),
-      })
-    )
-    .optional(),
-  variants: z
-    .array(
-      z.object({
-        size: z.string().optional(),
-        color: z.string().optional(),
-        fabric: z.string().optional(),
-        price: z.number().positive(),
-      })
-    )
-    .optional(),
-  stock: z
-    .object({
-      quantity: z.number().int().min(0),
-      lowStockThreshold: z.number().int().default(10),
-    })
-    .optional(),
+// Stock schema for both simple products and variants
+const StockSchema = z.object({
+  warehouseId: z.string().min(1, "Warehouse ID is required"),
+  quantity: z.number().int().min(0, "Quantity must be a positive number"),
+  lowStockThreshold: z.number().int().min(0).optional().default(10),
 });
+
+// Specification schema
+const SpecificationSchema = z.object({
+  key: z.string().min(1, "Specification key is required"),
+  value: z.string().min(1, "Specification value is required"),
+});
+
+// Image schema
+const ImageSchema = z.object({
+  url: z.string().url("Invalid image URL"),
+  altText: z.string().optional(),
+  order: z.number().int().min(0).optional().default(0),
+});
+
+// Variant schema
+const VariantSchema = z.object({
+  size: z.string().optional(),
+  color: z.string().optional(),
+  fabric: z.string().optional(),
+  price: z.number().positive("Variant price must be positive"),
+  stock: StockSchema.optional(),
+});
+
+// Create Product DTO
+export const CreateProductDTOSchema = z
+  .object({
+    name: z.string().min(1, "Product name is required"),
+    description: z.string().min(1, "Product description is required"),
+    categoryId: z.string().min(1, "Category ID is required"),
+    basePrice: z.number().positive("Base price must be positive"),
+    sellingPrice: z.number().positive("Selling price must be positive"),
+    isActive: z.boolean().optional().default(true),
+    hsnCode: z.string().optional(),
+    artisanName: z.string().optional(),
+    artisanAbout: z.string().optional(),
+    artisanLocation: z.string().optional(),
+    metaTitle: z.string().optional(),
+    metaDesc: z.string().optional(),
+    schemaMarkup: z.string().optional(),
+    specifications: z.array(SpecificationSchema).optional(),
+    images: z.array(ImageSchema).optional(),
+    variants: z.array(VariantSchema).optional(),
+    stock: StockSchema.optional(), // For simple products
+  })
+  .refine(
+    (data) => {
+      // Either variants OR stock must be provided, but not both
+      const hasVariants = data.variants && data.variants.length > 0;
+      const hasStock = !!data.stock;
+
+      if (hasVariants && hasStock) {
+        return false; // Cannot have both
+      }
+
+      if (!hasVariants && !hasStock) {
+        return false; // Must have one
+      }
+
+      // If has variants, each variant should have stock
+      if (hasVariants) {
+        return data.variants!.every((v) => v.stock !== undefined);
+      }
+
+      return true;
+    },
+    {
+      message:
+        "Product must have either stock (simple product) or variants with stock (variable product), but not both",
+    }
+  );
 
 export type CreateProductDTO = z.infer<typeof CreateProductDTOSchema>;
 
 // Update Product DTO
 export const UpdateProductDTOSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().optional(),
-  categoryId: z.string().optional(),
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  categoryId: z.string().min(1).optional(),
   basePrice: z.number().positive().optional(),
   sellingPrice: z.number().positive().optional(),
   isActive: z.boolean().optional(),
-  metaTitle: z.string().max(60).optional(),
-  metaDesc: z.string().max(160).optional(),
+  hsnCode: z.string().optional(),
+  metaTitle: z.string().optional(),
+  metaDesc: z.string().optional(),
   schemaMarkup: z.string().optional(),
 });
 
@@ -74,45 +102,53 @@ export const QueryProductDTOSchema = z.object({
   search: z.string().optional(),
   categoryId: z.string().optional(),
   isActive: z.boolean().optional(),
-  minPrice: z.number().optional(),
-  maxPrice: z.number().optional(),
-  sortBy: z.enum(["name", "price", "createdAt"]).default("createdAt"),
-  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+  hasVariants: z.boolean().optional(),
+  minPrice: z.number().positive().optional(),
+  maxPrice: z.number().positive().optional(),
+  sortBy: z
+    .enum(["createdAt", "price", "name"])
+    .optional()
+    .default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
 });
 
 export type QueryProductDTO = z.infer<typeof QueryProductDTOSchema>;
 
-// Add Variant DTO
-export const AddVariantDTOSchema = z.object({
-  size: z.string().optional(),
-  color: z.string().optional(),
-  fabric: z.string().optional(),
-  price: z.number().positive(),
-});
-
-export type AddVariantDTO = z.infer<typeof AddVariantDTOSchema>;
-
 // Add Specification DTO
 export const AddSpecificationDTOSchema = z.object({
-  key: z.string().min(1),
-  value: z.string().min(1),
+  key: z.string().min(1, "Specification key is required"),
+  value: z.string().min(1, "Specification value is required"),
 });
 
 export type AddSpecificationDTO = z.infer<typeof AddSpecificationDTOSchema>;
 
 // Add Image DTO
 export const AddImageDTOSchema = z.object({
-  url: z.string().url(),
+  url: z.string().url("Invalid image URL"),
   altText: z.string().optional(),
-  order: z.number().int().default(0),
+  order: z.number().int().min(0).optional().default(0),
 });
 
 export type AddImageDTO = z.infer<typeof AddImageDTOSchema>;
 
+// Add Variant DTO
+export const AddVariantDTOSchema = z.object({
+  size: z.string().optional(),
+  color: z.string().optional(),
+  fabric: z.string().optional(),
+  price: z.number().positive("Variant price must be positive"),
+  stock: StockSchema.optional(),
+});
+
+export type AddVariantDTO = z.infer<typeof AddVariantDTOSchema>;
+
 // Update Stock DTO
 export const UpdateStockDTOSchema = z.object({
-  quantity: z.number().int(),
-  reason: z.string().min(1),
+  variantId: z.string().optional(), // Optional - for variant stock
+  warehouseId: z.string().min(1, "Warehouse ID is required"),
+  quantity: z.number().int().min(0, "Quantity must be a positive number"),
+  lowStockThreshold: z.number().int().min(0).optional().default(10),
+  reason: z.string().min(1, "Reason for stock update is required"),
 });
 
 export type UpdateStockDTO = z.infer<typeof UpdateStockDTOSchema>;

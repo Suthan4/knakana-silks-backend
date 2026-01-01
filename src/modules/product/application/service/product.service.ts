@@ -4,13 +4,21 @@ import { IProductRepository } from "../../infrastructure/interface/Iproductrepos
 import { ICategoryRepository } from "@/modules/category/infrastructure/interface/Icategoryrepository.js";
 import { Product } from "@/generated/prisma/client.js";
 import { Decimal } from "@prisma/client/runtime/client";
+import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
+import {
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from "@/shared/utils/errors.js";
 
 @injectable()
 export class ProductService {
   constructor(
     @inject("IProductRepository") private productRepository: IProductRepository,
     @inject("ICategoryRepository")
-    private categoryRepository: ICategoryRepository
+    private categoryRepository: ICategoryRepository,
+    @inject("IWarehouseRepository")
+    private warehouseRepository: IWarehouseRepository
   ) {}
 
   async createProduct(data: {
@@ -58,20 +66,101 @@ export class ProductService {
         BigInt(data.categoryId)
       );
       if (!category) {
-        throw new Error("Category not found");
+        throw new NotFoundError(
+          `Category with ID ${data.categoryId} not found`
+        );
       }
 
       // Validate product type
       const hasVariants = !!(data.variants && data.variants.length > 0);
 
       if (hasVariants && data.stock) {
-        throw new Error(
+        throw new ValidationError(
           "Cannot provide both variants and direct stock. Use variant-level stock for variable products."
         );
       }
 
       if (!hasVariants && !data.stock) {
-        throw new Error("Simple products must have stock information.");
+        throw new ValidationError(
+          "Simple products must have stock information."
+        );
+      }
+
+      // ✅ 4. Validate warehouse for SIMPLE products
+      if (!hasVariants && data.stock) {
+        console.log(
+          "🔵 Validating warehouse for simple product:",
+          data.stock.warehouseId
+        );
+
+        const warehouse = await this.warehouseRepository.findById(
+          BigInt(data.stock.warehouseId)
+        );
+
+        if (!warehouse) {
+          throw new NotFoundError(
+            `Warehouse with ID ${data.stock.warehouseId} not found. Please create a warehouse first using: POST /api/admin/warehouses`
+          );
+        }
+
+        if (!warehouse.isActive) {
+          throw new ValidationError(
+            `Warehouse with ID ${data.stock.warehouseId} is inactive. Please activate it first.`
+          );
+        }
+
+        console.log("✅ Warehouse validated:", warehouse.name);
+      }
+
+      // ✅ 5. Validate warehouse for VARIABLE products
+      if (hasVariants && data.variants) {
+        console.log(
+          "🔵 Validating warehouses for variants:",
+          data.variants.length
+        );
+
+        for (let i = 0; i < data.variants.length; i++) {
+          const variant = data.variants[i];
+
+          if (!variant?.stock) {
+            throw new ValidationError(
+              `Variant ${i + 1} (${variant?.color || "unknown"} - ${
+                variant?.size || "unknown"
+              }) is missing stock information`
+            );
+          }
+
+          const warehouse = await this.warehouseRepository.findById(
+            BigInt(variant.stock.warehouseId)
+          );
+
+          if (!warehouse) {
+            throw new NotFoundError(
+              `Warehouse with ID ${
+                variant.stock.warehouseId
+              } not found for variant ${i + 1} (${
+                variant.color || "unknown"
+              } - ${
+                variant.size || "unknown"
+              }). Please create a warehouse first.`
+            );
+          }
+
+          if (!warehouse.isActive) {
+            throw new ValidationError(
+              `Warehouse with ID ${
+                variant.stock.warehouseId
+              } is inactive for variant ${i + 1} (${
+                variant.color || "unknown"
+              } - ${variant.size || "unknown"})`
+            );
+          }
+
+          console.log(
+            `✅ Warehouse validated for variant ${i + 1}:`,
+            warehouse.name
+          );
+        }
       }
 
       // Generate slug and SKU
@@ -85,10 +174,13 @@ export class ProductService {
       ]);
 
       if (existingSlug) {
-        throw new Error("Product with this name already exists");
+        throw new ConflictError(
+          `Product with name "${data.name}" already exists. Please use a different name.`
+        );
       }
 
       if (existingSku) {
+        console.log("⚠️ SKU collision detected, generating new SKU");
         const newSku = this.generateSKU(data.name + "-" + Date.now());
         return this.createProductWithSku(data, slug, newSku, hasVariants);
       }
@@ -217,7 +309,7 @@ export class ProductService {
           if (variant.stock) {
             await this.productRepository.updateStock(
               product.id,
-              createdVariant.id, // variantId provided
+              createdVariant.id,
               BigInt(variant.stock.warehouseId),
               variant.stock.quantity,
               variant.stock.lowStockThreshold || 10,
@@ -233,7 +325,7 @@ export class ProductService {
 
         await this.productRepository.updateStock(
           product.id,
-          null, // No variantId - this is key!
+          null,
           BigInt(data.stock!.warehouseId),
           data.stock!.quantity,
           data.stock!.lowStockThreshold || 10,
@@ -407,11 +499,11 @@ export class ProductService {
   }
 
   // Stock methods - updated to handle both types
-  async getStock(productId: string,warehouseId:string,variantId?: string,) {
+  async getStock(productId: string, warehouseId: string, variantId?: string) {
     return this.productRepository.getStock(
       BigInt(productId),
       BigInt(warehouseId),
-      variantId ? BigInt(variantId) : null,
+      variantId ? BigInt(variantId) : null
     );
   }
 

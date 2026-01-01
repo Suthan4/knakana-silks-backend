@@ -30,8 +30,8 @@ export const createApp = (): Application => {
   app.use(helmet());
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN?.split(",") || "*",
-      credentials: process.env.CORS_CREDENTIALS === "true",
+      origin: "http://localhost:3001",
+      // credentials: "true",
     })
   );
 

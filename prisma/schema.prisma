@@ -123,6 +123,7 @@ model User {
   role           UserRole         @default(USER)
   isActive       Boolean          @default(true)
   emailVerified  Boolean          @default(false)
+  termsAccepted  Boolean          @default(false)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 

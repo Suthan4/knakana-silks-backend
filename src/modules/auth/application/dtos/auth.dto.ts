@@ -11,6 +11,9 @@ export const RegisterDTOSchema = z.object({
     .regex(/[0-9]/, "Password must contain at least one number"),
   firstName: z.string().min(1, "First name is required").max(50),
   lastName: z.string().min(1, "Last name is required").max(50),
+  termsAccepted: z.boolean().refine((val) => val === true, {
+    message: "You must accept the terms and conditions",
+  }),
   phone: z
     .string()
     .regex(/^[6-9]\d{9}$/, "Invalid phone number")

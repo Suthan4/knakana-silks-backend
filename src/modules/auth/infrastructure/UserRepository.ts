@@ -3,7 +3,6 @@ import { UserRole } from "../../../generated/prisma/enums.js";
 import { PrismaClient, User } from "../../../generated/prisma/client.js";
 import { IUserRepository } from "../interface/Iuserrepository.js";
 
-
 @injectable()
 export class UserRepository implements IUserRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
@@ -23,6 +22,7 @@ export class UserRepository implements IUserRepository {
     lastName: string;
     phone?: string;
     role: UserRole;
+    termsAccepted: boolean;
   }): Promise<User> {
     return this.prisma.user.create({ data });
   }
