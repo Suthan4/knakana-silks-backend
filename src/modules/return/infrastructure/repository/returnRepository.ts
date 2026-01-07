@@ -3,9 +3,11 @@ import {
   Return,
   ReturnItem,
   ReturnShipment,
+  ReturnMedia, // NEW
   PrismaClient,
   Prisma,
 } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import {
   IReturnRepository,
   ReturnWithRelations,
@@ -35,7 +37,12 @@ export class ReturnRepository implements IReturnRepository {
               include: {
                 product: {
                   include: {
-                    images: { take: 1, orderBy: { order: "asc" } },
+                    media: {
+                      // UPDATED
+                      take: 1,
+                      where: { isActive: true },
+                      orderBy: { order: "asc" },
+                    },
                   },
                 },
                 variant: true,
@@ -47,7 +54,12 @@ export class ReturnRepository implements IReturnRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  // UPDATED
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -55,6 +67,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
+        media: true, // NEW: Include return media
       },
     });
   }
@@ -81,7 +94,12 @@ export class ReturnRepository implements IReturnRepository {
               include: {
                 product: {
                   include: {
-                    images: { take: 1, orderBy: { order: "asc" } },
+                    media: {
+                      // UPDATED
+                      take: 1,
+                      where: { isActive: true },
+                      orderBy: { order: "asc" },
+                    },
                   },
                 },
                 variant: true,
@@ -93,7 +111,12 @@ export class ReturnRepository implements IReturnRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  // UPDATED
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -101,6 +124,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
+        media: true, // NEW
       },
     });
   }
@@ -131,7 +155,12 @@ export class ReturnRepository implements IReturnRepository {
               include: {
                 product: {
                   include: {
-                    images: { take: 1, orderBy: { order: "asc" } },
+                    media: {
+                      // UPDATED
+                      take: 1,
+                      where: { isActive: true },
+                      orderBy: { order: "asc" },
+                    },
                   },
                 },
                 variant: true,
@@ -143,7 +172,12 @@ export class ReturnRepository implements IReturnRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  // UPDATED
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -151,6 +185,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
+        media: true, // NEW
       },
     });
   }
@@ -189,7 +224,12 @@ export class ReturnRepository implements IReturnRepository {
               include: {
                 product: {
                   include: {
-                    images: { take: 1, orderBy: { order: "asc" } },
+                    media: {
+                      // UPDATED
+                      take: 1,
+                      where: { isActive: true },
+                      orderBy: { order: "asc" },
+                    },
                   },
                 },
                 variant: true,
@@ -201,7 +241,12 @@ export class ReturnRepository implements IReturnRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  // UPDATED
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -209,6 +254,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
+        media: true, // NEW
       },
     });
   }
@@ -279,5 +325,44 @@ export class ReturnRepository implements IReturnRepository {
       where: { id },
       data,
     });
+  }
+
+  // NEW: ReturnMedia methods
+  async addReturnMedia(
+    returnId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      description?: string;
+    }
+  ): Promise<ReturnMedia> {
+    return this.prisma.returnMedia.create({
+      data: {
+        returnId,
+        type: data.type,
+        url: data.url,
+        key: data.key,
+        thumbnailUrl: data.thumbnailUrl,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        duration: data.duration,
+        width: data.width,
+        height: data.height,
+        order: data.order ?? 0,
+        description: data.description,
+      },
+    });
+  }
+
+  async deleteReturnMedia(id: bigint): Promise<void> {
+    await this.prisma.returnMedia.delete({ where: { id } });
   }
 }

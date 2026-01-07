@@ -49,7 +49,7 @@ router.post(
 );
 
 router.post(
-  "/admin/permissions",
+  "/admin/set-permissions",
   authenticate,
   authorize(UserRole.SUPER_ADMIN),
   (req, res) => getAdminController().setPermissions(req, res)

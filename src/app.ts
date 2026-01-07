@@ -22,6 +22,7 @@ import shipmentRoutes from "./modules/shipment/presentation/routes/shipment.rout
 import couponRoutes from "./modules/coupon/presentation/routes/coupon.routes.js";
 import consultationRoutes from "./modules/consultation/presentation/routes/consultation.routes.js";
 import warehouseRoutes from "./modules/warehouse/presentation/routes/warehouse.routes.js";
+// import uploadRoutes from "./modules/upload/presentation/routes/upload.routes.js";
 
 export const createApp = (): Application => {
 
@@ -30,8 +31,8 @@ export const createApp = (): Application => {
   app.use(helmet());
   app.use(
     cors({
-      origin: "http://localhost:3001",
-      // credentials: "true",
+      origin: ["http://localhost:3001", "http://localhost:5173"],
+      credentials: true,
     })
   );
 
@@ -59,7 +60,8 @@ export const createApp = (): Application => {
   app.use("/api", couponRoutes);
   app.use("/api", consultationRoutes);
   app.use("/api", warehouseRoutes);
-
+  // app.use("/api", uploadRoutes);
+  
   app.get("/health", (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });
   });

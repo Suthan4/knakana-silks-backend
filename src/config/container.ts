@@ -16,13 +16,15 @@ import { registerShipmentModule } from "@/modules/shipment/container.js";
 import { registerCouponModule } from "@/modules/coupon/container.js";
 import { registerConsultationModule } from "@/modules/consultation/container.js";
 import { registerWarehouseModule } from "@/modules/warehouse/container.js";
+// import { registerUploadModule } from "@/modules/upload/container.js";
 
 export function setupContainer() {
   // Register PrismaClient instance instead of the class
   container.registerInstance(PrismaClient, getPrismaClient);
 
   registerAuthModule();
-  registerWarehouseModule()
+  // registerUploadModule();
+  registerWarehouseModule();
   registerCategoryModule();
   registerProductModule();
   registerAddressModule();

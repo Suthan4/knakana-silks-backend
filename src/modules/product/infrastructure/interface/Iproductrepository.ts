@@ -1,4 +1,5 @@
 import { Product } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 
 export interface IProductRepository {
   create(data: {
@@ -10,7 +11,7 @@ export interface IProductRepository {
     sellingPrice: number;
     sku: string;
     isActive: boolean;
-    hasVariants: boolean; // NEW FIELD
+    hasVariants: boolean;
     hsnCode?: string;
     artisanName?: string;
     artisanAbout?: string;
@@ -34,14 +35,28 @@ export interface IProductRepository {
   updateSpecification(id: bigint, value: string): Promise<any>;
   deleteSpecification(id: bigint): Promise<void>;
 
-  // Images
-  addImage(
+  // UPDATED: Media methods (replaces image methods)
+  addMedia(
     productId: bigint,
-    url: string,
-    altText?: string,
-    order?: number
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
   ): Promise<any>;
-  deleteImage(id: bigint): Promise<void>;
+  updateMedia(id: bigint, data: any): Promise<any>;
+  deleteMedia(id: bigint): Promise<void>;
 
   // Variants
   addVariant(data: {
@@ -54,11 +69,15 @@ export interface IProductRepository {
   }): Promise<any>;
   deleteVariant(id: bigint): Promise<void>;
 
-  // Stock - UPDATED SIGNATURE
-  getStock(productId: bigint,warehouseId:bigint, variantId: bigint|null): Promise<any>;
+  // Stock
+  getStock(
+    productId: bigint,
+    warehouseId: bigint,
+    variantId: bigint | null
+  ): Promise<any>;
   updateStock(
     productId: bigint,
-    variantId: bigint | null, // Can be null for simple products
+    variantId: bigint | null,
     warehouseId: bigint,
     quantity: number,
     lowStockThreshold: number,

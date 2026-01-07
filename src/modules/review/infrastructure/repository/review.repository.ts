@@ -2,8 +2,10 @@ import { inject, injectable } from "tsyringe";
 import {
   Review,
   ReviewHelpfulVote,
+  ReviewMedia, // NEW
   PrismaClient,
 } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import {
   IReviewRepository,
   ReviewWithRelations,
@@ -30,8 +32,10 @@ export class ReviewRepository implements IReviewRepository {
             id: true,
             name: true,
             slug: true,
-            images: {
+            media: {
+              // UPDATED
               take: 1,
+              where: { isActive: true },
               orderBy: {
                 order: "asc",
               },
@@ -44,6 +48,7 @@ export class ReviewRepository implements IReviewRepository {
             orderNumber: true,
           },
         },
+        media: true, // NEW: Include review media
       },
     });
   }
@@ -71,8 +76,10 @@ export class ReviewRepository implements IReviewRepository {
             id: true,
             name: true,
             slug: true,
-            images: {
+            media: {
+              // UPDATED
               take: 1,
+              where: { isActive: true },
               orderBy: {
                 order: "asc",
               },
@@ -85,6 +92,7 @@ export class ReviewRepository implements IReviewRepository {
             orderNumber: true,
           },
         },
+        media: true, // NEW
       },
     });
   }
@@ -118,8 +126,10 @@ export class ReviewRepository implements IReviewRepository {
             id: true,
             name: true,
             slug: true,
-            images: {
+            media: {
+              // UPDATED
               take: 1,
+              where: { isActive: true },
               orderBy: {
                 order: "asc",
               },
@@ -132,6 +142,7 @@ export class ReviewRepository implements IReviewRepository {
             orderNumber: true,
           },
         },
+        media: true, // NEW
       },
     });
   }
@@ -167,8 +178,10 @@ export class ReviewRepository implements IReviewRepository {
             id: true,
             name: true,
             slug: true,
-            images: {
+            media: {
+              // UPDATED
               take: 1,
+              where: { isActive: true },
               orderBy: {
                 order: "asc",
               },
@@ -181,6 +194,7 @@ export class ReviewRepository implements IReviewRepository {
             orderNumber: true,
           },
         },
+        media: true, // NEW
       },
     });
   }
@@ -269,7 +283,6 @@ export class ReviewRepository implements IReviewRepository {
     reviewId: bigint,
     userId: bigint
   ): Promise<ReviewHelpfulVote> {
-    // Create helpful vote
     const vote = await this.prisma.reviewHelpfulVote.create({
       data: {
         reviewId,
@@ -277,7 +290,6 @@ export class ReviewRepository implements IReviewRepository {
       },
     });
 
-    // Increment helpful count
     await this.prisma.review.update({
       where: { id: reviewId },
       data: {
@@ -291,7 +303,6 @@ export class ReviewRepository implements IReviewRepository {
   }
 
   async unmarkHelpful(reviewId: bigint, userId: bigint): Promise<void> {
-    // Delete helpful vote
     await this.prisma.reviewHelpfulVote.delete({
       where: {
         reviewId_userId: {
@@ -301,7 +312,6 @@ export class ReviewRepository implements IReviewRepository {
       },
     });
 
-    // Decrement helpful count
     await this.prisma.review.update({
       where: { id: reviewId },
       data: {
@@ -326,5 +336,42 @@ export class ReviewRepository implements IReviewRepository {
     });
 
     return !!vote;
+  }
+
+  // NEW: ReviewMedia methods
+  async addReviewMedia(
+    reviewId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+    }
+  ): Promise<ReviewMedia> {
+    return this.prisma.reviewMedia.create({
+      data: {
+        reviewId,
+        type: data.type,
+        url: data.url,
+        key: data.key,
+        thumbnailUrl: data.thumbnailUrl,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        duration: data.duration,
+        width: data.width,
+        height: data.height,
+        order: data.order ?? 0,
+      },
+    });
+  }
+
+  async deleteReviewMedia(id: bigint): Promise<void> {
+    await this.prisma.reviewMedia.delete({ where: { id } });
   }
 }

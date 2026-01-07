@@ -3,10 +3,11 @@ import {
   Product,
   ProductVariant,
   Specification,
-  ProductImage,
+  ProductMedia, // UPDATED: Changed from ProductImage
   Stock,
   PrismaClient,
 } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import { IProductRepository } from "../interface/Iproductrepository.js";
 
 @injectable()
@@ -20,7 +21,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        images: { orderBy: { order: "asc" } },
+        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
         stock: true,
       },
     });
@@ -33,7 +34,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        images: { orderBy: { order: "asc" } },
+        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
         stock: true,
       },
     });
@@ -46,7 +47,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        images: { orderBy: { order: "asc" } },
+        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
         stock: true,
       },
     });
@@ -66,7 +67,12 @@ export class ProductRepository implements IProductRepository {
       orderBy: params.orderBy,
       include: params.include || {
         category: true,
-        images: { orderBy: { order: "asc" }, take: 1 },
+        media: {
+          // UPDATED
+          where: { isActive: true },
+          orderBy: { order: "asc" },
+          take: 1,
+        },
         stock: true,
         _count: {
           select: { reviews: true, variants: true },
@@ -88,11 +94,11 @@ export class ProductRepository implements IProductRepository {
     sellingPrice: number;
     sku: string;
     isActive: boolean;
-    hasVariants: boolean; // ADD THIS
+    hasVariants: boolean;
     hsnCode?: string;
-    artisanName?: string; // Make optional
-    artisanAbout?: string; // Make optional
-    artisanLocation?: string; // Make optional
+    artisanName?: string;
+    artisanAbout?: string;
+    artisanLocation?: string;
     metaTitle?: string;
     metaDesc?: string;
     schemaMarkup?: string;
@@ -115,11 +121,11 @@ export class ProductRepository implements IProductRepository {
           sellingPrice: data.sellingPrice,
           sku: data.sku,
           isActive: data.isActive,
-          hasVariants: data.hasVariants, // ADD THIS
+          hasVariants: data.hasVariants,
           hsnCode: data.hsnCode,
-          artisanName: data.artisanName || "", // Default to empty string
-          artisanAbout: data.artisanAbout || "", // Default to empty string
-          artisanLocation: data.artisanLocation || "", // Default to empty string
+          artisanName: data.artisanName || "",
+          artisanAbout: data.artisanAbout || "",
+          artisanLocation: data.artisanLocation || "",
           metaTitle: data.metaTitle,
           metaDesc: data.metaDesc,
           schemaMarkup: data.schemaMarkup,
@@ -128,7 +134,7 @@ export class ProductRepository implements IProductRepository {
           category: true,
           specifications: true,
           variants: true,
-          images: true,
+          media: true, // UPDATED
           stock: true,
         },
       });
@@ -149,7 +155,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        images: true,
+        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
         stock: true,
       },
     });
@@ -181,30 +187,63 @@ export class ProductRepository implements IProductRepository {
     await this.prisma.specification.delete({ where: { id } });
   }
 
-  // Images
-  async addImage(
+  // UPDATED: Media methods (replaces image methods)
+  async addMedia(
     productId: bigint,
-    url: string,
-    altText?: string,
-    order: number = 0
-  ): Promise<ProductImage> {
-    return this.prisma.productImage.create({
-      data: { productId, url, altText, order },
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
+  ): Promise<ProductMedia> {
+    return this.prisma.productMedia.create({
+      data: {
+        productId,
+        type: data.type,
+        url: data.url,
+        key: data.key,
+        thumbnailUrl: data.thumbnailUrl,
+        altText: data.altText,
+        title: data.title,
+        description: data.description,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        duration: data.duration,
+        width: data.width,
+        height: data.height,
+        order: data.order ?? 0,
+        isActive: data.isActive ?? true,
+      },
     });
   }
 
-  async updateImage(
+  async updateMedia(
     id: bigint,
-    data: Partial<ProductImage>
-  ): Promise<ProductImage> {
-    return this.prisma.productImage.update({
+    data: Partial<ProductMedia>
+  ): Promise<ProductMedia> {
+    return this.prisma.productMedia.update({
       where: { id },
       data,
     });
   }
 
-  async deleteImage(id: bigint): Promise<void> {
-    await this.prisma.productImage.delete({ where: { id } });
+  async deleteMedia(id: bigint): Promise<void> {
+    // Soft delete - mark as inactive
+    await this.prisma.productMedia.update({
+      where: { id },
+      data: { isActive: false },
+    });
   }
 
   // Variants
@@ -260,11 +299,10 @@ export class ProductRepository implements IProductRepository {
     lowStockThreshold: number,
     reason: string
   ) {
-    // Find existing stock record
     const existingStock = await this.prisma.stock.findFirst({
       where: {
         productId,
-        variantId, // null will match null
+        variantId,
         warehouseId,
       },
     });
@@ -272,7 +310,6 @@ export class ProductRepository implements IProductRepository {
     let stock;
 
     if (existingStock) {
-      // Update existing
       stock = await this.prisma.stock.update({
         where: { id: existingStock.id },
         data: {
@@ -281,11 +318,10 @@ export class ProductRepository implements IProductRepository {
         },
       });
     } else {
-      // Create new
       stock = await this.prisma.stock.create({
         data: {
           productId,
-          variantId, // null is fine here
+          variantId,
           warehouseId,
           quantity,
           lowStockThreshold,
@@ -293,7 +329,6 @@ export class ProductRepository implements IProductRepository {
       });
     }
 
-    // Create adjustment record
     await this.prisma.stockAdjustment.create({
       data: {
         stockId: stock.id,

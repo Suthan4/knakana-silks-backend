@@ -3,7 +3,7 @@ import { inject, injectable } from "tsyringe";
 
 import { ProductService } from "../../application/service/product.service.js";
 import {
-  AddImageDTOSchema,
+  AddMediaDTOSchema,
   AddSpecificationDTOSchema,
   AddVariantDTOSchema,
   CreateProductDTOSchema,
@@ -25,7 +25,6 @@ export class ProductController {
       const data = CreateProductDTOSchema.parse(req.body);
       console.log("✅ Validation passed:", JSON.stringify(data, null, 2));
 
-      // Pass the validated data directly - it already contains the complete stock object with warehouseId
       const product = await this.productService.createProduct(data);
       console.log("✅ Product created:", product?.id);
 
@@ -248,7 +247,7 @@ export class ProductController {
   async addImage(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const data = AddImageDTOSchema.parse(req.body);
+      const data = AddMediaDTOSchema.parse(req.body);
       if (!id) {
         res.status(400).json({
           success: false,
@@ -256,12 +255,7 @@ export class ProductController {
         });
         return;
       }
-      const image = await this.productService.addImage(
-        id,
-        data.url,
-        data.altText,
-        data.order
-      );
+      const image = await this.productService.addMedia(id, data);
 
       res.status(201).json({
         success: true,
@@ -284,7 +278,7 @@ export class ProductController {
         });
         return;
       }
-      await this.productService.deleteImage(imageId);
+      await this.productService.deleteMedia(imageId);
 
       res.json({
         success: true,

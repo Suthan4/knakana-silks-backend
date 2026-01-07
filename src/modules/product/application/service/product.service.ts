@@ -1,10 +1,11 @@
 import { injectable, inject } from "tsyringe";
-import { SlugUtil, NumberUtil } from "@/shared/utils/index.js";
+import { SlugUtil } from "@/shared/utils/index.js";
 import { IProductRepository } from "../../infrastructure/interface/Iproductrepository.js";
 import { ICategoryRepository } from "@/modules/category/infrastructure/interface/Icategoryrepository.js";
 import { Product } from "@/generated/prisma/client.js";
 import { Decimal } from "@prisma/client/runtime/client";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import {
   ConflictError,
   NotFoundError,
@@ -36,7 +37,23 @@ export class ProductService {
     metaDesc?: string;
     schemaMarkup?: string;
     specifications?: Array<{ key: string; value: string }>;
-    images?: Array<{ url: string; altText?: string; order?: number }>;
+    media?: Array<{
+      // UPDATED: Changed from images
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: number;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }>;
     variants?: Array<{
       size?: string;
       color?: string;
@@ -55,11 +72,7 @@ export class ProductService {
     };
   }): Promise<Product | null> {
     try {
-      console.log("🔵 ProductService.createProduct called with:", {
-        name: data.name,
-        categoryId: data.categoryId,
-        hasVariants: !!data.variants?.length,
-      });
+      console.log("🔵 ProductService.createProduct called");
 
       // Validate category
       const category = await this.categoryRepository.findById(
@@ -71,12 +84,11 @@ export class ProductService {
         );
       }
 
-      // Validate product type
       const hasVariants = !!(data.variants && data.variants.length > 0);
 
       if (hasVariants && data.stock) {
         throw new ValidationError(
-          "Cannot provide both variants and direct stock. Use variant-level stock for variable products."
+          "Cannot provide both variants and direct stock."
         );
       }
 
@@ -86,88 +98,54 @@ export class ProductService {
         );
       }
 
-      // ✅ 4. Validate warehouse for SIMPLE products
+      // Validate warehouses
       if (!hasVariants && data.stock) {
-        console.log(
-          "🔵 Validating warehouse for simple product:",
-          data.stock.warehouseId
-        );
-
         const warehouse = await this.warehouseRepository.findById(
           BigInt(data.stock.warehouseId)
         );
-
         if (!warehouse) {
           throw new NotFoundError(
-            `Warehouse with ID ${data.stock.warehouseId} not found. Please create a warehouse first using: POST /api/admin/warehouses`
+            `Warehouse with ID ${data.stock.warehouseId} not found`
           );
         }
-
         if (!warehouse.isActive) {
           throw new ValidationError(
-            `Warehouse with ID ${data.stock.warehouseId} is inactive. Please activate it first.`
+            `Warehouse with ID ${data.stock.warehouseId} is inactive`
           );
         }
-
-        console.log("✅ Warehouse validated:", warehouse.name);
       }
 
-      // ✅ 5. Validate warehouse for VARIABLE products
       if (hasVariants && data.variants) {
-        console.log(
-          "🔵 Validating warehouses for variants:",
-          data.variants.length
-        );
-
         for (let i = 0; i < data.variants.length; i++) {
           const variant = data.variants[i];
-
           if (!variant?.stock) {
             throw new ValidationError(
-              `Variant ${i + 1} (${variant?.color || "unknown"} - ${
-                variant?.size || "unknown"
-              }) is missing stock information`
+              `Variant ${i + 1} is missing stock information`
             );
           }
-
           const warehouse = await this.warehouseRepository.findById(
             BigInt(variant.stock.warehouseId)
           );
-
           if (!warehouse) {
             throw new NotFoundError(
               `Warehouse with ID ${
                 variant.stock.warehouseId
-              } not found for variant ${i + 1} (${
-                variant.color || "unknown"
-              } - ${
-                variant.size || "unknown"
-              }). Please create a warehouse first.`
+              } not found for variant ${i + 1}`
             );
           }
-
           if (!warehouse.isActive) {
             throw new ValidationError(
               `Warehouse with ID ${
                 variant.stock.warehouseId
-              } is inactive for variant ${i + 1} (${
-                variant.color || "unknown"
-              } - ${variant.size || "unknown"})`
+              } is inactive for variant ${i + 1}`
             );
           }
-
-          console.log(
-            `✅ Warehouse validated for variant ${i + 1}:`,
-            warehouse.name
-          );
         }
       }
 
-      // Generate slug and SKU
       const slug = SlugUtil.generateSlug(data.name);
       const sku = this.generateSKU(data.name);
 
-      // Check if slug or SKU exists
       const [existingSlug, existingSku] = await Promise.all([
         this.productRepository.findBySlug(slug),
         this.productRepository.findBySku(sku),
@@ -175,12 +153,11 @@ export class ProductService {
 
       if (existingSlug) {
         throw new ConflictError(
-          `Product with name "${data.name}" already exists. Please use a different name.`
+          `Product with name "${data.name}" already exists`
         );
       }
 
       if (existingSku) {
-        console.log("⚠️ SKU collision detected, generating new SKU");
         const newSku = this.generateSKU(data.name + "-" + Date.now());
         return this.createProductWithSku(data, slug, newSku, hasVariants);
       }
@@ -193,47 +170,12 @@ export class ProductService {
   }
 
   private async createProductWithSku(
-    data: {
-      name: string;
-      description: string;
-      categoryId: string;
-      basePrice: number;
-      sellingPrice: number;
-      isActive?: boolean;
-      hsnCode?: string;
-      artisanName?: string;
-      artisanAbout?: string;
-      artisanLocation?: string;
-      metaTitle?: string;
-      metaDesc?: string;
-      schemaMarkup?: string;
-      specifications?: Array<{ key: string; value: string }>;
-      images?: Array<{ url: string; altText?: string; order?: number }>;
-      variants?: Array<{
-        size?: string;
-        color?: string;
-        fabric?: string;
-        price: number;
-        stock?: {
-          warehouseId: string;
-          quantity: number;
-          lowStockThreshold?: number;
-        };
-      }>;
-      stock?: {
-        warehouseId: string;
-        quantity: number;
-        lowStockThreshold?: number;
-      };
-    },
+    data: any,
     slug: string,
     sku: string,
     hasVariants: boolean
   ): Promise<Product | null> {
     try {
-      console.log("🔵 Creating product:", { slug, sku, hasVariants });
-
-      // Create product with hasVariants flag
       const product = await this.productRepository.create({
         name: data.name,
         slug,
@@ -243,7 +185,7 @@ export class ProductService {
         sellingPrice: data.sellingPrice,
         sku,
         isActive: data.isActive ?? true,
-        hasVariants, // NEW FIELD
+        hasVariants,
         hsnCode: data.hsnCode,
         artisanName: data.artisanName || "",
         artisanAbout: data.artisanAbout || "",
@@ -253,12 +195,10 @@ export class ProductService {
         schemaMarkup: data.schemaMarkup,
       });
 
-      console.log("✅ Product created:", product.id);
-
       // Add specifications
       if (data.specifications?.length) {
         await Promise.all(
-          data.specifications.map((spec) =>
+          data.specifications.map((spec: any) =>
             this.productRepository.addSpecification(
               product.id,
               spec.key,
@@ -266,29 +206,36 @@ export class ProductService {
             )
           )
         );
-        console.log("✅ Specifications added");
       }
 
-      // Add images
-      if (data.images?.length) {
+      // UPDATED: Add media (replaces images)
+      if (data.media?.length) {
         await Promise.all(
-          data.images.map((img) =>
-            this.productRepository.addImage(
-              product.id,
-              img.url,
-              img.altText,
-              img.order
-            )
+          data.media.map((mediaItem: any) =>
+            this.productRepository.addMedia(product.id, {
+              type: mediaItem.type || MediaType.IMAGE,
+              url: mediaItem.url,
+              key: mediaItem.key,
+              thumbnailUrl: mediaItem.thumbnailUrl,
+              altText: mediaItem.altText,
+              title: mediaItem.title,
+              description: mediaItem.description,
+              mimeType: mediaItem.mimeType,
+              fileSize: mediaItem.fileSize
+                ? BigInt(mediaItem.fileSize)
+                : undefined,
+              duration: mediaItem.duration,
+              width: mediaItem.width,
+              height: mediaItem.height,
+              order: mediaItem.order,
+              isActive: mediaItem.isActive,
+            })
           )
         );
-        console.log("✅ Images added");
       }
 
-      // Handle stock based on product type
+      // Handle stock
       if (hasVariants) {
-        // Variable product - add variants with their stock
-        console.log("🔵 Adding variants with stock:", data.variants!.length);
-
         for (const variant of data.variants!) {
           const variantSku = this.generateSKU(
             `${data.name}-${variant.size || ""}-${variant.color || ""}-${
@@ -305,7 +252,6 @@ export class ProductService {
             sku: variantSku,
           });
 
-          // Add stock for this variant if provided
           if (variant.stock) {
             await this.productRepository.updateStock(
               product.id,
@@ -317,12 +263,7 @@ export class ProductService {
             );
           }
         }
-
-        console.log("✅ Variants and stock added");
       } else {
-        // Simple product - add stock directly to product
-        console.log("🔵 Adding direct product stock");
-
         await this.productRepository.updateStock(
           product.id,
           null,
@@ -331,14 +272,9 @@ export class ProductService {
           data.stock!.lowStockThreshold || 10,
           "Initial product stock"
         );
-
-        console.log("✅ Direct stock added");
       }
 
-      // Return product with all relations
-      const finalProduct = await this.productRepository.findById(product.id);
-      console.log("✅ Product creation complete:", finalProduct?.id);
-      return finalProduct;
+      return await this.productRepository.findById(product.id);
     } catch (error) {
       console.error("❌ Error in createProductWithSku:", error);
       throw error;
@@ -361,13 +297,12 @@ export class ProductService {
     }
   ): Promise<Product> {
     const productId = BigInt(id);
-
     const product = await this.productRepository.findById(productId);
+
     if (!product) {
       throw new Error("Product not found");
     }
 
-    // Validate category if changed
     if (data.categoryId) {
       const category = await this.categoryRepository.findById(
         BigInt(data.categoryId)
@@ -377,7 +312,6 @@ export class ProductService {
       }
     }
 
-    // Generate new slug if name changed
     let slug = product.slug;
     if (data.name && data.name !== product.name) {
       slug = SlugUtil.generateSlug(data.name);
@@ -430,14 +364,13 @@ export class ProductService {
     search?: string;
     categoryId?: string;
     isActive?: boolean;
-    hasVariants?: boolean; // NEW FILTER
+    hasVariants?: boolean;
     minPrice?: number;
     maxPrice?: number;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
   }) {
     const skip = (params.page - 1) * params.limit;
-
     const where: any = {};
 
     if (params.search) {
@@ -498,7 +431,7 @@ export class ProductService {
     };
   }
 
-  // Stock methods - updated to handle both types
+  // Stock methods
   async getStock(productId: string, warehouseId: string, variantId?: string) {
     return this.productRepository.getStock(
       BigInt(productId),
@@ -520,7 +453,6 @@ export class ProductService {
       throw new Error("Product not found");
     }
 
-    // Validate stock operation matches product type
     if (product.hasVariants && !variantId) {
       throw new Error(
         "This product has variants. You must specify a variantId."
@@ -564,27 +496,39 @@ export class ProductService {
     await this.productRepository.deleteSpecification(BigInt(id));
   }
 
-  // Image methods
-  async addImage(
+  // UPDATED: Media methods (replaces image methods)
+  async addMedia(
     productId: string,
-    url: string,
-    altText?: string,
-    order?: number
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: number;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
   ) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new Error("Product not found");
     }
-    return this.productRepository.addImage(
-      BigInt(productId),
-      url,
-      altText,
-      order
-    );
+
+    return this.productRepository.addMedia(BigInt(productId), {
+      ...data,
+      fileSize: data.fileSize ? BigInt(data.fileSize) : undefined,
+    });
   }
 
-  async deleteImage(id: string) {
-    await this.productRepository.deleteImage(BigInt(id));
+  async deleteMedia(id: string) {
+    await this.productRepository.deleteMedia(BigInt(id));
   }
 
   // Variant methods
@@ -623,7 +567,6 @@ export class ProductService {
       sku,
     });
 
-    // Add stock for the variant if provided
     if (data.stock) {
       await this.productRepository.updateStock(
         BigInt(productId),
@@ -642,7 +585,6 @@ export class ProductService {
     await this.productRepository.deleteVariant(BigInt(id));
   }
 
-  // Helper method to generate SKU
   private generateSKU(name: string): string {
     const slug = SlugUtil.generateSlug(name).substring(0, 10).toUpperCase();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();

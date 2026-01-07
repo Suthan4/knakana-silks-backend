@@ -1,4 +1,10 @@
-import { Return, ReturnItem, Prisma } from "@/generated/prisma/client.js";
+import {
+  Return,
+  ReturnItem,
+  ReturnMedia,
+  Prisma,
+} from "@/generated/prisma/client.js"; // NEW: Added ReturnMedia
+import { MediaType } from "@/generated/prisma/enums.js";
 
 export type ReturnWithRelations = Prisma.ReturnGetPayload<{
   include: {
@@ -18,7 +24,16 @@ export type ReturnWithRelations = Prisma.ReturnGetPayload<{
           include: {
             product: {
               include: {
-                images: true;
+                media: {
+                  // UPDATED
+                  take: 1;
+                  where: {
+                    isActive: true;
+                  };
+                  orderBy: {
+                    order: "asc";
+                  };
+                };
               };
             };
             variant: true;
@@ -30,7 +45,16 @@ export type ReturnWithRelations = Prisma.ReturnGetPayload<{
       include: {
         product: {
           include: {
-            images: true;
+            media: {
+              // UPDATED
+              take: 1;
+              where: {
+                isActive: true;
+              };
+              orderBy: {
+                order: "asc";
+              };
+            };
           };
         };
         variant: true;
@@ -38,6 +62,7 @@ export type ReturnWithRelations = Prisma.ReturnGetPayload<{
       };
     };
     returnShipment: true;
+    media: true; // NEW: Include return media
   };
 }>;
 
@@ -62,7 +87,7 @@ export interface IReturnRepository {
     orderId: bigint;
     reason: any;
     reasonDetails: string;
-    images: string[];
+    images: string[]; // Keep for backward compatibility
     status: any;
     refundAmount: number;
     refundMethod: any;
@@ -86,4 +111,23 @@ export interface IReturnRepository {
     status: string;
   }): Promise<any>;
   updateReturnShipment(id: bigint, data: any): Promise<any>;
+
+  // NEW: ReturnMedia methods
+  addReturnMedia(
+    returnId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      description?: string;
+    }
+  ): Promise<ReturnMedia>;
+  deleteReturnMedia(id: bigint): Promise<void>;
 }

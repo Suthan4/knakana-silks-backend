@@ -1,8 +1,10 @@
 import {
   Review,
   ReviewHelpfulVote,
+  ReviewMedia, // NEW
   Prisma,
 } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 
 export type ReviewWithRelations = Prisma.ReviewGetPayload<{
   include: {
@@ -19,8 +21,12 @@ export type ReviewWithRelations = Prisma.ReviewGetPayload<{
         id: true;
         name: true;
         slug: true;
-        images: {
+        media: {
+          // UPDATED
           take: 1;
+          where: {
+            isActive: true;
+          };
           orderBy: {
             order: "asc";
           };
@@ -33,6 +39,7 @@ export type ReviewWithRelations = Prisma.ReviewGetPayload<{
         orderNumber: true;
       };
     };
+    media: true; // NEW: Include review media
   };
 }>;
 
@@ -61,7 +68,7 @@ export interface IReviewRepository {
     orderId?: bigint;
     rating: number;
     comment?: string;
-    images?: string[];
+    images?: string[]; // Keep for backward compatibility
     isVerifiedPurchase: boolean;
     isApproved: boolean;
   }): Promise<Review>;
@@ -78,4 +85,22 @@ export interface IReviewRepository {
   markHelpful(reviewId: bigint, userId: bigint): Promise<ReviewHelpfulVote>;
   unmarkHelpful(reviewId: bigint, userId: bigint): Promise<void>;
   hasUserMarkedHelpful(reviewId: bigint, userId: bigint): Promise<boolean>;
+
+  // NEW: ReviewMedia methods
+  addReviewMedia(
+    reviewId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+    }
+  ): Promise<ReviewMedia>;
+  deleteReviewMedia(id: bigint): Promise<void>;
 }

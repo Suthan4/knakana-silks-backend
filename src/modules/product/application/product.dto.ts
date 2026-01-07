@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MediaType } from "@/generated/prisma/enums.js";
 
 // Stock schema for both simple products and variants
 const StockSchema = z.object({
@@ -13,11 +14,22 @@ const SpecificationSchema = z.object({
   value: z.string().min(1, "Specification value is required"),
 });
 
-// Image schema
-const ImageSchema = z.object({
-  url: z.string().url("Invalid image URL"),
+// UPDATED: Media schema (replaces ImageSchema)
+const MediaSchema = z.object({
+  type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
+  url: z.string().url("Invalid media URL"),
+  key: z.string().optional(), // R2 object key
+  thumbnailUrl: z.string().url().optional(), // For videos
   altText: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().int().positive().optional(),
+  duration: z.number().int().positive().optional(), // For videos in seconds
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   order: z.number().int().min(0).optional().default(0),
+  isActive: z.boolean().optional().default(true),
 });
 
 // Variant schema
@@ -46,7 +58,7 @@ export const CreateProductDTOSchema = z
     metaDesc: z.string().optional(),
     schemaMarkup: z.string().optional(),
     specifications: z.array(SpecificationSchema).optional(),
-    images: z.array(ImageSchema).optional(),
+    media: z.array(MediaSchema).optional(), // UPDATED: Changed from images to media
     variants: z.array(VariantSchema).optional(),
     stock: StockSchema.optional(), // For simple products
   })
@@ -122,14 +134,25 @@ export const AddSpecificationDTOSchema = z.object({
 
 export type AddSpecificationDTO = z.infer<typeof AddSpecificationDTOSchema>;
 
-// Add Image DTO
-export const AddImageDTOSchema = z.object({
-  url: z.string().url("Invalid image URL"),
+// UPDATED: Add Media DTO (replaces AddImageDTO)
+export const AddMediaDTOSchema = z.object({
+  type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
+  url: z.string().url("Invalid media URL"),
+  key: z.string().optional(),
+  thumbnailUrl: z.string().url().optional(),
   altText: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().int().positive().optional(),
+  duration: z.number().int().positive().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   order: z.number().int().min(0).optional().default(0),
+  isActive: z.boolean().optional().default(true),
 });
 
-export type AddImageDTO = z.infer<typeof AddImageDTOSchema>;
+export type AddMediaDTO = z.infer<typeof AddMediaDTOSchema>;
 
 // Add Variant DTO
 export const AddVariantDTOSchema = z.object({

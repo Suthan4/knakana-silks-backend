@@ -1,5 +1,6 @@
 import { inject, injectable } from "tsyringe";
 import { Banner, PrismaClient } from "@/generated/prisma/client.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import { IBannerRepository } from "../interface/Ibannerrepository.js";
 
 @injectable()
@@ -32,14 +33,37 @@ export class BannerRepository implements IBannerRepository {
 
   async create(data: {
     title: string;
-    image: string;
+    type: MediaType; // NEW
+    url: string; // UPDATED
+    key?: string; // NEW
+    thumbnailUrl?: string; // NEW
     link?: string;
     text?: string;
+    mimeType?: string; // NEW
+    fileSize?: bigint; // NEW
+    duration?: number; // NEW
+    width?: number; // NEW
+    height?: number; // NEW
     isActive: boolean;
     order: number;
   }): Promise<Banner> {
     return this.prisma.banner.create({
-      data,
+      data: {
+        title: data.title,
+        type: data.type,
+        url: data.url,
+        key: data.key,
+        thumbnailUrl: data.thumbnailUrl,
+        link: data.link,
+        text: data.text,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        duration: data.duration,
+        width: data.width,
+        height: data.height,
+        isActive: data.isActive,
+        order: data.order,
+      },
     });
   }
 
