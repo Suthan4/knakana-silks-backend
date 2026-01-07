@@ -10,3 +10,4 @@ certs/
 sec/
 /generated/prisma
 generated/ 
+.env
