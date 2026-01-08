@@ -4,6 +4,10 @@ import {
   HomeSectionWithRelations,
   IHomeSectionRepository,
 } from "../interface/Ihomesectionrepository.js";
+import type {
+  SectionMediaDTO,
+  SectionCTADTO,
+} from "../../application/dtos/home_section.dtos.js";
 
 @injectable()
 export class HomeSectionRepository implements IHomeSectionRepository {
@@ -15,7 +19,14 @@ export class HomeSectionRepository implements IHomeSectionRepository {
       include: {
         products: {
           include: {
-            images: { take: 1, orderBy: { order: "asc" } },
+            media: {
+              where: {
+                isActive: true,
+                type: "IMAGE",
+              },
+              take: 1,
+              orderBy: { order: "asc" },
+            },
             stock: true,
             category: true,
           },
@@ -24,6 +35,12 @@ export class HomeSectionRepository implements IHomeSectionRepository {
           include: {
             children: true,
           },
+        },
+        media: {
+          orderBy: { order: "asc" },
+        },
+        ctaButtons: {
+          orderBy: { order: "asc" },
         },
       },
     });
@@ -43,7 +60,14 @@ export class HomeSectionRepository implements IHomeSectionRepository {
       include: {
         products: {
           include: {
-            images: { take: 1, orderBy: { order: "asc" } },
+            media: {
+              where: {
+                isActive: true,
+                type: "IMAGE",
+              },
+              take: 1,
+              orderBy: { order: "asc" },
+            },
             stock: true,
             category: true,
           },
@@ -52,6 +76,12 @@ export class HomeSectionRepository implements IHomeSectionRepository {
           include: {
             children: true,
           },
+        },
+        media: {
+          orderBy: { order: "asc" },
+        },
+        ctaButtons: {
+          orderBy: { order: "asc" },
         },
       },
     });
@@ -65,9 +95,17 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     type: any;
     title: string;
     subtitle?: string;
+    description?: string;
+    customTypeName?: string;
+    backgroundColor?: string;
+    textColor?: string;
+    layout: string;
+    columns: number;
     isActive: boolean;
     order: number;
     limit: number;
+    showTitle: boolean;
+    showSubtitle: boolean;
   }): Promise<HomeSection> {
     return this.prisma.homeSection.create({
       data,
@@ -92,7 +130,14 @@ export class HomeSectionRepository implements IHomeSectionRepository {
       include: {
         products: {
           include: {
-            images: { take: 1, orderBy: { order: "asc" } },
+            media: {
+              where: {
+                isActive: true,
+                type: "IMAGE",
+              },
+              take: 1,
+              orderBy: { order: "asc" },
+            },
             stock: true,
             category: true,
           },
@@ -102,10 +147,17 @@ export class HomeSectionRepository implements IHomeSectionRepository {
             children: true,
           },
         },
+        media: {
+          orderBy: { order: "asc" },
+        },
+        ctaButtons: {
+          orderBy: { order: "asc" },
+        },
       },
     });
   }
 
+  // Product Relations
   async addProducts(sectionId: bigint, productIds: bigint[]): Promise<void> {
     await this.prisma.homeSection.update({
       where: { id: sectionId },
@@ -128,6 +180,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     });
   }
 
+  // Category Relations
   async addCategories(sectionId: bigint, categoryIds: bigint[]): Promise<void> {
     await this.prisma.homeSection.update({
       where: { id: sectionId },
@@ -150,6 +203,54 @@ export class HomeSectionRepository implements IHomeSectionRepository {
           disconnect: categoryIds.map((id) => ({ id })),
         },
       },
+    });
+  }
+
+  // Media Management
+  async addMedia(sectionId: bigint, media: SectionMediaDTO[]): Promise<void> {
+    await this.prisma.sectionMedia.createMany({
+      data: media.map((m) => ({
+        sectionId,
+        type: m.type,
+        url: m.url,
+        thumbnailUrl: m.thumbnailUrl,
+        altText: m.altText,
+        title: m.title,
+        order: m.order,
+        overlayTitle: m.overlayTitle,
+        overlaySubtitle: m.overlaySubtitle,
+        overlayPosition: m.overlayPosition,
+      })),
+    });
+  }
+
+  async removeAllMedia(sectionId: bigint): Promise<void> {
+    await this.prisma.sectionMedia.deleteMany({
+      where: { sectionId },
+    });
+  }
+
+  // CTA Button Management
+  async addCTAButtons(
+    sectionId: bigint,
+    buttons: SectionCTADTO[]
+  ): Promise<void> {
+    await this.prisma.sectionCTA.createMany({
+      data: buttons.map((b) => ({
+        sectionId,
+        text: b.text,
+        url: b.url,
+        style: b.style,
+        icon: b.icon,
+        order: b.order,
+        openNewTab: b.openNewTab,
+      })),
+    });
+  }
+
+  async removeAllCTAButtons(sectionId: bigint): Promise<void> {
+    await this.prisma.sectionCTA.deleteMany({
+      where: { sectionId },
     });
   }
 }

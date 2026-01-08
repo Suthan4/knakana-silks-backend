@@ -73,14 +73,26 @@ enum DiscountType {
   FIXED
 }
 
-enum SectionType {
-  HERO_SLIDER       
-  NEW_ARRIVALS      
-  FEATURED          
-  COLLECTIONS     
-  CATEGORIES        
-  CUSTOM           
+enum CTAStyle {
+  PRIMARY
+  SECONDARY
+  OUTLINE
+  TEXT
 }
+
+enum SectionType {
+  HERO_SLIDER
+  NEW_ARRIVALS
+  FEATURED
+  COLLECTIONS
+  CATEGORIES
+  BEST_SELLERS
+  TRENDING
+  SEASONAL
+  CATEGORY_SPOTLIGHT
+  CUSTOM
+}
+
 
 // NEW: MediaType enum for supporting different file types
 enum MediaType {
@@ -832,22 +844,85 @@ model Banner {
   @@map("banners")
 }
 
+// Main HomeSection Model
 model HomeSection {
-  id          BigInt      @id @default(autoincrement())
-  type        SectionType
-  title       String                    // "New Sarees", "Our Collections"
-  subtitle    String?                   // Optional subtitle
-  isActive    Boolean     @default(true)
-  order       Int         @default(0)   // Display order
-  limit       Int         @default(8)   // How many items to show
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id             BigInt      @id @default(autoincrement())
+  type           SectionType
+  title          String                    
+  subtitle       String?
+  description    String?
+  customTypeName String?
+  
+  // Layout & Styling
+  backgroundColor String?
+  textColor       String?
+  layout          String?     @default("grid")
+  columns         Int?        @default(4)
+  
+  // Display Settings
+  isActive       Boolean     @default(true)
+  order          Int         @default(0)   
+  limit          Int         @default(8)
+  showTitle      Boolean     @default(true)
+  showSubtitle   Boolean     @default(true)
+  
+  // Timestamps
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  products    Product[]   @relation("SectionProducts")
-  categories  Category[]  @relation("SectionCategories")
+  // Relations
+  products       Product[]      @relation("SectionProducts")
+  categories     Category[]     @relation("SectionCategories")
+  media          SectionMedia[]
+  ctaButtons     SectionCTA[]
 
   @@index([isActive, order])
   @@map("home_sections")
+}
+
+// Media Model - Multiple Images/Videos
+model SectionMedia {
+  id              BigInt      @id @default(autoincrement())
+  sectionId       BigInt
+  section         HomeSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  type            MediaType
+  url             String
+  thumbnailUrl    String?
+  altText         String?
+  title           String?
+  order           Int         @default(0)
+  
+  // Hero Slider Overlays
+  overlayTitle    String?
+  overlaySubtitle String?
+  overlayPosition String?     @default("center")
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([sectionId, order])
+  @@map("section_media")
+}
+
+// CTA Buttons Model
+model SectionCTA {
+  id          BigInt      @id @default(autoincrement())
+  sectionId   BigInt
+  section     HomeSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  text        String
+  url         String
+  style       CTAStyle    @default(PRIMARY)
+  icon        String?
+  order       Int         @default(0)
+  openNewTab  Boolean     @default(false)
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([sectionId, order])
+  @@map("section_ctas")
 }
 
 model SeoMeta {
