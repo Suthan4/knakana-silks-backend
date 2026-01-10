@@ -26,7 +26,11 @@ export class OrderRepository implements IOrderRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -60,7 +64,11 @@ export class OrderRepository implements IOrderRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -98,7 +106,11 @@ export class OrderRepository implements IOrderRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,
@@ -144,7 +156,11 @@ export class OrderRepository implements IOrderRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
               },
             },
             variant: true,

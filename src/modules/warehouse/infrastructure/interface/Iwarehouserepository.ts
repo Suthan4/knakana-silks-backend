@@ -6,7 +6,7 @@ export type WarehouseWithStock = Prisma.WarehouseGetPayload<{
       include: {
         product: {
           include: {
-            images: true;
+            media: true;
           };
         };
         variant: true;

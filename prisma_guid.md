@@ -1,3 +1,5 @@
+# This creates ONE clean migration with your current schema
+npx prisma migrate dev --name init
 # 1. Create migration
 npx prisma migrate dev --name add_artisan_details_to_products
 

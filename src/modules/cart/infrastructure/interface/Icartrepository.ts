@@ -1,18 +1,16 @@
 import { Cart, CartItem, Prisma } from "@/generated/prisma/client.js";
 
-// Define a type for Cart with items included
 // Define type that includes the relations
 export type CartWithItems = Prisma.CartGetPayload<{
   include: {
     items: {
       include: {
-        product: { include: { images: true; stock: true } };
+        product: { include: { media: true; stock: true } };
         variant: { include: { stock: true } };
       };
     };
   };
 }>;
-
 
 export interface ICartRepository {
   findByUserId(userId: bigint): Promise<Cart | null>;

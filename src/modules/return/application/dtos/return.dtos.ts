@@ -3,10 +3,10 @@ import {
   ReturnReason,
   ReturnStatus,
   RefundMethod,
-  MediaType, // NEW
+  MediaType,
 } from "@/generated/prisma/enums.js";
 
-// UPDATED: Media schema for returns
+// Media schema for returns
 const ReturnMediaSchema = z.object({
   type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
   url: z.string().url("Invalid media URL"),
@@ -18,46 +18,60 @@ const ReturnMediaSchema = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   order: z.number().int().min(0).optional().default(0),
-  description: z.string().max(500).optional(), // Describe the issue shown in media
+  description: z.string().max(500).optional(),
 });
 
 // Create Return DTO
-export const CreateReturnDTOSchema = z.object({
-  orderId: z.string(),
-  orderItems: z.array(
-    z.object({
-      orderItemId: z.string(),
-      quantity: z.number().int().positive(),
-      reason: z.nativeEnum(ReturnReason),
-    })
-  ),
-  reasonDetails: z
-    .string()
-    .min(10, "Please provide detailed reason (minimum 10 characters)"),
-  // UPDATED: Support for ReturnMedia
-  media: z
-    .array(ReturnMediaSchema)
-    .min(1, "At least one media file is required")
-    .max(10, "Maximum 10 media files allowed")
-    .optional(),
-  // Keep legacy images for backward compatibility
-  images: z
-    .array(z.string().url())
-    .min(1, "At least one image is required")
-    .max(5)
-    .optional(),
-  refundMethod: z
-    .nativeEnum(RefundMethod)
-    .default(RefundMethod.ORIGINAL_PAYMENT),
-  bankDetails: z
-    .object({
-      accountHolderName: z.string().optional(),
-      accountNumber: z.string().optional(),
-      ifscCode: z.string().optional(),
-      bankName: z.string().optional(),
-    })
-    .optional(),
-});
+export const CreateReturnDTOSchema = z
+  .object({
+    orderId: z.string(),
+    orderItems: z.array(
+      z.object({
+        orderItemId: z.string(),
+        quantity: z.number().int().positive(),
+        reason: z.nativeEnum(ReturnReason),
+      })
+    ),
+    reasonDetails: z
+      .string()
+      .min(10, "Please provide detailed reason (minimum 10 characters)"),
+    // Support for ReturnMedia
+    media: z
+      .array(ReturnMediaSchema)
+      .min(1, "At least one media file is required")
+      .max(10, "Maximum 10 media files allowed")
+      .optional(),
+    // Legacy images for backward compatibility
+    images: z
+      .array(z.string().url())
+      .min(1, "At least one image is required")
+      .max(5)
+      .optional(),
+    refundMethod: z
+      .nativeEnum(RefundMethod)
+      .default(RefundMethod.ORIGINAL_PAYMENT),
+    bankDetails: z
+      .object({
+        accountHolderName: z.string().optional(),
+        accountNumber: z.string().optional(),
+        ifscCode: z.string().optional(),
+        bankName: z.string().optional(),
+      })
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      // Either media or images must be provided
+      return (
+        (data.media && data.media.length > 0) ||
+        (data.images && data.images.length > 0)
+      );
+    },
+    {
+      message: "Either media or images must be provided",
+      path: ["media"],
+    }
+  );
 
 export type CreateReturnDTO = z.infer<typeof CreateReturnDTOSchema>;
 

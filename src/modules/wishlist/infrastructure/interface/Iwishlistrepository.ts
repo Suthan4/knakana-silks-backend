@@ -7,7 +7,7 @@ export type WishlistWithItems = Prisma.WishlistGetPayload<{
       include: {
         product: {
           include: {
-            images: true;
+            media: true;
             stock: true;
             category: true;
           };
@@ -22,7 +22,7 @@ export type WishlistItemWithProduct = Prisma.WishlistItemGetPayload<{
   include: {
     product: {
       include: {
-        images: true;
+        media: true;
         stock: true;
       };
     };

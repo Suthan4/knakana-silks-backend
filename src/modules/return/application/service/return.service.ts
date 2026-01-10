@@ -39,7 +39,7 @@ export class ReturnService {
         reason: ReturnReason;
       }>;
       reasonDetails: string;
-      images: string[];
+      images?: string[];
       refundMethod: RefundMethod;
       bankDetails?: any;
     }
@@ -131,14 +131,15 @@ export class ReturnService {
     if (!data.orderItems || data.orderItems.length === 0) {
       throw new Error("At least one order item is required for return");
     }
-    // Create return
+
+    // Create return - use empty array if images not provided
     const returnRequest = await this.returnRepository.create({
       returnNumber,
       userId: BigInt(userId),
       orderId: order.id,
-      reason: data.orderItems?.[0]?.reason ?? ReturnReason.OTHER, // Use first item's reason as primary
+      reason: data.orderItems?.[0]?.reason ?? ReturnReason.OTHER,
       reasonDetails: data.reasonDetails,
-      images: data.images,
+      images: data.images || [], // Provide default empty array
       status: ReturnStatus.PENDING,
       refundAmount,
       refundMethod: data.refundMethod,

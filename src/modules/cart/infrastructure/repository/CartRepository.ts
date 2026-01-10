@@ -31,13 +31,17 @@ export class CartRepository implements ICartRepository {
       data: {
         cartId: data.cartId,
         productId: data.productId,
-        variantId: data.variantId ?? null, // Use nullish coalescing
+        variantId: data.variantId ?? null,
         quantity: data.quantity,
       },
       include: {
         product: {
           include: {
-            images: { take: 1, orderBy: { order: "asc" } },
+            media: {
+              take: 1,
+              where: { isActive: true },
+              orderBy: { order: "asc" },
+            },
           },
         },
         variant: true,
@@ -52,7 +56,11 @@ export class CartRepository implements ICartRepository {
       include: {
         product: {
           include: {
-            images: { take: 1, orderBy: { order: "asc" } },
+            media: {
+              take: 1,
+              where: { isActive: true },
+              orderBy: { order: "asc" },
+            },
           },
         },
         variant: true,
@@ -70,23 +78,21 @@ export class CartRepository implements ICartRepository {
     variantId?: bigint
   ): Promise<CartItem | null> {
     if (variantId !== undefined) {
-      // Variant provided - use unique constraint
       return this.prisma.cartItem.findUnique({
         where: {
           cartId_productId_variantId: {
             cartId,
             productId,
-            variantId, // ✅ All fields present
+            variantId,
           },
         },
       });
     } else {
-      // No variant - use findFirst with null check
       return this.prisma.cartItem.findFirst({
         where: {
           cartId,
           productId,
-          variantId: null, // ✅ Explicitly null in where clause
+          variantId: null,
         },
       });
     }
@@ -100,7 +106,11 @@ export class CartRepository implements ICartRepository {
           include: {
             product: {
               include: {
-                images: { take: 1, orderBy: { order: "asc" } },
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
                 stock: true,
               },
             },
