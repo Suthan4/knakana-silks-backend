@@ -35,9 +35,9 @@ export const createApp = (): Application => {
         "http://localhost:3001",
         "http://localhost:5173",
         "https://qa.admin.kankanasilks.com",
-        "https://admin.kankanasilks.com/",
+        "https://admin.kankanasilks.com",
         "https://kankanasilks.com",
-        "https://qa.kankanasilks.com/",
+        "https://qa.kankanasilks.com",
       ],
       credentials: true,
     })
