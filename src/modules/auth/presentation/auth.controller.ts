@@ -38,7 +38,6 @@ export class AuthController {
         data.phone
       );
 
-
       res.status(201).json({
         success: true,
         message: "User registered successfully",
@@ -58,7 +57,6 @@ export class AuthController {
       const data = loginSchema.parse(req.body);
       const result = await this.authService.login(data.email, data.password);
 
-
       res.json({
         success: true,
         message: "Login successful",
@@ -75,7 +73,7 @@ export class AuthController {
 
   async refreshToken(req: Request, res: Response) {
     try {
-      const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+      const refreshToken = req.body.refreshToken;
 
       if (!refreshToken) {
         return res
@@ -99,7 +97,7 @@ export class AuthController {
 
   async revokeToken(req: Request, res: Response) {
     try {
-      const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+      const refreshToken = req.body.refreshToken;
 
       if (!refreshToken) {
         return res
@@ -122,7 +120,6 @@ export class AuthController {
     try {
       const userId = BigInt(req.user!.userId);
       await this.authService.logout(userId);
-      res.clearCookie("refreshToken");
 
       res.json({
         success: true,
