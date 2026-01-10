@@ -73,7 +73,7 @@ export class AuthController {
 
   async refreshToken(req: Request, res: Response) {
     try {
-      const refreshToken = req.body.refreshToken;
+      const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
 
       if (!refreshToken) {
         return res
@@ -97,7 +97,7 @@ export class AuthController {
 
   async revokeToken(req: Request, res: Response) {
     try {
-      const refreshToken = req.body.refreshToken;
+      const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
 
       if (!refreshToken) {
         return res
@@ -120,6 +120,7 @@ export class AuthController {
     try {
       const userId = BigInt(req.user!.userId);
       await this.authService.logout(userId);
+      res.clearCookie("refreshToken");
 
       res.json({
         success: true,
