@@ -8,6 +8,8 @@ import { errorHandler } from "./shared/middleware/errorHandler.js";
 import { setupContainer } from "./config/container.js";
 
 setupContainer();
+
+// Routes
 import authRoutes from "./modules/auth/presentation/auth.routes.js";
 import categoryRoutes from "./modules/category/presentation/routes/category.routes.js";
 import productRoutes from "./modules/product/presentation/routes/product.routes.js";
@@ -26,10 +28,17 @@ import uploadRoutes from "./shared/common/routes/s3.routes.js";
 
 export const createApp = (): Application => {
   const app = express();
-  
+
+  /* --------------------------------------------------
+   * Trust proxy (REQUIRED for HTTPS on Render)
+   * -------------------------------------------------- */
   app.set("trust proxy", 1);
 
+  /* --------------------------------------------------
+   * Security & CORS
+   * -------------------------------------------------- */
   app.use(helmet());
+
   app.use(
     cors({
       origin: [
@@ -44,16 +53,37 @@ export const createApp = (): Application => {
     })
   );
 
+  /* --------------------------------------------------
+   * Rate Limiter (EXCLUDE uploads)
+   * -------------------------------------------------- */
   const limiter = rateLimit({
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     max: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
   });
-  app.use("/api", limiter);
 
+  app.use("/api", (req, res, next) => {
+    // 🚫 DO NOT rate-limit file uploads (multer needs raw stream)
+    if (req.path.startsWith("/upload")) {
+      return next();
+    }
+    return limiter(req, res, next);
+  });
+
+  /* --------------------------------------------------
+   * Upload routes FIRST (before body parsers)
+   * -------------------------------------------------- */
+  app.use("/api", uploadRoutes);
+
+  /* --------------------------------------------------
+   * Body parsers (AFTER uploads)
+   * -------------------------------------------------- */
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
+  /* --------------------------------------------------
+   * Application routes
+   * -------------------------------------------------- */
   app.use("/api", authRoutes);
   app.use("/api", categoryRoutes);
   app.use("/api", productRoutes);
@@ -68,12 +98,17 @@ export const createApp = (): Application => {
   app.use("/api", couponRoutes);
   app.use("/api", consultationRoutes);
   app.use("/api", warehouseRoutes);
-  app.use("/api", uploadRoutes);
-  
-  app.get("/health", (req, res) => {
+
+  /* --------------------------------------------------
+   * Health check
+   * -------------------------------------------------- */
+  app.get("/health", (_req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });
   });
 
+  /* --------------------------------------------------
+   * Global error handler
+   * -------------------------------------------------- */
   app.use(errorHandler);
 
   return app;
