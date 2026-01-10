@@ -38,12 +38,6 @@ export class AuthController {
         data.phone
       );
 
-      res.cookie("refreshToken", result.refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
 
       res.status(201).json({
         success: true,
@@ -51,6 +45,7 @@ export class AuthController {
         data: {
           user: result.user,
           accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
         },
       });
     } catch (error: any) {
@@ -63,12 +58,6 @@ export class AuthController {
       const data = loginSchema.parse(req.body);
       const result = await this.authService.login(data.email, data.password);
 
-      res.cookie("refreshToken", result.refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
 
       res.json({
         success: true,
@@ -76,6 +65,7 @@ export class AuthController {
         data: {
           user: result.user,
           accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
         },
       });
     } catch (error: any) {
@@ -95,16 +85,12 @@ export class AuthController {
 
       const tokens = await this.authService.refreshToken(refreshToken);
 
-      res.cookie("refreshToken", tokens.refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-
       res.json({
         success: true,
-        data: { accessToken: tokens.accessToken },
+        data: {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+        },
       });
     } catch (error: any) {
       res.status(401).json({ success: false, message: error.message });
@@ -122,7 +108,6 @@ export class AuthController {
       }
 
       await this.authService.revokeToken(refreshToken);
-      res.clearCookie("refreshToken");
 
       res.json({
         success: true,

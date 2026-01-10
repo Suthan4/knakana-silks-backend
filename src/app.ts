@@ -25,8 +25,9 @@ import warehouseRoutes from "./modules/warehouse/presentation/routes/warehouse.r
 import uploadRoutes from "./shared/common/routes/s3.routes.js";
 
 export const createApp = (): Application => {
-
   const app = express();
+  
+  app.set("trust proxy", 1);
 
   app.use(helmet());
   app.use(
