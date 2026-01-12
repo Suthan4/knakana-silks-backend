@@ -1,5 +1,6 @@
 import { injectable, inject } from "tsyringe";
 import { IAddressRepository } from "../../infrastructure/interface/Iaddressrepository.js";
+import { AddressType } from "@/generated/prisma/enums.js";
 
 @injectable()
 export class AddressService {
@@ -18,7 +19,7 @@ export class AddressService {
       state: string;
       pincode: string;
       country?: string;
-      type?: string;
+      type?: "SHIPPING" | "BILLING" | "BOTH";
       isDefault?: boolean;
     }
   ) {
@@ -32,7 +33,7 @@ export class AddressService {
       state: data.state,
       pincode: data.pincode,
       country: data.country || "India",
-      type: data.type || "SHIPPING",
+      type: (data.type || "SHIPPING") as AddressType,
       isDefault: data.isDefault ?? false,
     });
   }
@@ -49,7 +50,7 @@ export class AddressService {
       state?: string;
       pincode?: string;
       country?: string;
-      type?: string;
+      type?: "SHIPPING" | "BILLING" | "BOTH";
       isDefault?: boolean;
     }
   ) {
@@ -64,7 +65,13 @@ export class AddressService {
       throw new Error("Unauthorized");
     }
 
-    return this.addressRepository.update(BigInt(addressId), data);
+    // Convert type to AddressType enum if provided
+    const updateData: any = { ...data };
+    if (data.type) {
+      updateData.type = data.type as AddressType;
+    }
+
+    return this.addressRepository.update(BigInt(addressId), updateData);
   }
 
   async deleteAddress(userId: string, addressId: string) {
@@ -121,5 +128,26 @@ export class AddressService {
 
   async getDefaultAddress(userId: string) {
     return this.addressRepository.getDefault(BigInt(userId));
+  }
+
+  /**
+   * Get addresses by type (SHIPPING, BILLING, or BOTH)
+   */
+  async getAddressesByType(userId: string, type: AddressType) {
+    return this.addressRepository.findByUserIdAndType(BigInt(userId), type);
+  }
+
+  /**
+   * Get shipping addresses (type SHIPPING or BOTH)
+   */
+  async getShippingAddresses(userId: string) {
+    return this.addressRepository.findShippingAddresses(BigInt(userId));
+  }
+
+  /**
+   * Get billing addresses (type BILLING or BOTH)
+   */
+  async getBillingAddresses(userId: string) {
+    return this.addressRepository.findBillingAddresses(BigInt(userId));
   }
 }

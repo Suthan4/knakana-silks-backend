@@ -9,13 +9,19 @@ export interface IProductRepository {
     categoryId: bigint;
     basePrice: number;
     sellingPrice: number;
-    sku: string;
+    sku?: string;
     isActive: boolean;
     hasVariants: boolean;
     hsnCode?: string;
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
+    // 🆕 Shipping Dimensions
+    weight?: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    volumetricWeight?: number;
     metaTitle?: string;
     metaDesc?: string;
     schemaMarkup?: string;

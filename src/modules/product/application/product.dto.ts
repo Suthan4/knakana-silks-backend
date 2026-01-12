@@ -49,11 +49,31 @@ export const CreateProductDTOSchema = z
     categoryId: z.string().min(1, "Category ID is required"),
     basePrice: z.number().positive("Base price must be positive"),
     sellingPrice: z.number().positive("Selling price must be positive"),
+    sku: z.string().optional(), // 🆕 Optional - will auto-generate if not provided
     isActive: z.boolean().optional().default(true),
     hsnCode: z.string().optional(),
     artisanName: z.string().optional(),
     artisanAbout: z.string().optional(),
     artisanLocation: z.string().optional(),
+
+    // 🆕 Shipping Dimensions (Required for Shiprocket)
+    weight: z
+      .number()
+      .positive("Weight must be positive")
+      .max(50, "Weight cannot exceed 50kg"),
+    length: z
+      .number()
+      .positive("Length must be positive")
+      .max(200, "Length cannot exceed 200cm"),
+    breadth: z
+      .number()
+      .positive("Breadth must be positive")
+      .max(200, "Breadth cannot exceed 200cm"),
+    height: z
+      .number()
+      .positive("Height must be positive")
+      .max(200, "Height cannot exceed 200cm"),
+
     metaTitle: z.string().optional(),
     metaDesc: z.string().optional(),
     schemaMarkup: z.string().optional(),
@@ -98,8 +118,19 @@ export const UpdateProductDTOSchema = z.object({
   categoryId: z.string().min(1).optional(),
   basePrice: z.number().positive().optional(),
   sellingPrice: z.number().positive().optional(),
+  sku: z.string().optional(), // 🆕 Allow SKU updates
   isActive: z.boolean().optional(),
   hsnCode: z.string().optional(),
+  artisanName: z.string().optional(),
+  artisanAbout: z.string().optional(),
+  artisanLocation: z.string().optional(),
+
+  // 🆕 Shipping Dimensions (Optional in update)
+  weight: z.number().positive().max(50).optional(),
+  length: z.number().positive().max(200).optional(),
+  breadth: z.number().positive().max(200).optional(),
+  height: z.number().positive().max(200).optional(),
+
   metaTitle: z.string().optional(),
   metaDesc: z.string().optional(),
   schemaMarkup: z.string().optional(),
@@ -108,20 +139,47 @@ export const UpdateProductDTOSchema = z.object({
 export type UpdateProductDTO = z.infer<typeof UpdateProductDTOSchema>;
 
 // Query Product DTO
+// Enhanced Product Query DTO with URL params support
 export const QueryProductDTOSchema = z.object({
-  page: z.number().int().positive().default(1),
-  limit: z.number().int().positive().max(100).default(10),
-  search: z.string().optional(),
+  // Pagination
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(12),
+
+  // Search
+  search: z.string().trim().optional(),
+
+  // Categories - Support multiple ways to filter
+  categorySlug: z.string().optional(),
   categoryId: z.string().optional(),
-  isActive: z.boolean().optional(),
-  hasVariants: z.boolean().optional(),
-  minPrice: z.number().positive().optional(),
-  maxPrice: z.number().positive().optional(),
-  sortBy: z
-    .enum(["createdAt", "price", "name"])
+  categoryIds: z
+    .union([z.string(), z.array(z.string())])
     .optional()
+    .transform((val) =>
+      typeof val === "string" ? val.split(",").filter(Boolean) : val
+    ),
+
+  // Product Flags
+  isActive: z.coerce.boolean().optional().default(true),
+  hasVariants: z.coerce.boolean().optional(),
+
+  // Price Range
+  minPrice: z.coerce.number().positive().optional(),
+  maxPrice: z.coerce.number().positive().optional(),
+
+  // Sorting
+  sortBy: z
+    .enum(["createdAt", "price", "name", "popularity"])
     .default("createdAt"),
-  sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+
+  // Filters (Advanced)
+  color: z.string().optional(),
+  fabric: z.string().optional(),
+  size: z.string().optional(),
+  artisan: z.string().optional(),
+
+  // Stock availability
+  inStock: z.coerce.boolean().optional(),
 });
 
 export type QueryProductDTO = z.infer<typeof QueryProductDTOSchema>;

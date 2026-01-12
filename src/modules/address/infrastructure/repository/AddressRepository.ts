@@ -1,5 +1,9 @@
 import { inject, injectable } from "tsyringe";
-import { Address, PrismaClient } from "@/generated/prisma/client.js";
+import {
+  Address,
+  AddressType,
+  PrismaClient,
+} from "@/generated/prisma/client.js";
 import { IAddressRepository } from "../interface/Iaddressrepository.js";
 
 @injectable()
@@ -17,6 +21,39 @@ export class AddressRepository implements IAddressRepository {
     });
   }
 
+  async findByUserIdAndType(
+    userId: bigint,
+    type: AddressType
+  ): Promise<Address[]> {
+    return this.prisma.address.findMany({
+      where: {
+        userId,
+        OR: [{ type: type }, { type: AddressType.BOTH }],
+      },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  async findShippingAddresses(userId: bigint): Promise<Address[]> {
+    return this.prisma.address.findMany({
+      where: {
+        userId,
+        OR: [{ type: AddressType.SHIPPING }, { type: AddressType.BOTH }],
+      },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  async findBillingAddresses(userId: bigint): Promise<Address[]> {
+    return this.prisma.address.findMany({
+      where: {
+        userId,
+        OR: [{ type: AddressType.BILLING }, { type: AddressType.BOTH }],
+      },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
   async create(data: {
     userId: bigint;
     fullName: string;
@@ -27,7 +64,7 @@ export class AddressRepository implements IAddressRepository {
     state: string;
     pincode: string;
     country: string;
-    type: string;
+    type: AddressType;
     isDefault: boolean;
   }): Promise<Address> {
     // If this is set as default, unset other defaults

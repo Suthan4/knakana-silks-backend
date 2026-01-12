@@ -11,7 +11,10 @@ export class CategoryRepository implements ICategoryRepository {
       where: { id },
       include: {
         parent: true,
-        children: true,
+        children: {
+          where: { isActive: true },
+          orderBy: { order: "asc" },
+        },
       },
     });
   }
@@ -21,7 +24,10 @@ export class CategoryRepository implements ICategoryRepository {
       where: { slug },
       include: {
         parent: true,
-        children: true,
+        children: {
+          where: { isActive: true },
+          orderBy: { order: "asc" },
+        },
       },
     });
   }
@@ -39,7 +45,10 @@ export class CategoryRepository implements ICategoryRepository {
       orderBy: params.orderBy,
       include: {
         parent: true,
-        children: true,
+        children: {
+          where: { isActive: true },
+          orderBy: { order: "asc" },
+        },
         _count: {
           select: { products: true },
         },
@@ -77,7 +86,10 @@ export class CategoryRepository implements ICategoryRepository {
       data,
       include: {
         parent: true,
-        children: true,
+        children: {
+          where: { isActive: true },
+          orderBy: { order: "asc" },
+        },
       },
     });
   }
@@ -88,7 +100,7 @@ export class CategoryRepository implements ICategoryRepository {
 
   async findChildren(parentId: bigint): Promise<Category[]> {
     return this.prisma.category.findMany({
-      where: { parentId },
+      where: { parentId, isActive: true },
       orderBy: { order: "asc" },
     });
   }
@@ -98,11 +110,88 @@ export class CategoryRepository implements ICategoryRepository {
       where: { id },
       include: {
         children: {
+          where: { isActive: true },
           include: {
-            children: true,
+            children: {
+              where: { isActive: true },
+            },
           },
+          orderBy: { order: "asc" },
         },
       },
     });
+  }
+
+  /**
+   * ✅ NEW: Recursively get all descendant category IDs
+   * This includes children, grandchildren, great-grandchildren, etc.
+   */
+  async getAllDescendantIds(categoryId: bigint): Promise<bigint[]> {
+    const ids: bigint[] = [categoryId];
+
+    // Get immediate children
+    const children = await this.prisma.category.findMany({
+      where: {
+        parentId: categoryId,
+        isActive: true, // Only active categories
+      },
+      select: { id: true },
+    });
+
+    // Recursively get descendants of each child
+    for (const child of children) {
+      const descendantIds = await this.getAllDescendantIds(child.id);
+      ids.push(...descendantIds);
+    }
+
+    return ids;
+  }
+
+  /**
+   * ✅ NEW: Get category with all descendant IDs by slug
+   * Returns the category and array of all descendant IDs (including itself)
+   */
+  async getCategoryWithDescendants(slug: string): Promise<{
+    category: Category;
+    descendantIds: bigint[];
+  } | null> {
+    const category = await this.findBySlug(slug);
+
+    if (!category) {
+      return null;
+    }
+
+    // Get all descendant IDs (including the category itself)
+    const descendantIds = await this.getAllDescendantIds(category.id);
+
+    return {
+      category,
+      descendantIds,
+    };
+  }
+
+  /**
+   * ✅ NEW: Get multiple categories with their descendants
+   * Useful for fetching multiple category trees at once
+   */
+  async getMultipleCategoriesWithDescendants(slugs: string[]): Promise<{
+    categories: Category[];
+    allDescendantIds: bigint[];
+  }> {
+    const categories: Category[] = [];
+    const allIds = new Set<bigint>();
+
+    for (const slug of slugs) {
+      const result = await this.getCategoryWithDescendants(slug);
+      if (result) {
+        categories.push(result.category);
+        result.descendantIds.forEach((id) => allIds.add(id));
+      }
+    }
+
+    return {
+      categories,
+      allDescendantIds: Array.from(allIds),
+    };
   }
 }

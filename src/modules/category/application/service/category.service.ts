@@ -19,16 +19,13 @@ export class CategoryService {
     isActive?: boolean;
     order?: number;
   }) {
-    // Generate slug
     const slug = SlugUtil.generateSlug(data.name);
 
-    // Check if slug exists
     const existing = await this.categoryRepository.findBySlug(slug);
     if (existing) {
       throw new Error("Category with this name already exists");
     }
 
-    // Validate parent if provided
     if (data.parentId) {
       const parent = await this.categoryRepository.findById(
         BigInt(data.parentId)
@@ -73,7 +70,6 @@ export class CategoryService {
       throw new Error("Category not found");
     }
 
-    // Generate new slug if name changed
     let slug = category.slug;
     if (data.name && data.name !== category.name) {
       slug = SlugUtil.generateSlug(data.name);
@@ -83,7 +79,6 @@ export class CategoryService {
       }
     }
 
-    // Validate parent
     if (data.parentId !== undefined) {
       if (data.parentId === null) {
         // Allow setting to null
@@ -116,13 +111,11 @@ export class CategoryService {
   async deleteCategory(id: string) {
     const categoryId = BigInt(id);
 
-    // Check if category has children
     const children = await this.categoryRepository.findChildren(categoryId);
     if (children.length > 0) {
       throw new Error("Cannot delete category with subcategories");
     }
 
-    // Check if category has products (this will be enforced by Prisma cascade)
     await this.categoryRepository.delete(categoryId);
   }
 
@@ -140,6 +133,22 @@ export class CategoryService {
       throw new Error("Category not found");
     }
     return category;
+  }
+
+  /**
+   * ✅ NEW: Get category with all descendant IDs
+   * Used by ProductController to fetch products from category + subcategories
+   */
+  async getCategoryWithDescendants(slug: string) {
+    const result = await this.categoryRepository.getCategoryWithDescendants(
+      slug
+    );
+
+    if (!result) {
+      throw new Error("Category not found");
+    }
+
+    return result;
   }
 
   async getCategories(params: {
@@ -199,7 +208,6 @@ export class CategoryService {
       return this.categoryRepository.findWithChildren(BigInt(id));
     }
 
-    // Get root categories with their children
     const rootCategories = await this.categoryRepository.findAll({
       skip: 0,
       take: 100,

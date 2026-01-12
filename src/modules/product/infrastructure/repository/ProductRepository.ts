@@ -3,7 +3,7 @@ import {
   Product,
   ProductVariant,
   Specification,
-  ProductMedia, // UPDATED: Changed from ProductImage
+  ProductMedia,
   Stock,
   PrismaClient,
 } from "@/generated/prisma/client.js";
@@ -21,7 +21,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
     });
@@ -34,7 +34,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
     });
@@ -47,7 +47,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
     });
@@ -68,7 +68,6 @@ export class ProductRepository implements IProductRepository {
       include: params.include || {
         category: true,
         media: {
-          // UPDATED
           where: { isActive: true },
           orderBy: { order: "asc" },
           take: 1,
@@ -99,6 +98,12 @@ export class ProductRepository implements IProductRepository {
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
+    // 🆕 Shipping Dimensions
+    weight?: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    volumetricWeight?: number;
     metaTitle?: string;
     metaDesc?: string;
     schemaMarkup?: string;
@@ -108,6 +113,8 @@ export class ProductRepository implements IProductRepository {
       sku: data.sku,
       categoryId: data.categoryId.toString(),
       hasVariants: data.hasVariants,
+      weight: data.weight,
+      dimensions: `${data.length}x${data.breadth}x${data.height}`,
     });
 
     try {
@@ -126,6 +133,12 @@ export class ProductRepository implements IProductRepository {
           artisanName: data.artisanName || "",
           artisanAbout: data.artisanAbout || "",
           artisanLocation: data.artisanLocation || "",
+          // 🆕 Shipping Dimensions
+          weight: data.weight,
+          length: data.length,
+          breadth: data.breadth,
+          height: data.height,
+          volumetricWeight: data.volumetricWeight,
           metaTitle: data.metaTitle,
           metaDesc: data.metaDesc,
           schemaMarkup: data.schemaMarkup,
@@ -134,7 +147,7 @@ export class ProductRepository implements IProductRepository {
           category: true,
           specifications: true,
           variants: true,
-          media: true, // UPDATED
+          media: true,
           stock: true,
         },
       });
@@ -155,7 +168,7 @@ export class ProductRepository implements IProductRepository {
         category: true,
         specifications: true,
         variants: true,
-        media: { where: { isActive: true }, orderBy: { order: "asc" } }, // UPDATED
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
     });

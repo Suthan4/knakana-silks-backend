@@ -25,4 +25,15 @@ export interface ICategoryRepository {
   delete(id: bigint): Promise<void>;
   findChildren(parentId: bigint): Promise<Category[]>;
   findWithChildren(id: bigint): Promise<Category | null>;
+
+  // ✅ NEW: Descendant support methods
+  getAllDescendantIds(categoryId: bigint): Promise<bigint[]>;
+  getCategoryWithDescendants(slug: string): Promise<{
+    category: Category;
+    descendantIds: bigint[];
+  } | null>;
+  getMultipleCategoriesWithDescendants(slugs: string[]): Promise<{
+    categories: Category[];
+    allDescendantIds: bigint[];
+  }>;
 }

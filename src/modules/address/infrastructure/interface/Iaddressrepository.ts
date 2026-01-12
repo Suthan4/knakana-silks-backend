@@ -1,8 +1,11 @@
-import { Address } from "@/generated/prisma/client.js";
+import { Address, AddressType } from "@/generated/prisma/client.js";
 
 export interface IAddressRepository {
   findById(id: bigint): Promise<Address | null>;
   findByUserId(userId: bigint): Promise<Address[]>;
+  findByUserIdAndType(userId: bigint, type: AddressType): Promise<Address[]>;
+  findShippingAddresses(userId: bigint): Promise<Address[]>;
+  findBillingAddresses(userId: bigint): Promise<Address[]>;
   create(data: {
     userId: bigint;
     fullName: string;
@@ -13,7 +16,7 @@ export interface IAddressRepository {
     state: string;
     pincode: string;
     country: string;
-    type: string;
+    type: AddressType;
     isDefault: boolean;
   }): Promise<Address>;
   update(id: bigint, data: Partial<Address>): Promise<Address>;

@@ -28,11 +28,16 @@ export class ProductService {
     categoryId: string;
     basePrice: number;
     sellingPrice: number;
+    sku?: string;
     isActive?: boolean;
     hsnCode?: string;
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
+    weight: number;
+    length: number;
+    breadth: number;
+    height: number;
     metaTitle?: string;
     metaDesc?: string;
     schemaMarkup?: string;
@@ -115,6 +120,10 @@ export class ProductService {
         }
       }
 
+      // 🆕 Calculate volumetric weight
+      const volumetricWeight =
+        (data.length * data.breadth * data.height) / 5000;
+
       if (hasVariants && data.variants) {
         for (let i = 0; i < data.variants.length; i++) {
           const variant = data.variants[i];
@@ -144,25 +153,39 @@ export class ProductService {
       }
 
       const slug = SlugUtil.generateSlug(data.name);
-      const sku = this.generateSKU(data.name);
 
-      const [existingSlug, existingSku] = await Promise.all([
-        this.productRepository.findBySlug(slug),
-        this.productRepository.findBySku(sku),
-      ]);
+      // 🆕 Handle SKU - use provided SKU or auto-generate
+      let sku: string;
+      if (data.sku) {
+        // Validate provided SKU is not already in use
+        const existingSku = await this.productRepository.findBySku(data.sku);
+        if (existingSku) {
+          throw new ConflictError(`SKU "${data.sku}" is already in use`);
+        }
+        sku = data.sku;
+      } else {
+        // Auto-generate SKU
+        sku = this.generateSKU(data.name);
+        const existingSku = await this.productRepository.findBySku(sku);
+        if (existingSku) {
+          sku = this.generateSKU(data.name + "-" + Date.now());
+        }
+      }
 
+      const existingSlug = await this.productRepository.findBySlug(slug);
       if (existingSlug) {
         throw new ConflictError(
           `Product with name "${data.name}" already exists`
         );
       }
 
-      if (existingSku) {
-        const newSku = this.generateSKU(data.name + "-" + Date.now());
-        return this.createProductWithSku(data, slug, newSku, hasVariants);
-      }
-
-      return this.createProductWithSku(data, slug, sku, hasVariants);
+      return this.createProductWithSku(
+        data,
+        slug,
+        sku,
+        hasVariants,
+        volumetricWeight
+      );
     } catch (error) {
       console.error("❌ Error in ProductService.createProduct:", error);
       throw error;
@@ -173,7 +196,8 @@ export class ProductService {
     data: any,
     slug: string,
     sku: string,
-    hasVariants: boolean
+    hasVariants: boolean,
+    volumetricWeight: number // 🆕 ADD THIS PARAMETER
   ): Promise<Product | null> {
     try {
       const product = await this.productRepository.create({
@@ -190,6 +214,12 @@ export class ProductService {
         artisanName: data.artisanName || "",
         artisanAbout: data.artisanAbout || "",
         artisanLocation: data.artisanLocation || "",
+        // 🆕 ADD THESE 5 LINES
+        weight: data.weight,
+        length: data.length,
+        breadth: data.breadth,
+        height: data.height,
+        volumetricWeight,
         metaTitle: data.metaTitle,
         metaDesc: data.metaDesc,
         schemaMarkup: data.schemaMarkup,
@@ -289,8 +319,17 @@ export class ProductService {
       categoryId?: string;
       basePrice?: number;
       sellingPrice?: number;
+      sku?: string; // 🆕 ADD THIS
       isActive?: boolean;
       hsnCode?: string;
+      artisanName?: string; // 🆕 ADD THIS
+      artisanAbout?: string; // 🆕 ADD THIS
+      artisanLocation?: string; // 🆕 ADD THIS
+      // 🆕 ADD THESE 4 LINES
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
       metaTitle?: string;
       metaDesc?: string;
       schemaMarkup?: string;
@@ -320,6 +359,13 @@ export class ProductService {
         throw new Error("Product with this name already exists");
       }
     }
+    // 🆕 Validate SKU if provided
+    if (data.sku && data.sku !== product.sku) {
+      const existingSku = await this.productRepository.findBySku(data.sku);
+      if (existingSku && existingSku.id !== productId) {
+        throw new ConflictError(`SKU "${data.sku}" is already in use`);
+      }
+    }
 
     const updateData: any = {
       ...data,
@@ -333,6 +379,16 @@ export class ProductService {
 
     if (data.sellingPrice !== undefined) {
       updateData.sellingPrice = new Decimal(data.sellingPrice);
+    }
+
+    // 🆕 Calculate volumetric weight if dimensions are updated
+    if (data.weight || data.length || data.breadth || data.height) {
+      const weight = data.weight ?? Number(product.weight);
+      const length = data.length ?? Number(product.length);
+      const breadth = data.breadth ?? Number(product.breadth);
+      const height = data.height ?? Number(product.height);
+
+      updateData.volumetricWeight = (length * breadth * height) / 5000;
     }
 
     return await this.productRepository.update(productId, updateData);
@@ -359,20 +415,45 @@ export class ProductService {
   }
 
   async getProducts(params: {
+    // Pagination
     page: number;
     limit: number;
+
+    // Search
     search?: string;
+
+    // Categories - Support multiple ways to filter
+    categorySlug?: string;
     categoryId?: string;
+    categoryIds?: string[];
+
+    // Product Flags
     isActive?: boolean;
     hasVariants?: boolean;
+
+    // Price Range
     minPrice?: number;
     maxPrice?: number;
-    sortBy?: string;
+
+    // Sorting
+    sortBy?: "createdAt" | "price" | "name" | "popularity";
     sortOrder?: "asc" | "desc";
+
+    // Filters (Advanced)
+    color?: string;
+    fabric?: string;
+    size?: string;
+    artisan?: string;
+
+    // Stock availability
+    inStock?: boolean;
   }) {
     const skip = (params.page - 1) * params.limit;
     const where: any = {};
 
+    // ============================================
+    // SEARCH
+    // ============================================
     if (params.search) {
       where.OR = [
         { name: { contains: params.search, mode: "insensitive" } },
@@ -381,10 +462,24 @@ export class ProductService {
       ];
     }
 
-    if (params.categoryId) {
+    // ============================================
+    // CATEGORY FILTERING
+    // ============================================
+    // Priority: categoryIds > categoryId
+    // Note: categorySlug is handled in controller before calling this method
+    if (params.categoryIds && params.categoryIds.length > 0) {
+      // Multiple category IDs (for descendant fetching or explicit multi-category filter)
+      where.categoryId = {
+        in: params.categoryIds.map((id) => BigInt(id)),
+      };
+    } else if (params.categoryId) {
+      // Single category ID (backward compatible)
       where.categoryId = BigInt(params.categoryId);
     }
 
+    // ============================================
+    // PRODUCT FLAGS
+    // ============================================
     if (params.isActive !== undefined) {
       where.isActive = params.isActive;
     }
@@ -393,6 +488,9 @@ export class ProductService {
       where.hasVariants = params.hasVariants;
     }
 
+    // ============================================
+    // PRICE RANGE
+    // ============================================
     if (params.minPrice !== undefined || params.maxPrice !== undefined) {
       where.sellingPrice = {};
       if (params.minPrice !== undefined) {
@@ -403,13 +501,79 @@ export class ProductService {
       }
     }
 
-    const orderBy: any = {};
-    if (params.sortBy === "price") {
-      orderBy.sellingPrice = params.sortOrder || "asc";
-    } else {
-      orderBy[params.sortBy || "createdAt"] = params.sortOrder || "desc";
+    // ============================================
+    // VARIANT FILTERS (color, fabric, size)
+    // ============================================
+    if (params.color || params.fabric || params.size) {
+      where.variants = {
+        some: {
+          ...(params.color && {
+            color: {
+              contains: params.color,
+              mode: "insensitive",
+            },
+          }),
+          ...(params.fabric && {
+            fabric: {
+              contains: params.fabric,
+              mode: "insensitive",
+            },
+          }),
+          ...(params.size && {
+            size: {
+              contains: params.size,
+              mode: "insensitive",
+            },
+          }),
+        },
+      };
     }
 
+    // ============================================
+    // ARTISAN FILTER
+    // ============================================
+    if (params.artisan) {
+      where.artisanName = {
+        contains: params.artisan,
+        mode: "insensitive",
+      };
+    }
+
+    // ============================================
+    // STOCK AVAILABILITY
+    // ============================================
+    if (params.inStock !== undefined && params.inStock) {
+      where.stock = {
+        some: {
+          quantity: {
+            gt: 0,
+          },
+        },
+      };
+    }
+
+    // ============================================
+    // SORTING
+    // ============================================
+    const orderBy: any = {};
+
+    if (params.sortBy === "price") {
+      orderBy.sellingPrice = params.sortOrder || "asc";
+    } else if (params.sortBy === "name") {
+      orderBy.name = params.sortOrder || "asc";
+    } else if (params.sortBy === "popularity") {
+      // Sort by review count
+      orderBy._count = {
+        reviews: params.sortOrder || "desc",
+      };
+    } else {
+      // Default: createdAt
+      orderBy.createdAt = params.sortOrder || "desc";
+    }
+
+    // ============================================
+    // EXECUTE QUERY
+    // ============================================
     const [products, total] = await Promise.all([
       this.productRepository.findAll({
         skip,

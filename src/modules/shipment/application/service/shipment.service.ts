@@ -5,6 +5,7 @@ import { IOrderRepository } from "@/modules/order/infrastructure/interface/Iorde
 import { OrderStatus, PaymentMethod } from "@/generated/prisma/enums.js";
 import { IShiprocketRepository } from "../../infrastructure/interface/IshiprocketRepository.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
+import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 
 @injectable()
 export class ShipmentService {
@@ -12,6 +13,8 @@ export class ShipmentService {
     @inject("IShipmentRepository")
     private shipmentRepository: IShipmentRepository,
     @inject("IOrderRepository") private orderRepository: IOrderRepository,
+    @inject("IWarehouseRepository")
+    private warehouseRepository: IWarehouseRepository,
     @inject("IShiprocketRepository")
     private shiprocketRepository: IShiprocketRepository,
     @inject(EmailService) private emailService: EmailService
@@ -48,6 +51,112 @@ export class ShipmentService {
   }
 
   /**
+   * 🆕 Calculate volumetric weight: (L × B × H) / 5000
+   */
+  private calculateVolumetricWeight(
+    length: number,
+    breadth: number,
+    height: number
+  ): number {
+    return (length * breadth * height) / 5000;
+  }
+
+  /**
+   * 🆕 Get chargeable weight (higher of actual or volumetric)
+   */
+  private getChargeableWeight(
+    actualWeight: number,
+    length: number,
+    breadth: number,
+    height: number
+  ): number {
+    const volumetricWeight = this.calculateVolumetricWeight(
+      length,
+      breadth,
+      height
+    );
+    return Math.max(actualWeight, volumetricWeight);
+  }
+
+  /**
+   * 🆕 Calculate total weight and dimensions for order
+   */
+  private calculateOrderDimensions(order: any): {
+    totalWeight: number;
+    length: number;
+    breadth: number;
+    height: number;
+    chargeableWeight: number;
+  } {
+    let totalWeight = 0;
+    let maxLength = 0;
+    let maxBreadth = 0;
+    let totalHeight = 0;
+
+    for (const item of order.items) {
+      const product = item.product;
+      const quantity = item.quantity;
+
+      // Use product dimensions or defaults
+      const weight = product.weight ? Number(product.weight) : 0.5;
+      const length = product.length ? Number(product.length) : 35;
+      const breadth = product.breadth ? Number(product.breadth) : 25;
+      const height = product.height ? Number(product.height) : 5;
+
+      totalWeight += weight * quantity;
+      maxLength = Math.max(maxLength, length);
+      maxBreadth = Math.max(maxBreadth, breadth);
+      totalHeight += height * quantity; // Stack items
+    }
+
+    const chargeableWeight = this.getChargeableWeight(
+      totalWeight,
+      maxLength,
+      maxBreadth,
+      totalHeight
+    );
+
+    return {
+      totalWeight,
+      length: maxLength,
+      breadth: maxBreadth,
+      height: totalHeight,
+      chargeableWeight,
+    };
+  }
+
+  /**
+   * 🆕 Get default pickup warehouse
+   */
+  private async getPickupWarehouse() {
+    // First try to get default pickup warehouse
+    const warehouses = await this.warehouseRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: { isDefaultPickup: true, isActive: true },
+    });
+
+    if (warehouses.length > 0) {
+      return warehouses[0];
+    }
+
+    // Fallback to any active warehouse
+    const fallbackWarehouses = await this.warehouseRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: { isActive: true },
+    });
+
+    if (fallbackWarehouses.length === 0) {
+      throw new Error(
+        "No active warehouse found. Please configure a warehouse first."
+      );
+    }
+
+    return fallbackWarehouses[0];
+  }
+
+  /**
    * Create shipment for order in Shiprocket
    */
   async createShipment(orderId: string) {
@@ -66,9 +175,40 @@ export class ShipmentService {
 
     const paymentMethod = this.determinePaymentMethod(order);
 
+    // 🆕 Get pickup warehouse
+    const pickupWarehouse = await this.getPickupWarehouse();
+
+    // 🆕 Calculate order dimensions
+    const dimensions = this.calculateOrderDimensions(order);
+
+    console.log(`📦 Order Dimensions:`, {
+      totalWeight: dimensions.totalWeight,
+      chargeableWeight: dimensions.chargeableWeight,
+      length: dimensions.length,
+      breadth: dimensions.breadth,
+      height: dimensions.height,
+    });
+
     const orderData = {
       orderNumber: order.orderNumber,
       orderDate: order.createdAt.toISOString(),
+
+      // 🆕 Pickup Address (Warehouse)
+      pickupLocation: pickupWarehouse.name,
+      pickupName: pickupWarehouse.contactPerson || pickupWarehouse.name,
+      pickupAddress: pickupWarehouse.address,
+      pickupAddress2: pickupWarehouse.addressLine2 || undefined,
+      pickupCity: pickupWarehouse.city,
+      pickupPincode: pickupWarehouse.pincode,
+      pickupState: pickupWarehouse.state,
+      pickupCountry: pickupWarehouse.country || "India",
+      pickupEmail:
+        pickupWarehouse.email ||
+        process.env.WAREHOUSE_EMAIL ||
+        order.user.email,
+      pickupPhone: pickupWarehouse.phone,
+
+      // Billing Address
       billingCustomerName: order.billingAddress.fullName,
       billingAddress: order.billingAddress.addressLine1,
       billingAddress2: order.billingAddress.addressLine2 || undefined,
@@ -78,6 +218,8 @@ export class ShipmentService {
       billingCountry: order.billingAddress.country,
       billingEmail: order.user.email,
       billingPhone: order.billingAddress.phone,
+
+      // Shipping Address
       shippingIsBilling:
         order.shippingAddressId === order.billingAddressId ? true : false,
       shippingCustomerName: order.shippingAddress.fullName,
@@ -89,6 +231,8 @@ export class ShipmentService {
       shippingCountry: order.shippingAddress.country,
       shippingEmail: order.user.email,
       shippingPhone: order.shippingAddress.phone,
+
+      // Order Items
       orderItems: order.items.map((item) => ({
         name: item.product.name,
         sku: item.product.sku,
@@ -98,12 +242,15 @@ export class ShipmentService {
         tax: 0,
         hsn: item.product.hsnCode ? parseInt(item.product.hsnCode) : undefined,
       })),
+
       paymentMethod: paymentMethod,
       subTotal: Number(order.subtotal),
-      length: 30,
-      breadth: 20,
-      height: 10,
-      weight: 0.5,
+
+      // 🆕 Use calculated dimensions with volumetric weight
+      length: Math.ceil(dimensions.length),
+      breadth: Math.ceil(dimensions.breadth),
+      height: Math.ceil(dimensions.height),
+      weight: dimensions.chargeableWeight, // Use chargeable weight
     };
 
     const shiprocketOrder = await this.shiprocketRepository.createOrder(
@@ -119,10 +266,19 @@ export class ShipmentService {
     console.log(
       `✅ Shipment created in Shiprocket: Order ${order.orderNumber} (${paymentMethod})`
     );
+    console.log(`📦 Chargeable Weight: ${dimensions.chargeableWeight}kg`);
+    console.log(
+      `🏢 Pickup from: ${pickupWarehouse.name}, ${pickupWarehouse.city}`
+    );
 
     return {
       shipment,
       shiprocketResponse: shiprocketOrder,
+      dimensions,
+      pickupWarehouse: {
+        name: pickupWarehouse.name,
+        address: `${pickupWarehouse.address}, ${pickupWarehouse.city}`,
+      },
     };
   }
 
@@ -136,20 +292,30 @@ export class ShipmentService {
       throw new Error("Order not found");
     }
 
-    const pickupPostcode = process.env.WAREHOUSE_PINCODE || "110001";
-    const weight = 0.5;
+    // 🆕 Get pickup warehouse
+    const pickupWarehouse = await this.getPickupWarehouse();
+
+    // 🆕 Calculate dimensions
+    const dimensions = this.calculateOrderDimensions(order);
 
     const paymentMethod = this.determinePaymentMethod(order);
     const cod = paymentMethod === "COD" ? Number(order.total) : undefined;
 
     const couriers = await this.shiprocketRepository.getAvailableCouriers({
-      pickupPostcode,
+      pickupPostcode: pickupWarehouse.pincode,
       deliveryPostcode: order.shippingAddress.pincode,
-      weight,
+      weight: dimensions.chargeableWeight,
       cod,
     });
 
-    return couriers;
+    return {
+      couriers,
+      dimensions,
+      pickupWarehouse: {
+        name: pickupWarehouse.name,
+        pincode: pickupWarehouse.pincode,
+      },
+    };
   }
 
   /**
