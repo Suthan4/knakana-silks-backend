@@ -6,6 +6,12 @@ import {
   QueryProductDTOSchema,
   CreateProductDTOSchema,
   UpdateProductDTOSchema,
+  AddSpecificationDTOSchema,
+  AddMediaDTOSchema,
+  AddVariantDTOSchema,
+  UpdateVariantDTOSchema,
+  AddVariantMediaDTOSchema,
+  UpdateStockDTOSchema,
 } from "../../application/product.dto.js";
 
 @injectable()
@@ -17,19 +23,11 @@ export class ProductController {
 
   /**
    * ✅ ENHANCED: Get products with full URL params support + descendant fetching
-   *
-   * Supports:
-   * - categorySlug: Fetch from category + all subcategories
-   * - categoryId: Single category
-   * - categoryIds: Multiple specific categories
-   * - All filters: price, search, sort, pagination, etc.
    */
   async getProducts(req: Request, res: Response) {
     try {
-      // Parse and validate query parameters
       const params = QueryProductDTOSchema.parse(req.query);
 
-      // ✅ Handle categorySlug - fetch category + all descendants
       let categoryIds: string[] | undefined;
 
       if (params.categorySlug) {
@@ -39,7 +37,6 @@ export class ProductController {
               params.categorySlug
             );
 
-          // Convert bigint[] to string[]
           categoryIds = descendantIds.map((id) => id.toString());
 
           console.log(
@@ -49,24 +46,20 @@ export class ProductController {
             `📊 Fetching products from ${categoryIds.length} categories (including descendants)`
           );
         } catch (error: any) {
-          // Category not found
           return res.status(404).json({
             success: false,
             message: `Category with slug "${params.categorySlug}" not found`,
           });
         }
       } else if (params.categoryIds && params.categoryIds.length > 0) {
-        // Use provided categoryIds array (already parsed by DTO)
         categoryIds = params.categoryIds;
       } else if (params.categoryId) {
-        // Single category ID (backward compatible)
         categoryIds = [params.categoryId];
       }
 
-      // Call product service with processed parameters
       const result = await this.productService.getProducts({
         ...params,
-        categoryIds, // ✅ Pass processed category IDs (overrides if exists)
+        categoryIds,
       });
 
       res.json({
@@ -82,7 +75,6 @@ export class ProductController {
     } catch (error: any) {
       console.error("❌ Error fetching products:", error);
 
-      // Handle Zod validation errors
       if (error.name === "ZodError") {
         return res.status(400).json({
           success: false,
@@ -149,6 +141,7 @@ export class ProductController {
         data: product,
       });
     } catch (error: any) {
+      console.error("❌ Error creating product:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
@@ -195,6 +188,10 @@ export class ProductController {
     }
   }
 
+  // ==========================================
+  // STOCK ENDPOINTS
+  // ==========================================
+
   async getProductStock(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -219,6 +216,293 @@ export class ProductController {
       });
     } catch (error: any) {
       res.status(404).json({ success: false, message: error.message });
+    }
+  }
+
+  async updateStock(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Product ID is required" });
+      }
+
+      const data = UpdateStockDTOSchema.parse(req.body);
+      const stock = await this.productService.updateStock(
+        id,
+        data.variantId || null,
+        data.warehouseId,
+        data.quantity,
+        data.lowStockThreshold,
+        data.reason
+      );
+
+      res.json({
+        success: true,
+        message: "Stock updated successfully",
+        data: stock,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  // ==========================================
+  // SPECIFICATION ENDPOINTS
+  // ==========================================
+
+  async addSpecification(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Product ID is required" });
+      }
+
+      const data = AddSpecificationDTOSchema.parse(req.body);
+      const specification = await this.productService.addSpecification(
+        id,
+        data.key,
+        data.value
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Specification added successfully",
+        data: specification,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async updateSpecification(req: Request, res: Response) {
+    try {
+      const { specId } = req.params;
+      const { value } = req.body;
+
+      if (!specId || !value) {
+        return res.status(400).json({
+          success: false,
+          message: "Specification ID and value are required",
+        });
+      }
+
+      const specification = await this.productService.updateSpecification(
+        specId,
+        value
+      );
+
+      res.json({
+        success: true,
+        message: "Specification updated successfully",
+        data: specification,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async deleteSpecification(req: Request, res: Response) {
+    try {
+      const { specId } = req.params;
+      if (!specId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Specification ID is required" });
+      }
+
+      await this.productService.deleteSpecification(specId);
+
+      res.json({
+        success: true,
+        message: "Specification deleted successfully",
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  // ==========================================
+  // PRODUCT MEDIA ENDPOINTS
+  // ==========================================
+
+  async addMedia(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Product ID is required" });
+      }
+
+      const data = AddMediaDTOSchema.parse(req.body);
+      const media = await this.productService.addMedia(id, data);
+
+      res.status(201).json({
+        success: true,
+        message: "Media added successfully",
+        data: media,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async deleteMedia(req: Request, res: Response) {
+    try {
+      const { mediaId } = req.params;
+      if (!mediaId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Media ID is required" });
+      }
+
+      await this.productService.deleteMedia(mediaId);
+
+      res.json({
+        success: true,
+        message: "Media deleted successfully",
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  // ==========================================
+  // VARIANT ENDPOINTS (ENHANCED)
+  // ==========================================
+
+  async addVariant(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Product ID is required" });
+      }
+
+      const data = AddVariantDTOSchema.parse(req.body);
+      const variant = await this.productService.addVariant(id, data);
+
+      res.status(201).json({
+        success: true,
+        message: "Variant added successfully",
+        data: variant,
+      });
+    } catch (error: any) {
+      console.error("❌ Error adding variant:", error);
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async updateVariant(req: Request, res: Response) {
+    try {
+      const { variantId } = req.params;
+      if (!variantId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Variant ID is required" });
+      }
+
+      const data = UpdateVariantDTOSchema.parse(req.body);
+      const variant = await this.productService.updateVariant(variantId, data);
+
+      res.json({
+        success: true,
+        message: "Variant updated successfully",
+        data: variant,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async deleteVariant(req: Request, res: Response) {
+    try {
+      const { variantId } = req.params;
+      if (!variantId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Variant ID is required" });
+      }
+
+      await this.productService.deleteVariant(variantId);
+
+      res.json({
+        success: true,
+        message: "Variant deleted successfully",
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async getVariant(req: Request, res: Response) {
+    try {
+      const { variantId } = req.params;
+      if (!variantId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Variant ID is required" });
+      }
+
+      const variant = await this.productService.getVariant(variantId);
+
+      res.json({
+        success: true,
+        data: variant,
+      });
+    } catch (error: any) {
+      res.status(404).json({ success: false, message: error.message });
+    }
+  }
+
+  // ==========================================
+  // 🆕 VARIANT MEDIA ENDPOINTS
+  // ==========================================
+
+  async addVariantMedia(req: Request, res: Response) {
+    try {
+      const { variantId } = req.params;
+      if (!variantId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Variant ID is required" });
+      }
+
+      const data = AddVariantMediaDTOSchema.parse(req.body);
+      const media = await this.productService.addVariantMedia(variantId, data);
+
+      res.status(201).json({
+        success: true,
+        message: "Variant media added successfully",
+        data: media,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async deleteVariantMedia(req: Request, res: Response) {
+    try {
+      const { mediaId } = req.params;
+      if (!mediaId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Media ID is required" });
+      }
+
+      await this.productService.deleteVariantMedia(mediaId);
+
+      res.json({
+        success: true,
+        message: "Variant media deleted successfully",
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
     }
   }
 }

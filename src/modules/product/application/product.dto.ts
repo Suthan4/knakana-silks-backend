@@ -32,12 +32,52 @@ const MediaSchema = z.object({
   isActive: z.boolean().optional().default(true),
 });
 
-// Variant schema
+// 🆕 Variant Media schema (for variant-specific media)
+const VariantMediaSchema = z.object({
+  type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
+  url: z.string().url("Invalid media URL"),
+  key: z.string().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  altText: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().int().positive().optional(),
+  duration: z.number().int().positive().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  order: z.number().int().min(0).optional().default(0),
+  isActive: z.boolean().optional().default(true),
+});
+
+// 🆕 ENHANCED: Variant schema with media, pricing, dimensions, and dynamic attributes
 const VariantSchema = z.object({
+  // Dynamic attributes (flexible key-value pairs)
+  attributes: z.record(z.string(),z.string()).optional(),
+
+  // Legacy fields (backward compatibility)
   size: z.string().optional(),
   color: z.string().optional(),
   fabric: z.string().optional(),
-  price: z.number().positive("Variant price must be positive"),
+
+  // Pricing (optional - falls back to product pricing)
+  basePrice: z.number().positive("Base price must be positive").optional(),
+  sellingPrice: z
+    .number()
+    .positive("Selling price must be positive")
+    .optional(),
+  price: z.number().positive("Variant price must be positive"), // Legacy field
+
+  // Shipping dimensions (optional - falls back to product dimensions)
+  weight: z.number().positive().max(50).optional(),
+  length: z.number().positive().max(200).optional(),
+  breadth: z.number().positive().max(200).optional(),
+  height: z.number().positive().max(200).optional(),
+
+  // Variant-specific media
+  media: z.array(VariantMediaSchema).optional(),
+
+  // Stock
   stock: StockSchema.optional(),
 });
 
@@ -212,16 +252,82 @@ export const AddMediaDTOSchema = z.object({
 
 export type AddMediaDTO = z.infer<typeof AddMediaDTOSchema>;
 
-// Add Variant DTO
+// 🆕 Add Variant Media DTO
+export const AddVariantMediaDTOSchema = z.object({
+  type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
+  url: z.string().url("Invalid media URL"),
+  key: z.string().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  altText: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().int().positive().optional(),
+  duration: z.number().int().positive().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  order: z.number().int().min(0).optional().default(0),
+  isActive: z.boolean().optional().default(true),
+});
+
+export type AddVariantMediaDTO = z.infer<typeof AddVariantMediaDTOSchema>;
+
+// 🆕 ENHANCED: Add Variant DTO with all new features
 export const AddVariantDTOSchema = z.object({
+  // Dynamic attributes
+  attributes: z.record(z.string(),z.string()).optional(),
+
+  // Legacy fields
   size: z.string().optional(),
   color: z.string().optional(),
   fabric: z.string().optional(),
-  price: z.number().positive("Variant price must be positive"),
+
+  // Pricing (optional - falls back to product pricing)
+  basePrice: z.number().positive("Base price must be positive").optional(),
+  sellingPrice: z
+    .number()
+    .positive("Selling price must be positive")
+    .optional(),
+  price: z.number().positive("Variant price must be positive"), // Legacy field
+
+  // Shipping dimensions (optional - falls back to product dimensions)
+  weight: z.number().positive().max(50).optional(),
+  length: z.number().positive().max(200).optional(),
+  breadth: z.number().positive().max(200).optional(),
+  height: z.number().positive().max(200).optional(),
+
+  // Variant-specific media
+  media: z.array(VariantMediaSchema).optional(),
+
+  // Stock
   stock: StockSchema.optional(),
 });
 
 export type AddVariantDTO = z.infer<typeof AddVariantDTOSchema>;
+
+// 🆕 Update Variant DTO
+export const UpdateVariantDTOSchema = z.object({
+  // Dynamic attributes
+  attributes: z.record(z.string(),z.string()).optional(),
+
+  // Legacy fields
+  size: z.string().optional(),
+  color: z.string().optional(),
+  fabric: z.string().optional(),
+
+  // Pricing
+  basePrice: z.number().positive().optional(),
+  sellingPrice: z.number().positive().optional(),
+  price: z.number().positive().optional(),
+
+  // Shipping dimensions
+  weight: z.number().positive().max(50).optional(),
+  length: z.number().positive().max(200).optional(),
+  breadth: z.number().positive().max(200).optional(),
+  height: z.number().positive().max(200).optional(),
+});
+
+export type UpdateVariantDTO = z.infer<typeof UpdateVariantDTOSchema>;
 
 // Update Stock DTO
 export const UpdateStockDTOSchema = z.object({

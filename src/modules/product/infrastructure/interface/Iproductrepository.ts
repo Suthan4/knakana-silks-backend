@@ -1,4 +1,4 @@
-import { Product } from "@/generated/prisma/client.js";
+import { Product, ProductVariant } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
 
 export interface IProductRepository {
@@ -64,16 +64,67 @@ export interface IProductRepository {
   updateMedia(id: bigint, data: any): Promise<any>;
   deleteMedia(id: bigint): Promise<void>;
 
-  // Variants
+  // 🆕 Variants with enhanced features
   addVariant(data: {
     productId: bigint;
+    attributes?: Record<string, any>;
     size?: string;
     color?: string;
     fabric?: string;
+    basePrice?: number;
+    sellingPrice?: number;
     price: number;
+    weight?: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    volumetricWeight?: number;
     sku: string;
-  }): Promise<any>;
+  }): Promise<ProductVariant>;
+
+  updateVariant(
+    id: bigint,
+    data: {
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
+      price?: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+    }
+  ): Promise<ProductVariant>;
+
   deleteVariant(id: bigint): Promise<void>;
+  findVariantById(id: bigint): Promise<ProductVariant | null>;
+
+  // 🆕 Variant Media methods
+  addVariantMedia(
+    variantId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
+  ): Promise<any>;
+  updateVariantMedia(id: bigint, data: any): Promise<any>;
+  deleteVariantMedia(id: bigint): Promise<void>;
 
   // Stock
   getStock(

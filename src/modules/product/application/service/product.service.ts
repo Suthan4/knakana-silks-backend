@@ -2,7 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { SlugUtil } from "@/shared/utils/index.js";
 import { IProductRepository } from "../../infrastructure/interface/Iproductrepository.js";
 import { ICategoryRepository } from "@/modules/category/infrastructure/interface/Icategoryrepository.js";
-import { Product } from "@/generated/prisma/client.js";
+import { Product, ProductVariant } from "@/generated/prisma/client.js";
 import { Decimal } from "@prisma/client/runtime/client";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 import { MediaType } from "@/generated/prisma/enums.js";
@@ -43,7 +43,6 @@ export class ProductService {
     schemaMarkup?: string;
     specifications?: Array<{ key: string; value: string }>;
     media?: Array<{
-      // UPDATED: Changed from images
       type: MediaType;
       url: string;
       key?: string;
@@ -60,10 +59,33 @@ export class ProductService {
       isActive?: boolean;
     }>;
     variants?: Array<{
+      attributes?: Record<string, any>;
       size?: string;
       color?: string;
       fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
       price: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      media?: Array<{
+        type: MediaType;
+        url: string;
+        key?: string;
+        thumbnailUrl?: string;
+        altText?: string;
+        title?: string;
+        description?: string;
+        mimeType?: string;
+        fileSize?: number;
+        duration?: number;
+        width?: number;
+        height?: number;
+        order?: number;
+        isActive?: boolean;
+      }>;
       stock?: {
         warehouseId: string;
         quantity: number;
@@ -197,7 +219,7 @@ export class ProductService {
     slug: string,
     sku: string,
     hasVariants: boolean,
-    volumetricWeight: number // 🆕 ADD THIS PARAMETER
+    volumetricWeight: number
   ): Promise<Product | null> {
     try {
       const product = await this.productRepository.create({
@@ -214,7 +236,6 @@ export class ProductService {
         artisanName: data.artisanName || "",
         artisanAbout: data.artisanAbout || "",
         artisanLocation: data.artisanLocation || "",
-        // 🆕 ADD THESE 5 LINES
         weight: data.weight,
         length: data.length,
         breadth: data.breadth,
@@ -238,7 +259,7 @@ export class ProductService {
         );
       }
 
-      // UPDATED: Add media (replaces images)
+      // Add product-level media
       if (data.media?.length) {
         await Promise.all(
           data.media.map((mediaItem: any) =>
@@ -264,24 +285,73 @@ export class ProductService {
         );
       }
 
-      // Handle stock
+      // Handle variants with media, pricing, and dimensions
       if (hasVariants) {
         for (const variant of data.variants!) {
+          // Generate variant SKU
           const variantSku = this.generateSKU(
             `${data.name}-${variant.size || ""}-${variant.color || ""}-${
               variant.fabric || ""
-            }`
+            }-${JSON.stringify(variant.attributes || {})}`
           );
 
+          // 🆕 Calculate variant-specific volumetric weight if dimensions provided
+          let variantVolumetricWeight: number | undefined;
+          if (
+            variant.weight &&
+            variant.length &&
+            variant.breadth &&
+            variant.height
+          ) {
+            variantVolumetricWeight =
+              (variant.length * variant.breadth * variant.height) / 5000;
+          }
+
+          // Create variant with all new features
           const createdVariant = await this.productRepository.addVariant({
             productId: product.id,
+            attributes: variant.attributes,
             size: variant.size,
             color: variant.color,
             fabric: variant.fabric,
+            basePrice: variant.basePrice,
+            sellingPrice: variant.sellingPrice,
             price: variant.price,
+            weight: variant.weight,
+            length: variant.length,
+            breadth: variant.breadth,
+            height: variant.height,
+            volumetricWeight: variantVolumetricWeight,
             sku: variantSku,
           });
 
+          // 🆕 Add variant-specific media
+          if (variant.media?.length) {
+            await Promise.all(
+              variant.media.map((mediaItem: any) =>
+                this.productRepository.addVariantMedia(createdVariant.id, {
+                  type: mediaItem.type || MediaType.IMAGE,
+                  url: mediaItem.url,
+                  key: mediaItem.key,
+                  thumbnailUrl: mediaItem.thumbnailUrl,
+                  altText: mediaItem.altText,
+                  title: mediaItem.title,
+                  description: mediaItem.description,
+                  mimeType: mediaItem.mimeType,
+                  fileSize: mediaItem.fileSize
+                    ? BigInt(mediaItem.fileSize)
+                    : undefined,
+                  duration: mediaItem.duration,
+                  width: mediaItem.width,
+                  height: mediaItem.height,
+                  order: mediaItem.order,
+                  isActive: mediaItem.isActive,
+                })
+              )
+            );
+          }
+
+          // Add stock
           if (variant.stock) {
             await this.productRepository.updateStock(
               product.id,
@@ -294,6 +364,7 @@ export class ProductService {
           }
         }
       } else {
+        // Simple product stock
         await this.productRepository.updateStock(
           product.id,
           null,
@@ -311,6 +382,8 @@ export class ProductService {
     }
   }
 
+  // Continuation of ProductService class...
+
   async updateProduct(
     id: string,
     data: {
@@ -319,13 +392,12 @@ export class ProductService {
       categoryId?: string;
       basePrice?: number;
       sellingPrice?: number;
-      sku?: string; // 🆕 ADD THIS
+      sku?: string;
       isActive?: boolean;
       hsnCode?: string;
-      artisanName?: string; // 🆕 ADD THIS
-      artisanAbout?: string; // 🆕 ADD THIS
-      artisanLocation?: string; // 🆕 ADD THIS
-      // 🆕 ADD THESE 4 LINES
+      artisanName?: string;
+      artisanAbout?: string;
+      artisanLocation?: string;
       weight?: number;
       length?: number;
       breadth?: number;
@@ -339,7 +411,7 @@ export class ProductService {
     const product = await this.productRepository.findById(productId);
 
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
 
     if (data.categoryId) {
@@ -347,7 +419,7 @@ export class ProductService {
         BigInt(data.categoryId)
       );
       if (!category) {
-        throw new Error("Category not found");
+        throw new NotFoundError("Category not found");
       }
     }
 
@@ -356,10 +428,11 @@ export class ProductService {
       slug = SlugUtil.generateSlug(data.name);
       const existing = await this.productRepository.findBySlug(slug);
       if (existing && existing.id !== productId) {
-        throw new Error("Product with this name already exists");
+        throw new ConflictError("Product with this name already exists");
       }
     }
-    // 🆕 Validate SKU if provided
+
+    // Validate SKU if provided
     if (data.sku && data.sku !== product.sku) {
       const existingSku = await this.productRepository.findBySku(data.sku);
       if (existingSku && existingSku.id !== productId) {
@@ -381,7 +454,7 @@ export class ProductService {
       updateData.sellingPrice = new Decimal(data.sellingPrice);
     }
 
-    // 🆕 Calculate volumetric weight if dimensions are updated
+    // Calculate volumetric weight if dimensions are updated
     if (data.weight || data.length || data.breadth || data.height) {
       const weight = data.weight ?? Number(product.weight);
       const length = data.length ?? Number(product.length);
@@ -401,7 +474,7 @@ export class ProductService {
   async getProduct(id: string) {
     const product = await this.productRepository.findById(BigInt(id));
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
     return product;
   }
@@ -409,51 +482,33 @@ export class ProductService {
   async getProductBySlug(slug: string) {
     const product = await this.productRepository.findBySlug(slug);
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
     return product;
   }
 
   async getProducts(params: {
-    // Pagination
     page: number;
     limit: number;
-
-    // Search
     search?: string;
-
-    // Categories - Support multiple ways to filter
     categorySlug?: string;
     categoryId?: string;
     categoryIds?: string[];
-
-    // Product Flags
     isActive?: boolean;
     hasVariants?: boolean;
-
-    // Price Range
     minPrice?: number;
     maxPrice?: number;
-
-    // Sorting
     sortBy?: "createdAt" | "price" | "name" | "popularity";
     sortOrder?: "asc" | "desc";
-
-    // Filters (Advanced)
     color?: string;
     fabric?: string;
     size?: string;
     artisan?: string;
-
-    // Stock availability
     inStock?: boolean;
   }) {
     const skip = (params.page - 1) * params.limit;
     const where: any = {};
 
-    // ============================================
-    // SEARCH
-    // ============================================
     if (params.search) {
       where.OR = [
         { name: { contains: params.search, mode: "insensitive" } },
@@ -462,24 +517,14 @@ export class ProductService {
       ];
     }
 
-    // ============================================
-    // CATEGORY FILTERING
-    // ============================================
-    // Priority: categoryIds > categoryId
-    // Note: categorySlug is handled in controller before calling this method
     if (params.categoryIds && params.categoryIds.length > 0) {
-      // Multiple category IDs (for descendant fetching or explicit multi-category filter)
       where.categoryId = {
         in: params.categoryIds.map((id) => BigInt(id)),
       };
     } else if (params.categoryId) {
-      // Single category ID (backward compatible)
       where.categoryId = BigInt(params.categoryId);
     }
 
-    // ============================================
-    // PRODUCT FLAGS
-    // ============================================
     if (params.isActive !== undefined) {
       where.isActive = params.isActive;
     }
@@ -488,9 +533,6 @@ export class ProductService {
       where.hasVariants = params.hasVariants;
     }
 
-    // ============================================
-    // PRICE RANGE
-    // ============================================
     if (params.minPrice !== undefined || params.maxPrice !== undefined) {
       where.sellingPrice = {};
       if (params.minPrice !== undefined) {
@@ -501,9 +543,6 @@ export class ProductService {
       }
     }
 
-    // ============================================
-    // VARIANT FILTERS (color, fabric, size)
-    // ============================================
     if (params.color || params.fabric || params.size) {
       where.variants = {
         some: {
@@ -529,9 +568,6 @@ export class ProductService {
       };
     }
 
-    // ============================================
-    // ARTISAN FILTER
-    // ============================================
     if (params.artisan) {
       where.artisanName = {
         contains: params.artisan,
@@ -539,9 +575,6 @@ export class ProductService {
       };
     }
 
-    // ============================================
-    // STOCK AVAILABILITY
-    // ============================================
     if (params.inStock !== undefined && params.inStock) {
       where.stock = {
         some: {
@@ -552,9 +585,6 @@ export class ProductService {
       };
     }
 
-    // ============================================
-    // SORTING
-    // ============================================
     const orderBy: any = {};
 
     if (params.sortBy === "price") {
@@ -562,18 +592,13 @@ export class ProductService {
     } else if (params.sortBy === "name") {
       orderBy.name = params.sortOrder || "asc";
     } else if (params.sortBy === "popularity") {
-      // Sort by review count
       orderBy._count = {
         reviews: params.sortOrder || "desc",
       };
     } else {
-      // Default: createdAt
       orderBy.createdAt = params.sortOrder || "desc";
     }
 
-    // ============================================
-    // EXECUTE QUERY
-    // ============================================
     const [products, total] = await Promise.all([
       this.productRepository.findAll({
         skip,
@@ -614,17 +639,17 @@ export class ProductService {
   ) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
 
     if (product.hasVariants && !variantId) {
-      throw new Error(
+      throw new ValidationError(
         "This product has variants. You must specify a variantId."
       );
     }
 
     if (!product.hasVariants && variantId) {
-      throw new Error(
+      throw new ValidationError(
         "This product has no variants. Do not specify a variantId."
       );
     }
@@ -643,7 +668,7 @@ export class ProductService {
   async addSpecification(productId: string, key: string, value: string) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
     return this.productRepository.addSpecification(
       BigInt(productId),
@@ -660,7 +685,7 @@ export class ProductService {
     await this.productRepository.deleteSpecification(BigInt(id));
   }
 
-  // UPDATED: Media methods (replaces image methods)
+  // Product Media methods
   async addMedia(
     productId: string,
     data: {
@@ -682,7 +707,7 @@ export class ProductService {
   ) {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
 
     return this.productRepository.addMedia(BigInt(productId), {
@@ -695,42 +720,111 @@ export class ProductService {
     await this.productRepository.deleteMedia(BigInt(id));
   }
 
-  // Variant methods
+  // 🆕 ENHANCED: Variant methods with media, pricing, and dimensions
   async addVariant(
     productId: string,
     data: {
+      attributes?: Record<string, any>;
       size?: string;
       color?: string;
       fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
       price: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      media?: Array<{
+        type: MediaType;
+        url: string;
+        key?: string;
+        thumbnailUrl?: string;
+        altText?: string;
+        title?: string;
+        description?: string;
+        mimeType?: string;
+        fileSize?: number;
+        duration?: number;
+        width?: number;
+        height?: number;
+        order?: number;
+        isActive?: boolean;
+      }>;
       stock?: {
         warehouseId: string;
         quantity: number;
         lowStockThreshold?: number;
       };
     }
-  ) {
+  ): Promise<ProductVariant> {
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
-      throw new Error("Product not found");
+      throw new NotFoundError("Product not found");
     }
 
     if (!product.hasVariants) {
-      throw new Error("Cannot add variants to a simple product");
+      throw new ValidationError("Cannot add variants to a simple product");
     }
 
+    // Generate variant SKU
     const sku = this.generateSKU(
       `${product.name}-${data.size || ""}-${data.color || ""}-${
         data.fabric || ""
-      }`
+      }-${JSON.stringify(data.attributes || {})}`
     );
 
+    // Calculate variant-specific volumetric weight if dimensions provided
+    let volumetricWeight: number | undefined;
+    if (data.weight && data.length && data.breadth && data.height) {
+      volumetricWeight = (data.length * data.breadth * data.height) / 5000;
+    }
+
+    // Create variant
     const variant = await this.productRepository.addVariant({
       productId: BigInt(productId),
-      ...data,
+      attributes: data.attributes,
+      size: data.size,
+      color: data.color,
+      fabric: data.fabric,
+      basePrice: data.basePrice,
+      sellingPrice: data.sellingPrice,
+      price: data.price,
+      weight: data.weight,
+      length: data.length,
+      breadth: data.breadth,
+      height: data.height,
+      volumetricWeight,
       sku,
     });
 
+    // Add variant-specific media
+    if (data.media?.length) {
+      await Promise.all(
+        data.media.map((mediaItem: any) =>
+          this.productRepository.addVariantMedia(variant.id, {
+            type: mediaItem.type || MediaType.IMAGE,
+            url: mediaItem.url,
+            key: mediaItem.key,
+            thumbnailUrl: mediaItem.thumbnailUrl,
+            altText: mediaItem.altText,
+            title: mediaItem.title,
+            description: mediaItem.description,
+            mimeType: mediaItem.mimeType,
+            fileSize: mediaItem.fileSize
+              ? BigInt(mediaItem.fileSize)
+              : undefined,
+            duration: mediaItem.duration,
+            width: mediaItem.width,
+            height: mediaItem.height,
+            order: mediaItem.order,
+            isActive: mediaItem.isActive,
+          })
+        )
+      );
+    }
+
+    // Add stock
     if (data.stock) {
       await this.productRepository.updateStock(
         BigInt(productId),
@@ -745,8 +839,93 @@ export class ProductService {
     return variant;
   }
 
+  async updateVariant(
+    id: string,
+    data: {
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
+      price?: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+    }
+  ): Promise<ProductVariant> {
+    const variant = await this.productRepository.findVariantById(BigInt(id));
+    if (!variant) {
+      throw new NotFoundError("Variant not found");
+    }
+
+    // Calculate volumetric weight if dimensions are updated
+    let volumetricWeight: number | undefined;
+    if (data.weight || data.length || data.breadth || data.height) {
+      const weight = data.weight ?? Number(variant.weight);
+      const length = data.length ?? Number(variant.length);
+      const breadth = data.breadth ?? Number(variant.breadth);
+      const height = data.height ?? Number(variant.height);
+
+      if (weight && length && breadth && height) {
+        volumetricWeight = (length * breadth * height) / 5000;
+      }
+    }
+
+    return await this.productRepository.updateVariant(BigInt(id), {
+      ...data,
+      volumetricWeight,
+    });
+  }
+
   async deleteVariant(id: string) {
     await this.productRepository.deleteVariant(BigInt(id));
+  }
+
+  async getVariant(id: string): Promise<ProductVariant> {
+    const variant = await this.productRepository.findVariantById(BigInt(id));
+    if (!variant) {
+      throw new NotFoundError("Variant not found");
+    }
+    return variant;
+  }
+
+  // 🆕 Variant Media methods
+  async addVariantMedia(
+    variantId: string,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: number;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
+  ) {
+    const variant = await this.productRepository.findVariantById(
+      BigInt(variantId)
+    );
+    if (!variant) {
+      throw new NotFoundError("Variant not found");
+    }
+
+    return this.productRepository.addVariantMedia(BigInt(variantId), {
+      ...data,
+      fileSize: data.fileSize ? BigInt(data.fileSize) : undefined,
+    });
+  }
+
+  async deleteVariantMedia(id: string) {
+    await this.productRepository.deleteVariantMedia(BigInt(id));
   }
 
   private generateSKU(name: string): string {

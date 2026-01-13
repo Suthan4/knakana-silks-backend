@@ -12,7 +12,10 @@ const router = Router();
 
 const getProductController = () => container.resolve(ProductController);
 
-// Public routes
+// ==========================================
+// PUBLIC ROUTES
+// ==========================================
+
 router.get("/products", (req, res) =>
   getProductController().getProducts(req, res)
 );
@@ -26,10 +29,13 @@ router.get("/products/slug/:slug", (req, res) =>
 );
 
 router.get("/products/:id/stock", (req, res) =>
-  getProductController().getStock(req, res)
+  getProductController().getProductStock(req, res)
 );
 
-// Admin routes - Products
+// ==========================================
+// ADMIN ROUTES - PRODUCTS
+// ==========================================
+
 router.post(
   "/products",
   authenticate,
@@ -51,7 +57,10 @@ router.delete(
   (req, res) => getProductController().deleteProduct(req, res)
 );
 
-// Admin routes - Specifications
+// ==========================================
+// ADMIN ROUTES - SPECIFICATIONS
+// ==========================================
+
 router.post(
   "/products/:id/specifications",
   authenticate,
@@ -73,27 +82,47 @@ router.delete(
   (req, res) => getProductController().deleteSpecification(req, res)
 );
 
-// Admin routes - Images
+// ==========================================
+// ADMIN ROUTES - PRODUCT MEDIA
+// ==========================================
+
 router.post(
-  "/products/:id/images",
+  "/products/:id/media",
   authenticate,
   checkPermission("products", "update"),
-  (req, res) => getProductController().addImage(req, res)
+  (req, res) => getProductController().addMedia(req, res)
 );
 
 router.delete(
-  "/products/:id/images/:imageId",
+  "/products/:id/media/:mediaId",
   authenticate,
   checkPermission("products", "update"),
-  (req, res) => getProductController().deleteImage(req, res)
+  (req, res) => getProductController().deleteMedia(req, res)
 );
 
-// Admin routes - Variants
+// ==========================================
+// ADMIN ROUTES - VARIANTS (ENHANCED)
+// ==========================================
+
 router.post(
   "/products/:id/variants",
   authenticate,
   checkPermission("products", "update"),
   (req, res) => getProductController().addVariant(req, res)
+);
+
+router.get(
+  "/products/:id/variants/:variantId",
+  authenticate,
+  checkPermission("products", "read"),
+  (req, res) => getProductController().getVariant(req, res)
+);
+
+router.put(
+  "/products/:id/variants/:variantId",
+  authenticate,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().updateVariant(req, res)
 );
 
 router.delete(
@@ -103,7 +132,28 @@ router.delete(
   (req, res) => getProductController().deleteVariant(req, res)
 );
 
-// Admin routes - Stock
+// ==========================================
+// 🆕 ADMIN ROUTES - VARIANT MEDIA
+// ==========================================
+
+router.post(
+  "/products/:id/variants/:variantId/media",
+  authenticate,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().addVariantMedia(req, res)
+);
+
+router.delete(
+  "/products/:id/variants/:variantId/media/:mediaId",
+  authenticate,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().deleteVariantMedia(req, res)
+);
+
+// ==========================================
+// ADMIN ROUTES - STOCK
+// ==========================================
+
 router.put(
   "/products/:id/stock",
   authenticate,

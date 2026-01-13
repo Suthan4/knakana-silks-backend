@@ -4,6 +4,7 @@ import {
   ProductVariant,
   Specification,
   ProductMedia,
+  ProductVariantMedia,
   Stock,
   PrismaClient,
 } from "@/generated/prisma/client.js";
@@ -20,7 +21,12 @@ export class ProductRepository implements IProductRepository {
       include: {
         category: true,
         specifications: true,
-        variants: true,
+        variants: {
+          include: {
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            stock: true,
+          },
+        },
         media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
@@ -33,7 +39,12 @@ export class ProductRepository implements IProductRepository {
       include: {
         category: true,
         specifications: true,
-        variants: true,
+        variants: {
+          include: {
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            stock: true,
+          },
+        },
         media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
@@ -46,7 +57,12 @@ export class ProductRepository implements IProductRepository {
       include: {
         category: true,
         specifications: true,
-        variants: true,
+        variants: {
+          include: {
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            stock: true,
+          },
+        },
         media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
@@ -146,7 +162,12 @@ export class ProductRepository implements IProductRepository {
         include: {
           category: true,
           specifications: true,
-          variants: true,
+          variants: {
+            include: {
+              media: true,
+              stock: true,
+            },
+          },
           media: true,
           stock: true,
         },
@@ -167,7 +188,12 @@ export class ProductRepository implements IProductRepository {
       include: {
         category: true,
         specifications: true,
-        variants: true,
+        variants: {
+          include: {
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            stock: true,
+          },
+        },
         media: { where: { isActive: true }, orderBy: { order: "asc" } },
         stock: true,
       },
@@ -259,32 +285,146 @@ export class ProductRepository implements IProductRepository {
     });
   }
 
-  // Variants
+  // 🆕 ENHANCED: Variants with media, pricing, and dimensions
   async addVariant(data: {
     productId: bigint;
+    attributes?: Record<string, any>;
     size?: string;
     color?: string;
     fabric?: string;
+    basePrice?: number;
+    sellingPrice?: number;
     price: number;
+    weight?: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    volumetricWeight?: number;
     sku: string;
   }): Promise<ProductVariant> {
     return this.prisma.productVariant.create({
-      data,
+      data: {
+        productId: data.productId,
+        attributes: data.attributes,
+        size: data.size,
+        color: data.color,
+        fabric: data.fabric,
+        basePrice: data.basePrice,
+        sellingPrice: data.sellingPrice,
+        price: data.price,
+        weight: data.weight,
+        length: data.length,
+        breadth: data.breadth,
+        height: data.height,
+        volumetricWeight: data.volumetricWeight,
+        sku: data.sku,
+      },
+      include: {
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        stock: true,
+      },
     });
   }
 
   async updateVariant(
     id: bigint,
-    data: Partial<ProductVariant>
+    data: {
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
+      price?: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+    }
   ): Promise<ProductVariant> {
     return this.prisma.productVariant.update({
       where: { id },
       data,
+      include: {
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        stock: true,
+      },
     });
   }
 
   async deleteVariant(id: bigint): Promise<void> {
     await this.prisma.productVariant.delete({ where: { id } });
+  }
+
+  async findVariantById(id: bigint): Promise<ProductVariant | null> {
+    return this.prisma.productVariant.findUnique({
+      where: { id },
+      include: {
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        stock: true,
+        product: true,
+      },
+    });
+  }
+
+  // 🆕 Variant Media methods
+  async addVariantMedia(
+    variantId: bigint,
+    data: {
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
+      description?: string;
+      mimeType?: string;
+      fileSize?: bigint;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }
+  ): Promise<ProductVariantMedia> {
+    return this.prisma.productVariantMedia.create({
+      data: {
+        variantId,
+        type: data.type,
+        url: data.url,
+        key: data.key,
+        thumbnailUrl: data.thumbnailUrl,
+        altText: data.altText,
+        title: data.title,
+        description: data.description,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        duration: data.duration,
+        width: data.width,
+        height: data.height,
+        order: data.order ?? 0,
+        isActive: data.isActive ?? true,
+      },
+    });
+  }
+
+  async updateVariantMedia(
+    id: bigint,
+    data: Partial<ProductVariantMedia>
+  ): Promise<ProductVariantMedia> {
+    return this.prisma.productVariantMedia.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteVariantMedia(id: bigint): Promise<void> {
+    // Soft delete - mark as inactive
+    await this.prisma.productVariantMedia.update({
+      where: { id },
+      data: { isActive: false },
+    });
   }
 
   // Stock
