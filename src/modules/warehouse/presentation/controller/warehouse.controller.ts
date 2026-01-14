@@ -139,7 +139,26 @@ export class WarehouseController {
           .json({ success: false, message: "Warehouse ID is required" });
         return;
       }
-      const stock = await this.warehouseService.getWarehouseStock(id);
+      const page = req.query.page ? parseInt(req.query.page as string) : 1;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+
+      const search = req.query.search ? String(req.query.search) : undefined;
+      const startDate = req.query.startDate
+        ? String(req.query.startDate)
+        : undefined;
+      const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+
+      const sortBy = req.query.sortBy ? String(req.query.sortBy) : "createdAt";
+      const sortOrder = req.query.sortOrder === "asc" ? "asc" : "desc";
+      const stock = await this.warehouseService.getWarehouseStock(id, {
+        page,
+        limit,
+        search,
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder,
+      });
 
       res.json({
         success: true,

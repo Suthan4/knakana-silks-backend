@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { Order, OrderItem, PrismaClient } from "@/generated/prisma/client.js";
+import { Order, OrderItem, Prisma, PrismaClient } from "@/generated/prisma/client.js";
 import {
   OrderWithRelations,
   IOrderRepository,
@@ -196,7 +196,10 @@ export class OrderRepository implements IOrderRepository {
     });
   }
 
-  async update(id: bigint, data: Partial<Order>): Promise<Order> {
+  async update(
+    id: bigint,
+    data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
+  ): Promise<Order> {
     return this.prisma.order.update({
       where: { id },
       data,

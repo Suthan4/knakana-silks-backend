@@ -7,7 +7,7 @@ import { sendPasswordResetEmail } from "./email.service.js";
 import { IUserRepository } from "../../interface/Iuserrepository.js";
 
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "your-secret-key";
 const JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET || "your-refresh-secret";
 
@@ -15,6 +15,11 @@ interface TokenPayload {
   userId: string;
   email: string;
   role: UserRole;
+}
+
+interface ResetPasswordPayload {
+  userId: string;
+  email: string;
 }
 
 @injectable()
@@ -150,7 +155,7 @@ export class AuthService {
         userId: user.id.toString(),
         email: user.email,
       },
-      JWT_SECRET,
+      JWT_ACCESS_SECRET,
       {
         expiresIn: "1h",
       }
@@ -161,13 +166,19 @@ export class AuthService {
 
   // Reset Password
   async resetPassword(token: string, newPassword: string) {
-    const payload = jwt.verify(token, JWT_SECRET) as TokenPayload;
+    const payload = jwt.verify(
+      token,
+      JWT_ACCESS_SECRET
+    ) as ResetPasswordPayload;
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await this.userRepository.update(BigInt(payload.userId), {
       password: hashedPassword,
     });
+
+    // ✅ optional but recommended: revoke all refresh tokens
+    await this.refreshTokenRepository.deleteByUserId(BigInt(payload.userId));
   }
 
   // Get user profile
@@ -182,7 +193,9 @@ export class AuthService {
 
   // Generate tokens
   generateTokens(payload: TokenPayload) {
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
+    const accessToken = jwt.sign(payload, JWT_ACCESS_SECRET, {
+      expiresIn: "20s",
+    });
     const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
       expiresIn: "7d",
     });
@@ -199,6 +212,6 @@ export class AuthService {
 
   // Verify token
   verifyAccessToken(token: string): TokenPayload {
-    return jwt.verify(token, JWT_SECRET) as TokenPayload;
+    return jwt.verify(token, JWT_ACCESS_SECRET) as TokenPayload;
   }
 }

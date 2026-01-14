@@ -6,8 +6,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { errorHandler } from "./shared/middleware/errorHandler.js";
 import { setupContainer } from "./config/container.js";
-
 setupContainer();
+
 
 // Routes
 import authRoutes from "./modules/auth/presentation/auth.routes.js";
@@ -37,21 +37,29 @@ export const createApp = (): Application => {
   /* --------------------------------------------------
    * Security & CORS
    * -------------------------------------------------- */
-  app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+}));
 
-  app.use(
-    cors({
-      origin: [
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "https://qa.admin.kankanasilks.com",
-        "https://admin.kankanasilks.com",
-        "https://kankanasilks.com",
-        "https://qa.kankanasilks.com",
-      ],
-      credentials: true,
-    })
-  );
+const corsOptions = {
+  origin: [
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "https://qa.admin.kankanasilks.com",
+    "https://admin.kankanasilks.com",
+    "https://kankanasilks.com",
+    "https://qa.kankanasilks.com",
+  ],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+};
+
+app.use(cors(corsOptions));
+
+// ✅ IMPORTANT: Preflight must use SAME config
+app.options("*", cors(corsOptions));
+
 
   /* --------------------------------------------------
    * Rate Limiter (EXCLUDE uploads)
@@ -102,6 +110,10 @@ export const createApp = (): Application => {
   /* --------------------------------------------------
    * Health check
    * -------------------------------------------------- */
+
+  app.get("/", (req, res) => {
+  res.status(200).send("OK");
+});
   app.get("/health", (_req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });
   });

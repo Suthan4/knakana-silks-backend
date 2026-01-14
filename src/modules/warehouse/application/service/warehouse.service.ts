@@ -134,14 +134,56 @@ export class WarehouseService {
     return this.warehouseRepository.findActive();
   }
 
-  async getWarehouseStock(id: string) {
+  async getWarehouseStock(
+    id: string,
+    params: {
+      page: number;
+      limit: number;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      sortBy?: string;
+      sortOrder?: "asc" | "desc";
+    }
+  ) {
     const warehouseId = BigInt(id);
     const warehouse = await this.warehouseRepository.findById(warehouseId);
 
     if (!warehouse) {
       throw new Error("Warehouse not found");
     }
+    const skip = (params.page - 1) * params.limit;
+    // ✅ convert dates (partial allowed)
+    const startDate = params.startDate ? new Date(params.startDate) : undefined;
+    const endDate = params.endDate ? new Date(params.endDate) : undefined;
 
-    return this.warehouseRepository.getStock(warehouseId);
+    const [stock, total] = await Promise.all([
+      this.warehouseRepository.getStock({
+        warehouseId,
+        skip,
+        take: params.limit,
+        search: params.search,
+        startDate,
+        endDate,
+        sortBy: params.sortBy,
+        sortOrder: params.sortOrder,
+      }),
+      this.warehouseRepository.countStock({
+        warehouseId,
+        search: params.search,
+        startDate,
+        endDate,
+      }),
+    ]);
+
+    return {
+      stock,
+      pagination: {
+        page: params.page,
+        limit: params.limit,
+        total,
+        totalPages: Math.ceil(total / params.limit),
+      },
+    };
   }
 }

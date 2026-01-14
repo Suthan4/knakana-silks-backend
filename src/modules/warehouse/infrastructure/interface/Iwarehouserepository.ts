@@ -38,5 +38,20 @@ export interface IWarehouseRepository {
   delete(id: bigint): Promise<void>;
   findActive(): Promise<Warehouse[]>;
   hasStock(warehouseId: bigint): Promise<boolean>;
-  getStock(warehouseId: bigint): Promise<Stock[]>;
+  getStock(params: {
+    warehouseId: bigint;
+    skip: number;
+    take: number;
+    search?: string;
+    startDate?: Date;
+    endDate?: Date;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+  }): Promise<Stock[]>;
+  countStock(params: {
+    warehouseId: bigint;
+    search?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<number>;
 }

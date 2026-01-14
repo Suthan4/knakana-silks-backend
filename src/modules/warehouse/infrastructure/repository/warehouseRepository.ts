@@ -75,9 +75,83 @@ export class WarehouseRepository implements IWarehouseRepository {
     return count > 0;
   }
 
-  async getStock(warehouseId: bigint): Promise<Stock[]> {
+  async countStock(params: {
+    warehouseId: bigint;
+    search?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<number> {
+    const where: any = {
+      warehouseId: params.warehouseId,
+    };
+
+    // ✅ Date filter (partial allowed)
+    if (params.startDate || params.endDate) {
+      where.createdAt = {};
+      if (params.startDate) where.createdAt.gte = params.startDate;
+      if (params.endDate) where.createdAt.lte = params.endDate;
+    }
+
+    // ✅ Global Search in DB (not pagination limited)
+    if (params.search) {
+      where.OR = [
+        {
+          product: {
+            name: { contains: params.search, mode: "insensitive" },
+          },
+        },
+        {
+          variant: {
+            sku: { contains: params.search, mode: "insensitive" },
+          },
+        },
+      ];
+    }
+
+    return this.prisma.stock.count({ where });
+  }
+
+  async getStock(params: {
+    warehouseId: bigint;
+    skip: number;
+    take: number;
+    search?: string;
+    startDate?: Date;
+    endDate?: Date;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+  }): Promise<Stock[]> {
+    const where: any = {
+      warehouseId: params.warehouseId,
+    };
+    // ✅ Date filter (partial allowed)
+    if (params.startDate || params.endDate) {
+      where.createdAt = {};
+      if (params.startDate) where.createdAt.gte = params.startDate;
+      if (params.endDate) where.createdAt.lte = params.endDate;
+    }
+
+    // ✅ Global Search in DB
+    if (params.search) {
+      where.OR = [
+        {
+          product: {
+            name: { contains: params.search, mode: "insensitive" },
+          },
+        },
+        {
+          variant: {
+            sku: { contains: params.search, mode: "insensitive" },
+          },
+        },
+      ];
+    }
+
+    const orderBy: any = {};
+    orderBy[params.sortBy || "createdAt"] = params.sortOrder || "desc";
+    
     return this.prisma.stock.findMany({
-      where: { warehouseId },
+      where,
       include: {
         product: {
           include: {

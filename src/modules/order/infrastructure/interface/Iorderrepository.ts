@@ -56,7 +56,8 @@ export interface IOrderRepository {
     billingAddressId: bigint;
     couponId?: bigint;
   }): Promise<Order>;
-  update(id: bigint, data: Partial<Order>): Promise<Order>;
+  update(id: bigint, data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
+): Promise<Order>;
   addItem(data: {
     orderId: bigint;
     productId: bigint;
