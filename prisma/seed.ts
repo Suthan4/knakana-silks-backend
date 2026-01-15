@@ -24,7 +24,7 @@ async function main() {
   });
 
   console.log("✅ Super Admin created:");
-  console.log("   Email: superadmin@kanganasilks.com");
+  console.log("   Email: superadmin@kankanasilks.com");
   console.log("   Password: SuperAdmin123!");
   console.log("   ID:", superAdmin.id.toString());
 

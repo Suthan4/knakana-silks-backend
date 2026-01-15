@@ -73,6 +73,19 @@ enum DiscountType {
   FIXED
 }
 
+enum CouponScope {
+  ALL
+  CATEGORY
+  PRODUCT
+}
+
+enum CouponUserEligibility {
+  ALL
+  SPECIFIC_USERS
+  FIRST_TIME
+  NEW_USERS
+}
+
 enum CTAStyle {
   PRIMARY
   SECONDARY
@@ -166,6 +179,7 @@ model User {
   viewedProducts ProductView[]
   refreshTokens  RefreshToken[]
   reviewHelpfulVotes  ReviewHelpfulVote[]
+  eligibleCoupons     Coupon[]    @relation("CouponEligibleUsers")
   returns             Return[]
 
   @@index([email])
@@ -222,6 +236,7 @@ model Category {
   parent              Category?            @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children            Category[]           @relation("CategoryHierarchy")
   homeSections        HomeSection[]        @relation("SectionCategories")
+  coupons             Coupon[]             @relation("CouponCategories")
   products            Product[]
   consultationConfigs ConsultationConfig[]
 
@@ -262,6 +277,7 @@ model Product {
 
   category            Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   homeSections        HomeSection[]        @relation("SectionProducts")
+  coupons             Coupon[]             @relation("CouponProducts")
   specifications      Specification[]
   variants            ProductVariant[]
   media               ProductMedia[]       // UPDATED: Changed from images to media
@@ -654,8 +670,15 @@ model Coupon {
   isActive      Boolean       @default(true)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  scope         CouponScope   @default(ALL)
+  userEligibility CouponUserEligibility @default(ALL)
+  newUserDays     Int?
+  maxDiscountAmount Decimal?  @db.Decimal(10, 2)
 
   orders        Order[]
+  categories    Category[]    @relation("CouponCategories")
+  products      Product[]     @relation("CouponProducts")
+  eligibleUsers User[]        @relation("CouponEligibleUsers")
 
   @@index([code])
   @@map("coupons")

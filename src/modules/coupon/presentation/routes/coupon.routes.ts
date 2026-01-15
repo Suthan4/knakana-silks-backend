@@ -10,13 +10,21 @@ const router = Router();
 
 const getCouponController = () => container.resolve(CouponController);
 
-// Public routes
+// 🆕 NEW: Public routes for coupon validation
 router.get("/coupons/active", (req, res) =>
   getCouponController().getActiveCoupons(req, res)
 );
 
+router.post("/coupons/validate", authenticate, (req, res) =>
+  getCouponController().validateCoupon(req, res)
+);
+
 router.post("/coupons/apply", authenticate, (req, res) =>
   getCouponController().applyCoupon(req, res)
+);
+
+router.post("/coupons/applicable", authenticate, (req, res) =>
+  getCouponController().getApplicableCoupons(req, res)
 );
 
 // Admin routes

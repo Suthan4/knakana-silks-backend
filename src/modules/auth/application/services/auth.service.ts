@@ -194,7 +194,7 @@ export class AuthService {
   // Generate tokens
   generateTokens(payload: TokenPayload) {
     const accessToken = jwt.sign(payload, JWT_ACCESS_SECRET, {
-      expiresIn: "20s",
+      expiresIn: "1h",
     });
     const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
       expiresIn: "7d",
