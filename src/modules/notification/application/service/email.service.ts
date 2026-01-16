@@ -57,8 +57,8 @@ export class EmailService {
     email: string;
     firstName: string;
     orderNumber: string;
-    total: number;
-    items: Array<{
+    orderTotal: number;
+    orderItems: Array<{
       name: string;
       quantity: number;
       price: number;
@@ -91,7 +91,7 @@ export class EmailService {
             <div class="order-details">
               <h3>Order #${data.orderNumber}</h3>
               
-              ${data.items
+              ${data.orderItems
                 .map(
                   (item) => `
                 <div class="item">
@@ -105,7 +105,7 @@ export class EmailService {
                 .join("")}
               
               <div class="total">
-                Total: ₹${data.total.toFixed(2)}
+                Total: ₹${data.orderTotal.toFixed(2)}
               </div>
             </div>
             

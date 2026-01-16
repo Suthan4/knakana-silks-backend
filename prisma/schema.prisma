@@ -580,7 +580,8 @@ model Order {
   couponId          BigInt?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
-
+  
+  shippingInfo      OrderShippingInfo?
   user              User        @relation(fields: [userId], references: [id])
   shippingAddress   Address     @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
   billingAddress    Address     @relation("BillingAddress", fields: [billingAddressId], references: [id])
@@ -599,6 +600,41 @@ model Order {
   @@map("orders")
 }
 
+model OrderShippingInfo {
+  id               BigInt   @id @default(autoincrement())
+  orderId          BigInt   @unique
+  
+  // Warehouse/Pickup Information
+  warehouseId      BigInt
+  warehouseName    String
+  warehouseCode    String
+  pickupAddress    String
+  pickupAddressLine2 String?
+  pickupCity       String
+  pickupState      String
+  pickupPincode    String
+  pickupCountry    String   @default("India")
+  pickupPhone      String?
+  pickupEmail      String?
+  pickupContactPerson String?
+  
+  // Shipping Dimensions & Weights
+  totalWeight      Decimal  @db.Decimal(8, 3)
+  volumetricWeight Decimal  @db.Decimal(8, 3)
+  chargeableWeight Decimal  @db.Decimal(8, 3)
+  length           Int
+  breadth          Int
+  height           Int
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([warehouseId])
+  @@map("order_shipping_info")
+}
 model OrderItem {
   id        BigInt           @id @default(autoincrement())
   orderId   BigInt

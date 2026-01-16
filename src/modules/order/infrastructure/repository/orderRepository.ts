@@ -1,5 +1,10 @@
 import { inject, injectable } from "tsyringe";
-import { Order, OrderItem, Prisma, PrismaClient } from "@/generated/prisma/client.js";
+import {
+  Order,
+  OrderItem,
+  Prisma,
+  PrismaClient,
+} from "@/generated/prisma/client.js";
 import {
   OrderWithRelations,
   IOrderRepository,
@@ -9,6 +14,9 @@ import {
 export class OrderRepository implements IOrderRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
+  /**
+   * Find order by ID with all relations including shippingInfo
+   */
   async findById(id: bigint): Promise<OrderWithRelations | null> {
     return this.prisma.order.findUnique({
       where: { id },
@@ -41,10 +49,14 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
+        shippingInfo: true, // 🆕 Include shipping info
       },
     });
   }
 
+  /**
+   * Find order by order number with all relations
+   */
   async findByOrderNumber(
     orderNumber: string
   ): Promise<OrderWithRelations | null> {
@@ -79,10 +91,14 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
+        shippingInfo: true, // 🆕 Include shipping info
       },
     });
   }
 
+  /**
+   * Find orders by user ID with pagination
+   */
   async findByUserId(
     userId: bigint,
     params: { skip: number; take: number; where?: any; orderBy?: any }
@@ -121,16 +137,23 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
+        shippingInfo: true, // 🆕 Include shipping info
       },
     });
   }
 
+  /**
+   * Count orders by user ID
+   */
   async countByUserId(userId: bigint, where?: any): Promise<number> {
     return this.prisma.order.count({
       where: { userId, ...where },
     });
   }
 
+  /**
+   * Find all orders with pagination (Admin)
+   */
   async findAll(params: {
     skip: number;
     take: number;
@@ -171,14 +194,21 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
+        shippingInfo: true, // 🆕 Include shipping info
       },
     });
   }
 
+  /**
+   * Count all orders
+   */
   async count(where?: any): Promise<number> {
     return this.prisma.order.count({ where });
   }
 
+  /**
+   * Create new order
+   */
   async create(data: {
     userId: bigint;
     orderNumber: string;
@@ -189,13 +219,31 @@ export class OrderRepository implements IOrderRepository {
     total: number;
     shippingAddressId: bigint;
     billingAddressId: bigint;
+    shippingAddressSnapshot?: any;
+    billingAddressSnapshot?: any;
     couponId?: bigint;
   }): Promise<Order> {
     return this.prisma.order.create({
-      data,
+      data: {
+        userId: data.userId,
+        orderNumber: data.orderNumber,
+        status: data.status,
+        subtotal: data.subtotal,
+        discount: data.discount,
+        shippingCost: data.shippingCost,
+        total: data.total,
+        shippingAddressId: data.shippingAddressId,
+        billingAddressId: data.billingAddressId,
+        shippingAddressSnapshot: data.shippingAddressSnapshot,
+        billingAddressSnapshot: data.billingAddressSnapshot,
+        couponId: data.couponId,
+      },
     });
   }
 
+  /**
+   * Update order
+   */
   async update(
     id: bigint,
     data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
@@ -206,6 +254,9 @@ export class OrderRepository implements IOrderRepository {
     });
   }
 
+  /**
+   * Add item to order
+   */
   async addItem(data: {
     orderId: bigint;
     productId: bigint;

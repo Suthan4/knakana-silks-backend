@@ -10,38 +10,75 @@ const router = Router();
 
 const getOrderController = () => container.resolve(OrderController);
 
-// User routes (authenticated)
+// ==================== USER ROUTES (Authenticated) ====================
+
+/**
+ * Create order from cart
+ * POST /api/orders
+ * Body: { shippingAddressId, billingAddressId, couponCode?, paymentMethod }
+ */
 router.post("/orders", authenticate, (req, res) =>
   getOrderController().createOrder(req, res)
 );
 
+/**
+ * Verify Razorpay payment
+ * POST /api/orders/verify-payment
+ * Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+ */
 router.post("/orders/verify-payment", authenticate, (req, res) =>
   getOrderController().verifyPayment(req, res)
 );
 
+/**
+ * Get user's orders with pagination
+ * GET /api/orders/my-orders
+ * Query: page, limit, status, startDate, endDate, sortBy, sortOrder
+ */
 router.get("/orders/my-orders", authenticate, (req, res) =>
   getOrderController().getUserOrders(req, res)
 );
 
+/**
+ * Get single order by ID
+ * GET /api/orders/:id
+ */
 router.get("/orders/:id", authenticate, (req, res) =>
   getOrderController().getOrder(req, res)
 );
 
+/**
+ * Get order by order number
+ * GET /api/orders/number/:orderNumber
+ */
 router.get("/orders/number/:orderNumber", authenticate, (req, res) =>
   getOrderController().getOrderByNumber(req, res)
 );
 
-// Check if order can be cancelled (for UI logic)
+/**
+ * Check if order can be cancelled
+ * GET /api/orders/:id/can-cancel
+ */
 router.get("/orders/:id/can-cancel", authenticate, (req, res) =>
   getOrderController().canCancelOrder(req, res)
 );
 
-// Cancel order
+/**
+ * Cancel order
+ * POST /api/orders/:id/cancel
+ * Body: { reason?: string }
+ */
 router.post("/orders/:id/cancel", authenticate, (req, res) =>
   getOrderController().cancelOrder(req, res)
 );
 
-// Admin routes
+// ==================== ADMIN ROUTES ====================
+
+/**
+ * Get all orders (Admin)
+ * GET /api/admin/orders
+ * Query: page, limit, status, startDate, endDate, sortBy, sortOrder
+ */
 router.get(
   "/admin/orders",
   authenticate,
@@ -49,6 +86,11 @@ router.get(
   (req, res) => getOrderController().getAllOrders(req, res)
 );
 
+/**
+ * Update order status (Admin)
+ * PUT /api/admin/orders/:id/status
+ * Body: { status: OrderStatus }
+ */
 router.put(
   "/admin/orders/:id/status",
   authenticate,

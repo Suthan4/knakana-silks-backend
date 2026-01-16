@@ -26,24 +26,30 @@ export type OrderWithRelations = Prisma.OrderGetPayload<{
     payment: true;
     shipment: true;
     coupon: true;
+    shippingInfo: true; // 🆕 Include shipping info
   };
 }>;
 
 export interface IOrderRepository {
+  // Find operations
   findById(id: bigint): Promise<OrderWithRelations | null>;
   findByOrderNumber(orderNumber: string): Promise<OrderWithRelations | null>;
   findByUserId(
     userId: bigint,
     params: { skip: number; take: number; where?: any; orderBy?: any }
   ): Promise<OrderWithRelations[]>;
-  countByUserId(userId: bigint, where?: any): Promise<number>;
   findAll(params: {
     skip: number;
     take: number;
     where?: any;
     orderBy?: any;
   }): Promise<OrderWithRelations[]>;
+
+  // Count operations
+  countByUserId(userId: bigint, where?: any): Promise<number>;
   count(where?: any): Promise<number>;
+
+  // Create/Update operations
   create(data: {
     userId: bigint;
     orderNumber: string;
@@ -54,10 +60,16 @@ export interface IOrderRepository {
     total: number;
     shippingAddressId: bigint;
     billingAddressId: bigint;
+    shippingAddressSnapshot?: any;
+    billingAddressSnapshot?: any;
     couponId?: bigint;
   }): Promise<Order>;
-  update(id: bigint, data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
-): Promise<Order>;
+
+  update(
+    id: bigint,
+    data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
+  ): Promise<Order>;
+
   addItem(data: {
     orderId: bigint;
     productId: bigint;

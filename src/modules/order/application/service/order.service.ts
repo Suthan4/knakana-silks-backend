@@ -2,6 +2,8 @@ import { injectable, inject } from "tsyringe";
 import { IOrderRepository } from "../../infrastructure/interface/Iorderrepository.js";
 import { ICartRepository } from "@/modules/cart/infrastructure/interface/Icartrepository.js";
 import { IPaymentRepository } from "@/modules/payment/infrastructure/interface/Ipaymentrepository.js";
+import { IAddressRepository } from "@/modules/address/infrastructure/interface/Iaddressrepository.js";
+import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 import { RazorpayService } from "@/modules/payment/application/service/razorpay.service.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
 import { NumberUtil } from "@/shared/utils/index.js";
@@ -10,23 +12,141 @@ import {
   PaymentStatus,
   PaymentMethod,
 } from "@/generated/prisma/enums.js";
-import { IShipmentRepository } from "@/modules/shipment/infrastructure/interface/Ishipmentrepository.js";
-import { ShiprocketService } from "@/modules/shipment/infrastructure/services/shiprocket.service.js";
+import { IOrderShippingInfoRepository } from "../../infrastructure/interface/Iordershippinginforepository.js";
+
+interface ShippingDimensions {
+  totalWeight: number;
+  volumetricWeight: number;
+  chargeableWeight: number;
+  length: number;
+  breadth: number;
+  height: number;
+}
 
 @injectable()
 export class OrderService {
   constructor(
     @inject("IOrderRepository") private orderRepository: IOrderRepository,
     @inject("ICartRepository") private cartRepository: ICartRepository,
-    @inject("IPaymentRepository") private paymentRepository: IPaymentRepository,
-    @inject("IShipmentRepository") private shipmentRepository: IShipmentRepository,
+    @inject("IPaymentRepository")
+    private paymentRepository: IPaymentRepository,
+    @inject("IAddressRepository")
+    private addressRepository: IAddressRepository,
+    @inject("IWarehouseRepository")
+    private warehouseRepository: IWarehouseRepository,
+    @inject("IOrderShippingInfoRepository")
+    private orderShippingInfoRepository: IOrderShippingInfoRepository,
     @inject(RazorpayService) private razorpayService: RazorpayService,
-    @inject(ShiprocketService) private shiprocketService: ShiprocketService,
     @inject(EmailService) private emailService: EmailService
   ) {}
 
   /**
-   * Create order from cart
+   * Calculate volumetric weight: (L × B × H) / 5000
+   */
+  private calculateVolumetricWeight(
+    length: number,
+    breadth: number,
+    height: number
+  ): number {
+    return (length * breadth * height) / 5000;
+  }
+
+  /**
+   * Calculate shipping dimensions for order
+   * Combines weights and dimensions from all order items
+   */
+  private calculateShippingDimensions(items: any[]): ShippingDimensions {
+    let totalWeight = 0;
+    let maxLength = 0;
+    let maxBreadth = 0;
+    let totalHeight = 0;
+
+    for (const item of items) {
+      const quantity = item.quantity;
+
+      // Get weight - priority: variant > product > default (0.5kg)
+      let weight = 0.5; // Default weight
+      if (item.variant?.weight) {
+        weight = Number(item.variant.weight);
+      } else if (item.product?.weight) {
+        weight = Number(item.product.weight);
+      }
+
+      // Get dimensions - priority: variant > product > defaults
+      let length = 35; // Default length in cm
+      let breadth = 25; // Default breadth in cm
+      let height = 5; // Default height in cm
+
+      if (item.variant) {
+        length = item.variant.length ? Number(item.variant.length) : length;
+        breadth = item.variant.breadth ? Number(item.variant.breadth) : breadth;
+        height = item.variant.height ? Number(item.variant.height) : height;
+      } else if (item.product) {
+        length = item.product.length ? Number(item.product.length) : length;
+        breadth = item.product.breadth ? Number(item.product.breadth) : breadth;
+        height = item.product.height ? Number(item.product.height) : height;
+      }
+
+      // Calculate totals
+      totalWeight += weight * quantity;
+      maxLength = Math.max(maxLength, length);
+      maxBreadth = Math.max(maxBreadth, breadth);
+      totalHeight += height * quantity; // Stack items vertically
+    }
+
+    // Calculate volumetric weight
+    const volumetricWeight = this.calculateVolumetricWeight(
+      maxLength,
+      maxBreadth,
+      totalHeight
+    );
+
+    // Chargeable weight is the higher of actual or volumetric
+    const chargeableWeight = Math.max(totalWeight, volumetricWeight);
+
+    return {
+      totalWeight: Math.round(totalWeight * 1000) / 1000, // Round to 3 decimals
+      volumetricWeight: Math.round(volumetricWeight * 1000) / 1000,
+      chargeableWeight: Math.round(chargeableWeight * 1000) / 1000,
+      length: Math.ceil(maxLength),
+      breadth: Math.ceil(maxBreadth),
+      height: Math.ceil(totalHeight),
+    };
+  }
+
+  /**
+   * Get default pickup warehouse for shipments
+   */
+  private async getPickupWarehouse() {
+    // Try to get warehouse marked as default pickup
+    const defaultWarehouses = await this.warehouseRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: { isDefaultPickup: true, isActive: true },
+    });
+
+    if (defaultWarehouses.length > 0) {
+      return defaultWarehouses[0];
+    }
+
+    // Fallback to any active warehouse
+    const activeWarehouses = await this.warehouseRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: { isActive: true },
+    });
+
+    if (activeWarehouses.length === 0) {
+      throw new Error(
+        "No active warehouse found. Please configure a warehouse first."
+      );
+    }
+
+    return activeWarehouses[0];
+  }
+
+  /**
+   * Create order from cart with weight calculation and shipping info
    */
   async createOrder(
     userId: string,
@@ -39,13 +159,41 @@ export class OrderService {
   ) {
     const userIdBigInt = BigInt(userId);
 
-    // Get cart with items
+    // 1. Get cart with items (includes product and variant details)
     const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
     if (!cart || cart.items.length === 0) {
       throw new Error("Cart is empty");
     }
 
-    // Calculate totals
+    // 2. Validate addresses exist and belong to user
+    const [shippingAddress, billingAddress] = await Promise.all([
+      this.addressRepository.findById(BigInt(data.shippingAddressId)),
+      this.addressRepository.findById(BigInt(data.billingAddressId)),
+    ]);
+
+    if (!shippingAddress || shippingAddress.userId !== userIdBigInt) {
+      throw new Error("Invalid shipping address");
+    }
+
+    if (!billingAddress || billingAddress.userId !== userIdBigInt) {
+      throw new Error("Invalid billing address");
+    }
+
+    // 3. Get pickup warehouse (for shipment creation)
+    const pickupWarehouse = await this.getPickupWarehouse();
+    console.log(`📦 Pickup warehouse selected: ${pickupWarehouse.name}`);
+
+    // 4. Calculate shipping dimensions and weights
+    const shippingDimensions = this.calculateShippingDimensions(cart.items);
+
+    console.log("📏 Shipping Dimensions:", {
+      totalWeight: `${shippingDimensions.totalWeight}kg`,
+      volumetricWeight: `${shippingDimensions.volumetricWeight}kg`,
+      chargeableWeight: `${shippingDimensions.chargeableWeight}kg`,
+      dimensions: `${shippingDimensions.length} × ${shippingDimensions.breadth} × ${shippingDimensions.height} cm`,
+    });
+
+    // 5. Calculate order totals
     let subtotal = 0;
     for (const item of cart.items) {
       const price = item.variant
@@ -58,17 +206,40 @@ export class OrderService {
     let discount = 0;
     let couponId: bigint | undefined;
 
-    // Apply coupon if provided
+    // 6. Apply coupon if provided (TODO: Implement coupon validation)
     if (data.couponCode) {
-      // TODO: Validate and apply coupon
+      // Future: Validate and apply coupon logic
     }
 
     const total = subtotal + shippingCost - discount;
 
-    // Generate order number
+    // 7. Generate unique order number
     const orderNumber = NumberUtil.generateOrderNumber();
 
-    // Create order
+    // 8. Create address snapshots for historical record
+    const shippingAddressSnapshot = {
+      fullName: shippingAddress.fullName,
+      phone: shippingAddress.phone,
+      addressLine1: shippingAddress.addressLine1,
+      addressLine2: shippingAddress.addressLine2,
+      city: shippingAddress.city,
+      state: shippingAddress.state,
+      pincode: shippingAddress.pincode,
+      country: shippingAddress.country,
+    };
+
+    const billingAddressSnapshot = {
+      fullName: billingAddress.fullName,
+      phone: billingAddress.phone,
+      addressLine1: billingAddress.addressLine1,
+      addressLine2: billingAddress.addressLine2,
+      city: billingAddress.city,
+      state: billingAddress.state,
+      pincode: billingAddress.pincode,
+      country: billingAddress.country,
+    };
+
+    // 9. Create order
     const order = await this.orderRepository.create({
       userId: userIdBigInt,
       orderNumber,
@@ -79,10 +250,37 @@ export class OrderService {
       total,
       shippingAddressId: BigInt(data.shippingAddressId),
       billingAddressId: BigInt(data.billingAddressId),
+      shippingAddressSnapshot,
+      billingAddressSnapshot,
       couponId,
     });
 
-    // Add order items
+    // 10. Create OrderShippingInfo record
+    await this.orderShippingInfoRepository.create({
+      orderId: order.id,
+      warehouseId: pickupWarehouse.id,
+      warehouseName: pickupWarehouse.name,
+      warehouseCode: pickupWarehouse.code,
+      pickupAddress: pickupWarehouse.address,
+      pickupAddressLine2: pickupWarehouse.addressLine2,
+      pickupCity: pickupWarehouse.city,
+      pickupState: pickupWarehouse.state,
+      pickupPincode: pickupWarehouse.pincode,
+      pickupCountry: pickupWarehouse.country || "India",
+      pickupPhone: pickupWarehouse.phone,
+      pickupEmail: pickupWarehouse.email,
+      pickupContactPerson: pickupWarehouse.contactPerson,
+      totalWeight: shippingDimensions.totalWeight,
+      volumetricWeight: shippingDimensions.volumetricWeight,
+      chargeableWeight: shippingDimensions.chargeableWeight,
+      length: shippingDimensions.length,
+      breadth: shippingDimensions.breadth,
+      height: shippingDimensions.height,
+    });
+
+    console.log(`✅ Shipping info created for order: ${orderNumber}`);
+
+    // 11. Add order items
     for (const item of cart.items) {
       const price = item.variant
         ? Number(item.variant.price)
@@ -97,7 +295,7 @@ export class OrderService {
       });
     }
 
-    // Create Razorpay order
+    // 12. Create Razorpay order
     const razorpayOrder = await this.razorpayService.createOrder({
       amount: Math.round(total * 100), // Convert to paise
       currency: "INR",
@@ -105,10 +303,12 @@ export class OrderService {
       notes: {
         orderId: order.id.toString(),
         userId: userId,
+        warehouse: pickupWarehouse.name,
+        chargeableWeight: shippingDimensions.chargeableWeight.toString(),
       },
     });
 
-    // Create payment record
+    // 13. Create payment record
     await this.paymentRepository.create({
       orderId: order.id,
       razorpayOrderId: razorpayOrder.id,
@@ -117,16 +317,28 @@ export class OrderService {
       amount: total,
     });
 
-    // Clear cart
+    // 14. Clear cart after successful order creation
     await this.cartRepository.clearCart(cart.id);
 
-    // Get complete order details
+    // 15. Get complete order details with shipping info
     const completeOrder = await this.orderRepository.findById(order.id);
+
+    console.log(`✅ Order created: ${orderNumber}`);
+    console.log(`📦 Chargeable weight: ${shippingDimensions.chargeableWeight}kg`);
+    console.log(`🏢 Pickup from: ${pickupWarehouse.name}, ${pickupWarehouse.city}`);
 
     return {
       order: completeOrder,
       razorpayOrderId: razorpayOrder.id,
       razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+      shippingInfo: {
+        warehouse: {
+          name: pickupWarehouse.name,
+          city: pickupWarehouse.city,
+          pincode: pickupWarehouse.pincode,
+        },
+        dimensions: shippingDimensions,
+      },
     };
   }
 
@@ -138,14 +350,14 @@ export class OrderService {
     razorpay_payment_id: string;
     razorpay_signature: string;
   }) {
-    // Verify signature
+    // 1. Verify signature
     const isValid = this.razorpayService.verifyPaymentSignature(params);
 
     if (!isValid) {
       throw new Error("Invalid payment signature");
     }
 
-    // Find payment
+    // 2. Find payment by Razorpay order ID
     const payment = await this.paymentRepository.findByRazorpayOrderId(
       params.razorpay_order_id
     );
@@ -154,30 +366,75 @@ export class OrderService {
       throw new Error("Payment not found");
     }
 
-    // Update payment
+    // 3. Update payment status
     await this.paymentRepository.update(payment.id, {
       razorpayPaymentId: params.razorpay_payment_id,
       status: PaymentStatus.SUCCESS,
     });
 
-    // Update order status
+    // 4. Update order status to PROCESSING
     await this.orderRepository.update(payment.orderId, {
       status: OrderStatus.PROCESSING,
     });
 
-    // Get complete order
-    return this.orderRepository.findById(payment.orderId);
+    // 5. Get complete order details with shipping info
+    const order = await this.orderRepository.findById(payment.orderId);
+
+    if (!order) {
+      throw new Error("Order not found after payment");
+    }
+
+    // 6. Log that order is ready for shipment
+    console.log(`✅ Payment verified for order: ${order.orderNumber}`);
+    console.log(`📦 Order ready for shipment creation`);
+    
+    if (order.shippingInfo) {
+      console.log(`🏢 Pickup: ${order.shippingInfo.warehouseName}`);
+      console.log(`⚖️ Weight: ${order.shippingInfo.chargeableWeight}kg`);
+    }
+
+    // 7. Send order confirmation email
+    try {
+      await this.emailService.sendOrderConfirmation({
+        email: order.user.email,
+        firstName: order.user.firstName,
+        orderNumber: order.orderNumber,
+        orderTotal: Number(order.total),
+        orderItems: order.items.map((item) => ({
+          name: item.product.name,
+          quantity: item.quantity,
+          price: Number(item.price),
+        })),
+      });
+    } catch (error) {
+      console.error("Failed to send order confirmation email:", error);
+    }
+
+    // 8. TODO: Create Shiprocket shipment automatically
+    // This is where you'll integrate shipment creation:
+    // const shippingInfo = order.shippingInfo;
+    // await this.shipmentService.createShipment(order.id.toString(), shippingInfo);
+
+    return order;
   }
 
   /**
-   * Cancel order with proper conditions
-   *
-   * CANCELLATION CONDITIONS:
-   * 1. Only allowed if order status is PENDING or PROCESSING
-   * 2. NOT allowed if order is SHIPPED, DELIVERED, COMPLETED, or already CANCELLED
-   * 3. If shipment is created in Shiprocket, cancel it first
-   * 4. Refund only if payment was successful
-   * 5. Check time window (e.g., within 24 hours of order placement)
+   * Get shipping info for order (useful for Shiprocket integration)
+   */
+  async getOrderShippingInfo(orderId: string) {
+    const shippingInfo = await this.orderShippingInfoRepository.findByOrderId(
+      BigInt(orderId)
+    );
+
+    if (!shippingInfo) {
+      throw new Error("Shipping info not found for this order");
+    }
+
+    return shippingInfo;
+  }
+
+  /**
+   * Cancel order
    */
   async cancelOrder(userId: string, orderId: string, reason?: string) {
     const order = await this.orderRepository.findById(BigInt(orderId));
@@ -191,9 +448,8 @@ export class OrderService {
       throw new Error("Unauthorized: You can only cancel your own orders");
     }
 
-    // ===== CANCELLATION CONDITIONS =====
+    // ===== CANCELLATION VALIDATION =====
 
-    // Condition 1: Check order status
     if (order.status === OrderStatus.CANCELLED) {
       throw new Error("Order is already cancelled");
     }
@@ -214,7 +470,7 @@ export class OrderService {
       );
     }
 
-    // Condition 2: Check time window (24 hours from order creation)
+    // Check time window (24 hours from order creation)
     const ORDER_CANCELLATION_WINDOW_HOURS = 24;
     const orderAge = Date.now() - order.createdAt.getTime();
     const maxCancellationTime =
@@ -229,31 +485,14 @@ export class OrderService {
       );
     }
 
-    // Condition 3: Check if shipment exists in Shiprocket
-    let shiprocketCancelled = false;
-    if (order.shipment && order.shipment.shiprocketOrderId) {
-      try {
-        // Cancel in Shiprocket first
-        await this.shiprocketService.cancelShipment([
-          parseInt(order.shipment.shiprocketOrderId),
-        ]);
-        shiprocketCancelled = true;
-        console.log(
-          `✅ Shiprocket order cancelled: ${order.shipment.shiprocketOrderId}`
-        );
-      } catch (error) {
-        console.error("Failed to cancel Shiprocket shipment:", error);
-        // Continue with order cancellation even if Shiprocket fails
-        // Admin can manually handle in Shiprocket dashboard
-      }
-    }
+    // ===== PERFORM CANCELLATION =====
 
     // Update order status to CANCELLED
     await this.orderRepository.update(order.id, {
       status: OrderStatus.CANCELLED,
     });
 
-    // Condition 4: Process refund if payment was successful
+    // Process refund if payment was successful
     let refundProcessed = false;
     if (order.payment && order.payment.status === PaymentStatus.SUCCESS) {
       try {
@@ -262,10 +501,6 @@ export class OrderService {
         console.log(`✅ Refund processed for order: ${order.orderNumber}`);
       } catch (error) {
         console.error("Refund processing failed:", error);
-        // Update payment status to indicate refund pending
-        await this.paymentRepository.update(order.payment.id, {
-          status: PaymentStatus.PENDING, // Will be retried
-        });
       }
     }
 
@@ -285,12 +520,10 @@ export class OrderService {
       console.error("Failed to send cancellation email:", error);
     }
 
-    // Get updated order
     const updatedOrder = await this.orderRepository.findById(order.id);
 
     return {
       order: updatedOrder,
-      shiprocketCancelled,
       refundProcessed,
       message: "Order cancelled successfully",
     };
@@ -298,7 +531,6 @@ export class OrderService {
 
   /**
    * Check if order can be cancelled
-   * This helps frontend show/hide cancel button
    */
   async canCancelOrder(
     userId: string,
@@ -317,7 +549,6 @@ export class OrderService {
       return { canCancel: false, reason: "Unauthorized" };
     }
 
-    // Check status
     if (order.status === OrderStatus.CANCELLED) {
       return { canCancel: false, reason: "Order is already cancelled" };
     }
@@ -344,7 +575,6 @@ export class OrderService {
       };
     }
 
-    // Check time window
     const ORDER_CANCELLATION_WINDOW_HOURS = 24;
     const orderAge = Date.now() - order.createdAt.getTime();
     const maxCancellationTime =
@@ -364,7 +594,7 @@ export class OrderService {
   }
 
   /**
-   * Get user orders
+   * Get user orders with pagination and filtering
    */
   async getUserOrders(
     userId: string,
@@ -429,7 +659,6 @@ export class OrderService {
       throw new Error("Order not found");
     }
 
-    // Verify user owns the order
     if (order.userId !== BigInt(userId)) {
       throw new Error("Unauthorized");
     }
@@ -447,7 +676,6 @@ export class OrderService {
       throw new Error("Order not found");
     }
 
-    // Verify user owns the order
     if (order.userId !== BigInt(userId)) {
       throw new Error("Unauthorized");
     }
@@ -467,11 +695,29 @@ export class OrderService {
 
     await this.orderRepository.update(order.id, { status });
 
+    try {
+      if (status === OrderStatus.SHIPPED) {
+        await this.emailService.sendShippingNotification({
+          email: order.user.email,
+          firstName: order.user.firstName,
+          orderNumber: order.orderNumber,
+        });
+      } else if (status === OrderStatus.DELIVERED) {
+        await this.emailService.sendDeliveryConfirmation({
+          email: order.user.email,
+          firstName: order.user.firstName,
+          orderNumber: order.orderNumber,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to send status update email:", error);
+    }
+
     return this.orderRepository.findById(order.id);
   }
 
   /**
-   * Admin: Get all orders
+   * Admin: Get all orders with pagination and filtering
    */
   async getAllOrders(params: {
     page: number;
@@ -527,16 +773,14 @@ export class OrderService {
    * Calculate shipping cost
    */
   private calculateShippingCost(subtotal: number): number {
-    // Free shipping above 1000
     if (subtotal >= 1000) {
       return 0;
     }
-    // Flat 50 for orders below 1000
     return 50;
   }
 
   /**
-   * Refund payment
+   * Refund payment via Razorpay
    */
   private async refundPayment(paymentId: bigint) {
     const payment = await this.paymentRepository.findById(paymentId);
