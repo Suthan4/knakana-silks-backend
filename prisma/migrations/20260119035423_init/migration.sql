@@ -23,6 +23,12 @@ CREATE TYPE "NotificationType" AS ENUM ('ORDER_CONFIRMATION', 'PAYMENT_SUCCESS',
 CREATE TYPE "DiscountType" AS ENUM ('PERCENTAGE', 'FIXED');
 
 -- CreateEnum
+CREATE TYPE "CouponScope" AS ENUM ('ALL', 'CATEGORY', 'PRODUCT');
+
+-- CreateEnum
+CREATE TYPE "CouponUserEligibility" AS ENUM ('ALL', 'SPECIFIC_USERS', 'FIRST_TIME', 'NEW_USERS');
+
+-- CreateEnum
 CREATE TYPE "CTAStyle" AS ENUM ('PRIMARY', 'SECONDARY', 'OUTLINE', 'TEXT');
 
 -- CreateEnum
@@ -39,6 +45,9 @@ CREATE TYPE "ReturnStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'PICKUP_S
 
 -- CreateEnum
 CREATE TYPE "RefundMethod" AS ENUM ('ORIGINAL_PAYMENT', 'STORE_CREDIT', 'BANK_TRANSFER');
+
+-- CreateEnum
+CREATE TYPE "AddressType" AS ENUM ('SHIPPING', 'BILLING', 'BOTH');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -123,6 +132,11 @@ CREATE TABLE "products" (
     "schemaMarkup" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "weight" DECIMAL(8,3),
+    "length" DECIMAL(8,2),
+    "breadth" DECIMAL(8,2),
+    "height" DECIMAL(8,2),
+    "volumetricWeight" DECIMAL(8,3),
 
     CONSTRAINT "products_pkey" PRIMARY KEY ("id")
 );
@@ -142,15 +156,47 @@ CREATE TABLE "specifications" (
 CREATE TABLE "product_variants" (
     "id" BIGSERIAL NOT NULL,
     "productId" BIGINT NOT NULL,
+    "attributes" JSONB,
     "size" TEXT,
     "color" TEXT,
     "fabric" TEXT,
+    "basePrice" DECIMAL(10,2),
+    "sellingPrice" DECIMAL(10,2),
     "price" DECIMAL(10,2) NOT NULL,
+    "weight" DECIMAL(8,3),
+    "length" DECIMAL(8,2),
+    "breadth" DECIMAL(8,2),
+    "height" DECIMAL(8,2),
+    "volumetricWeight" DECIMAL(8,3),
     "sku" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "product_variants_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "product_variant_media" (
+    "id" BIGSERIAL NOT NULL,
+    "variantId" BIGINT NOT NULL,
+    "type" "MediaType" NOT NULL DEFAULT 'IMAGE',
+    "url" TEXT NOT NULL,
+    "key" TEXT,
+    "thumbnailUrl" TEXT,
+    "altText" TEXT,
+    "title" TEXT,
+    "description" TEXT,
+    "mimeType" TEXT,
+    "fileSize" BIGINT,
+    "duration" INTEGER,
+    "width" INTEGER,
+    "height" INTEGER,
+    "order" INTEGER NOT NULL DEFAULT 0,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "product_variant_media_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -183,9 +229,15 @@ CREATE TABLE "warehouses" (
     "name" TEXT NOT NULL,
     "code" TEXT NOT NULL,
     "address" TEXT NOT NULL,
+    "addressLine2" TEXT,
     "city" TEXT NOT NULL,
     "state" TEXT NOT NULL,
     "pincode" TEXT NOT NULL,
+    "country" TEXT NOT NULL DEFAULT 'India',
+    "contactPerson" TEXT,
+    "phone" TEXT,
+    "email" TEXT,
+    "isDefaultPickup" BOOLEAN NOT NULL DEFAULT false,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -275,7 +327,7 @@ CREATE TABLE "addresses" (
     "pincode" TEXT NOT NULL,
     "country" TEXT NOT NULL DEFAULT 'India',
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "type" TEXT NOT NULL DEFAULT 'SHIPPING',
+    "type" "AddressType" NOT NULL DEFAULT 'SHIPPING',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -294,11 +346,41 @@ CREATE TABLE "orders" (
     "total" DECIMAL(10,2) NOT NULL,
     "shippingAddressId" BIGINT NOT NULL,
     "billingAddressId" BIGINT NOT NULL,
+    "shippingAddressSnapshot" JSONB,
+    "billingAddressSnapshot" JSONB,
     "couponId" BIGINT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "orders_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "order_shipping_info" (
+    "id" BIGSERIAL NOT NULL,
+    "orderId" BIGINT NOT NULL,
+    "warehouseId" BIGINT NOT NULL,
+    "warehouseName" TEXT NOT NULL,
+    "warehouseCode" TEXT NOT NULL,
+    "pickupAddress" TEXT NOT NULL,
+    "pickupAddressLine2" TEXT,
+    "pickupCity" TEXT NOT NULL,
+    "pickupState" TEXT NOT NULL,
+    "pickupPincode" TEXT NOT NULL,
+    "pickupCountry" TEXT NOT NULL DEFAULT 'India',
+    "pickupPhone" TEXT,
+    "pickupEmail" TEXT,
+    "pickupContactPerson" TEXT,
+    "totalWeight" DECIMAL(8,3) NOT NULL,
+    "volumetricWeight" DECIMAL(8,3) NOT NULL,
+    "chargeableWeight" DECIMAL(8,3) NOT NULL,
+    "length" INTEGER NOT NULL,
+    "breadth" INTEGER NOT NULL,
+    "height" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "order_shipping_info_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -362,6 +444,10 @@ CREATE TABLE "coupons" (
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "scope" "CouponScope" NOT NULL DEFAULT 'ALL',
+    "userEligibility" "CouponUserEligibility" NOT NULL DEFAULT 'ALL',
+    "newUserDays" INTEGER,
+    "maxDiscountAmount" DECIMAL(10,2),
 
     CONSTRAINT "coupons_pkey" PRIMARY KEY ("id")
 );
@@ -660,6 +746,30 @@ CREATE TABLE "_SectionCategories" (
 );
 
 -- CreateTable
+CREATE TABLE "_CouponCategories" (
+    "A" BIGINT NOT NULL,
+    "B" BIGINT NOT NULL,
+
+    CONSTRAINT "_CouponCategories_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
+CREATE TABLE "_CouponProducts" (
+    "A" BIGINT NOT NULL,
+    "B" BIGINT NOT NULL,
+
+    CONSTRAINT "_CouponProducts_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
+CREATE TABLE "_CouponEligibleUsers" (
+    "A" BIGINT NOT NULL,
+    "B" BIGINT NOT NULL,
+
+    CONSTRAINT "_CouponEligibleUsers_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
 CREATE TABLE "_SectionProducts" (
     "A" BIGINT NOT NULL,
     "B" BIGINT NOT NULL,
@@ -731,6 +841,15 @@ CREATE INDEX "product_variants_productId_idx" ON "product_variants"("productId")
 CREATE INDEX "product_variants_sku_idx" ON "product_variants"("sku");
 
 -- CreateIndex
+CREATE INDEX "product_variant_media_variantId_idx" ON "product_variant_media"("variantId");
+
+-- CreateIndex
+CREATE INDEX "product_variant_media_type_idx" ON "product_variant_media"("type");
+
+-- CreateIndex
+CREATE INDEX "product_variant_media_isActive_idx" ON "product_variant_media"("isActive");
+
+-- CreateIndex
 CREATE INDEX "product_media_productId_idx" ON "product_media"("productId");
 
 -- CreateIndex
@@ -789,6 +908,15 @@ CREATE INDEX "orders_orderNumber_idx" ON "orders"("orderNumber");
 
 -- CreateIndex
 CREATE INDEX "orders_status_idx" ON "orders"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "order_shipping_info_orderId_key" ON "order_shipping_info"("orderId");
+
+-- CreateIndex
+CREATE INDEX "order_shipping_info_orderId_idx" ON "order_shipping_info"("orderId");
+
+-- CreateIndex
+CREATE INDEX "order_shipping_info_warehouseId_idx" ON "order_shipping_info"("warehouseId");
 
 -- CreateIndex
 CREATE INDEX "order_items_orderId_idx" ON "order_items"("orderId");
@@ -935,6 +1063,15 @@ CREATE UNIQUE INDEX "seo_meta_pageType_pageId_key" ON "seo_meta"("pageType", "pa
 CREATE INDEX "_SectionCategories_B_index" ON "_SectionCategories"("B");
 
 -- CreateIndex
+CREATE INDEX "_CouponCategories_B_index" ON "_CouponCategories"("B");
+
+-- CreateIndex
+CREATE INDEX "_CouponProducts_B_index" ON "_CouponProducts"("B");
+
+-- CreateIndex
+CREATE INDEX "_CouponEligibleUsers_B_index" ON "_CouponEligibleUsers"("B");
+
+-- CreateIndex
 CREATE INDEX "_SectionProducts_B_index" ON "_SectionProducts"("B");
 
 -- AddForeignKey
@@ -954,6 +1091,9 @@ ALTER TABLE "specifications" ADD CONSTRAINT "specifications_productId_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "product_variants" ADD CONSTRAINT "product_variants_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "product_variant_media" ADD CONSTRAINT "product_variant_media_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "product_variants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "product_media" ADD CONSTRAINT "product_media_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1005,6 +1145,9 @@ ALTER TABLE "orders" ADD CONSTRAINT "orders_billingAddressId_fkey" FOREIGN KEY (
 
 -- AddForeignKey
 ALTER TABLE "orders" ADD CONSTRAINT "orders_couponId_fkey" FOREIGN KEY ("couponId") REFERENCES "coupons"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "order_shipping_info" ADD CONSTRAINT "order_shipping_info_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "orders"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "orders"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1095,6 +1238,24 @@ ALTER TABLE "_SectionCategories" ADD CONSTRAINT "_SectionCategories_A_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "_SectionCategories" ADD CONSTRAINT "_SectionCategories_B_fkey" FOREIGN KEY ("B") REFERENCES "home_sections"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponCategories" ADD CONSTRAINT "_CouponCategories_A_fkey" FOREIGN KEY ("A") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponCategories" ADD CONSTRAINT "_CouponCategories_B_fkey" FOREIGN KEY ("B") REFERENCES "coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponProducts" ADD CONSTRAINT "_CouponProducts_A_fkey" FOREIGN KEY ("A") REFERENCES "coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponProducts" ADD CONSTRAINT "_CouponProducts_B_fkey" FOREIGN KEY ("B") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponEligibleUsers" ADD CONSTRAINT "_CouponEligibleUsers_A_fkey" FOREIGN KEY ("A") REFERENCES "coupons"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_CouponEligibleUsers" ADD CONSTRAINT "_CouponEligibleUsers_B_fkey" FOREIGN KEY ("B") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "_SectionProducts" ADD CONSTRAINT "_SectionProducts_A_fkey" FOREIGN KEY ("A") REFERENCES "home_sections"("id") ON DELETE CASCADE ON UPDATE CASCADE;

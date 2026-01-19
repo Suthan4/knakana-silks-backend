@@ -149,198 +149,226 @@ export class OrderService {
    * Create order from cart with weight calculation and shipping info
    */
   async createOrder(
-    userId: string,
-    data: {
-      shippingAddressId: string;
-      billingAddressId: string;
-      couponCode?: string;
-      paymentMethod: PaymentMethod;
-    }
-  ) {
-    const userIdBigInt = BigInt(userId);
+  userId: string,
+  data: {
+    shippingAddressId: string;
+    billingAddressId: string;
+    couponCode?: string;
+    paymentMethod: PaymentMethod;
 
-    // 1. Get cart with items (includes product and variant details)
-    const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+    // ✅ BUY NOW ITEMS SUPPORT
+    items?: Array<{
+      productId: string;
+      variantId?: string;
+      quantity: number;
+    }>;
+  }
+) {
+  const userIdBigInt = BigInt(userId);
+  const isBuyNow = !!data.items?.length;
+
+  // 1. Get items source (Cart OR BuyNow)
+  let cart: any = null;
+  let orderItems: any[] = [];
+
+  if (isBuyNow) {
+    // ✅ BUY NOW FLOW
+    orderItems = await this.orderRepository.getOrderItemsFromBuyNow(data.items!);
+
+    if (!orderItems || orderItems.length === 0) {
+      throw new Error("Buy now item not found");
+    }
+  } else {
+    // ✅ CART FLOW
+    cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+
     if (!cart || cart.items.length === 0) {
       throw new Error("Cart is empty");
     }
 
-    // 2. Validate addresses exist and belong to user
-    const [shippingAddress, billingAddress] = await Promise.all([
-      this.addressRepository.findById(BigInt(data.shippingAddressId)),
-      this.addressRepository.findById(BigInt(data.billingAddressId)),
-    ]);
-
-    if (!shippingAddress || shippingAddress.userId !== userIdBigInt) {
-      throw new Error("Invalid shipping address");
-    }
-
-    if (!billingAddress || billingAddress.userId !== userIdBigInt) {
-      throw new Error("Invalid billing address");
-    }
-
-    // 3. Get pickup warehouse (for shipment creation)
-    const pickupWarehouse = await this.getPickupWarehouse();
-    console.log(`📦 Pickup warehouse selected: ${pickupWarehouse.name}`);
-
-    // 4. Calculate shipping dimensions and weights
-    const shippingDimensions = this.calculateShippingDimensions(cart.items);
-
-    console.log("📏 Shipping Dimensions:", {
-      totalWeight: `${shippingDimensions.totalWeight}kg`,
-      volumetricWeight: `${shippingDimensions.volumetricWeight}kg`,
-      chargeableWeight: `${shippingDimensions.chargeableWeight}kg`,
-      dimensions: `${shippingDimensions.length} × ${shippingDimensions.breadth} × ${shippingDimensions.height} cm`,
-    });
-
-    // 5. Calculate order totals
-    let subtotal = 0;
-    for (const item of cart.items) {
-      const price = item.variant
-        ? Number(item.variant.price)
-        : Number(item.product.sellingPrice);
-      subtotal += price * item.quantity;
-    }
-
-    const shippingCost = this.calculateShippingCost(subtotal);
-    let discount = 0;
-    let couponId: bigint | undefined;
-
-    // 6. Apply coupon if provided (TODO: Implement coupon validation)
-    if (data.couponCode) {
-      // Future: Validate and apply coupon logic
-    }
-
-    const total = subtotal + shippingCost - discount;
-
-    // 7. Generate unique order number
-    const orderNumber = NumberUtil.generateOrderNumber();
-
-    // 8. Create address snapshots for historical record
-    const shippingAddressSnapshot = {
-      fullName: shippingAddress.fullName,
-      phone: shippingAddress.phone,
-      addressLine1: shippingAddress.addressLine1,
-      addressLine2: shippingAddress.addressLine2,
-      city: shippingAddress.city,
-      state: shippingAddress.state,
-      pincode: shippingAddress.pincode,
-      country: shippingAddress.country,
-    };
-
-    const billingAddressSnapshot = {
-      fullName: billingAddress.fullName,
-      phone: billingAddress.phone,
-      addressLine1: billingAddress.addressLine1,
-      addressLine2: billingAddress.addressLine2,
-      city: billingAddress.city,
-      state: billingAddress.state,
-      pincode: billingAddress.pincode,
-      country: billingAddress.country,
-    };
-
-    // 9. Create order
-    const order = await this.orderRepository.create({
-      userId: userIdBigInt,
-      orderNumber,
-      status: OrderStatus.PENDING,
-      subtotal,
-      discount,
-      shippingCost,
-      total,
-      shippingAddressId: BigInt(data.shippingAddressId),
-      billingAddressId: BigInt(data.billingAddressId),
-      shippingAddressSnapshot,
-      billingAddressSnapshot,
-      couponId,
-    });
-
-    // 10. Create OrderShippingInfo record
-    await this.orderShippingInfoRepository.create({
-      orderId: order.id,
-      warehouseId: pickupWarehouse.id,
-      warehouseName: pickupWarehouse.name,
-      warehouseCode: pickupWarehouse.code,
-      pickupAddress: pickupWarehouse.address,
-      pickupAddressLine2: pickupWarehouse.addressLine2,
-      pickupCity: pickupWarehouse.city,
-      pickupState: pickupWarehouse.state,
-      pickupPincode: pickupWarehouse.pincode,
-      pickupCountry: pickupWarehouse.country || "India",
-      pickupPhone: pickupWarehouse.phone,
-      pickupEmail: pickupWarehouse.email,
-      pickupContactPerson: pickupWarehouse.contactPerson,
-      totalWeight: shippingDimensions.totalWeight,
-      volumetricWeight: shippingDimensions.volumetricWeight,
-      chargeableWeight: shippingDimensions.chargeableWeight,
-      length: shippingDimensions.length,
-      breadth: shippingDimensions.breadth,
-      height: shippingDimensions.height,
-    });
-
-    console.log(`✅ Shipping info created for order: ${orderNumber}`);
-
-    // 11. Add order items
-    for (const item of cart.items) {
-      const price = item.variant
-        ? Number(item.variant.price)
-        : Number(item.product.sellingPrice);
-
-      await this.orderRepository.addItem({
-        orderId: order.id,
-        productId: item.productId,
-        variantId: item.variantId ?? undefined,
-        quantity: item.quantity,
-        price,
-      });
-    }
-
-    // 12. Create Razorpay order
-    const razorpayOrder = await this.razorpayService.createOrder({
-      amount: Math.round(total * 100), // Convert to paise
-      currency: "INR",
-      receipt: orderNumber,
-      notes: {
-        orderId: order.id.toString(),
-        userId: userId,
-        warehouse: pickupWarehouse.name,
-        chargeableWeight: shippingDimensions.chargeableWeight.toString(),
-      },
-    });
-
-    // 13. Create payment record
-    await this.paymentRepository.create({
-      orderId: order.id,
-      razorpayOrderId: razorpayOrder.id,
-      method: data.paymentMethod,
-      status: PaymentStatus.PENDING,
-      amount: total,
-    });
-
-    // 14. Clear cart after successful order creation
-    await this.cartRepository.clearCart(cart.id);
-
-    // 15. Get complete order details with shipping info
-    const completeOrder = await this.orderRepository.findById(order.id);
-
-    console.log(`✅ Order created: ${orderNumber}`);
-    console.log(`📦 Chargeable weight: ${shippingDimensions.chargeableWeight}kg`);
-    console.log(`🏢 Pickup from: ${pickupWarehouse.name}, ${pickupWarehouse.city}`);
-
-    return {
-      order: completeOrder,
-      razorpayOrderId: razorpayOrder.id,
-      razorpayKeyId: process.env.RAZORPAY_KEY_ID,
-      shippingInfo: {
-        warehouse: {
-          name: pickupWarehouse.name,
-          city: pickupWarehouse.city,
-          pincode: pickupWarehouse.pincode,
-        },
-        dimensions: shippingDimensions,
-      },
-    };
+    orderItems = cart.items;
   }
+
+  // 2. Validate addresses exist and belong to user
+  const [shippingAddress, billingAddress] = await Promise.all([
+    this.addressRepository.findById(BigInt(data.shippingAddressId)),
+    this.addressRepository.findById(BigInt(data.billingAddressId)),
+  ]);
+
+  if (!shippingAddress || shippingAddress.userId !== userIdBigInt) {
+    throw new Error("Invalid shipping address");
+  }
+
+  if (!billingAddress || billingAddress.userId !== userIdBigInt) {
+    throw new Error("Invalid billing address");
+  }
+
+  // 3. Get pickup warehouse (for shipment creation)
+  const pickupWarehouse = await this.getPickupWarehouse();
+  console.log(`📦 Pickup warehouse selected: ${pickupWarehouse.name}`);
+
+  // 4. Calculate shipping dimensions and weights ✅ (use orderItems)
+  const shippingDimensions = this.calculateShippingDimensions(orderItems);
+
+  console.log("📏 Shipping Dimensions:", {
+    totalWeight: `${shippingDimensions.totalWeight}kg`,
+    volumetricWeight: `${shippingDimensions.volumetricWeight}kg`,
+    chargeableWeight: `${shippingDimensions.chargeableWeight}kg`,
+    dimensions: `${shippingDimensions.length} × ${shippingDimensions.breadth} × ${shippingDimensions.height} cm`,
+  });
+
+  // 5. Calculate order totals ✅ (use orderItems)
+  let subtotal = 0;
+  for (const item of orderItems) {
+    const price = item.variant
+      ? Number(item.variant.price)
+      : Number(item.product.sellingPrice);
+
+    subtotal += price * item.quantity;
+  }
+
+  const shippingCost = this.calculateShippingCost(subtotal);
+  let discount = 0;
+  let couponId: bigint | undefined;
+
+  // 6. Apply coupon if provided (TODO: Implement coupon validation)
+  if (data.couponCode) {
+    // Future: Validate and apply coupon logic
+  }
+
+  const total = subtotal + shippingCost - discount;
+
+  // 7. Generate unique order number
+  const orderNumber = NumberUtil.generateOrderNumber();
+
+  // 8. Create address snapshots for historical record
+  const shippingAddressSnapshot = {
+    fullName: shippingAddress.fullName,
+    phone: shippingAddress.phone,
+    addressLine1: shippingAddress.addressLine1,
+    addressLine2: shippingAddress.addressLine2,
+    city: shippingAddress.city,
+    state: shippingAddress.state,
+    pincode: shippingAddress.pincode,
+    country: shippingAddress.country,
+  };
+
+  const billingAddressSnapshot = {
+    fullName: billingAddress.fullName,
+    phone: billingAddress.phone,
+    addressLine1: billingAddress.addressLine1,
+    addressLine2: billingAddress.addressLine2,
+    city: billingAddress.city,
+    state: billingAddress.state,
+    pincode: billingAddress.pincode,
+    country: billingAddress.country,
+  };
+
+  // 9. Create order
+  const order = await this.orderRepository.create({
+    userId: userIdBigInt,
+    orderNumber,
+    status: OrderStatus.PENDING,
+    subtotal,
+    discount,
+    shippingCost,
+    total,
+    shippingAddressId: BigInt(data.shippingAddressId),
+    billingAddressId: BigInt(data.billingAddressId),
+    shippingAddressSnapshot,
+    billingAddressSnapshot,
+    couponId,
+  });
+
+  // 10. Create OrderShippingInfo record
+  await this.orderShippingInfoRepository.create({
+    orderId: order.id,
+    warehouseId: pickupWarehouse.id,
+    warehouseName: pickupWarehouse.name,
+    warehouseCode: pickupWarehouse.code,
+    pickupAddress: pickupWarehouse.address,
+    pickupAddressLine2: pickupWarehouse.addressLine2,
+    pickupCity: pickupWarehouse.city,
+    pickupState: pickupWarehouse.state,
+    pickupPincode: pickupWarehouse.pincode,
+    pickupCountry: pickupWarehouse.country || "India",
+    pickupPhone: pickupWarehouse.phone,
+    pickupEmail: pickupWarehouse.email,
+    pickupContactPerson: pickupWarehouse.contactPerson,
+    totalWeight: shippingDimensions.totalWeight,
+    volumetricWeight: shippingDimensions.volumetricWeight,
+    chargeableWeight: shippingDimensions.chargeableWeight,
+    length: shippingDimensions.length,
+    breadth: shippingDimensions.breadth,
+    height: shippingDimensions.height,
+  });
+
+  console.log(`✅ Shipping info created for order: ${orderNumber}`);
+
+  // 11. Add order items ✅ (use orderItems)
+  for (const item of orderItems) {
+    const price = item.variant
+      ? Number(item.variant.price)
+      : Number(item.product.sellingPrice);
+
+    await this.orderRepository.addItem({
+      orderId: order.id,
+      productId: item.productId,
+      variantId: item.variantId ?? undefined,
+      quantity: item.quantity,
+      price,
+    });
+  }
+
+  // 12. Create Razorpay order
+  const razorpayOrder = await this.razorpayService.createOrder({
+    amount: Math.round(total * 100), // Convert to paise
+    currency: "INR",
+    receipt: orderNumber,
+    notes: {
+      orderId: order.id.toString(),
+      userId: userId,
+      warehouse: pickupWarehouse.name,
+      chargeableWeight: shippingDimensions.chargeableWeight.toString(),
+    },
+  });
+
+  // 13. Create payment record
+  await this.paymentRepository.create({
+    orderId: order.id,
+    razorpayOrderId: razorpayOrder.id,
+    method: data.paymentMethod,
+    status: PaymentStatus.PENDING,
+    amount: total,
+  });
+
+  // 14. Clear cart ONLY for cart checkout ✅
+  if (!isBuyNow && cart) {
+    await this.cartRepository.clearCart(cart.id);
+  }
+
+  // 15. Get complete order details with shipping info
+  const completeOrder = await this.orderRepository.findById(order.id);
+
+  console.log(`✅ Order created: ${orderNumber}`);
+  console.log(`📦 Chargeable weight: ${shippingDimensions.chargeableWeight}kg`);
+  console.log(`🏢 Pickup from: ${pickupWarehouse.name}, ${pickupWarehouse.city}`);
+
+  return {
+    order: completeOrder,
+    razorpayOrderId: razorpayOrder.id,
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+    shippingInfo: {
+      warehouse: {
+        name: pickupWarehouse.name,
+        city: pickupWarehouse.city,
+        pincode: pickupWarehouse.pincode,
+      },
+      dimensions: shippingDimensions,
+    },
+  };
+}
+
 
   /**
    * Verify payment and update order

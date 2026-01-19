@@ -241,6 +241,54 @@ export class OrderRepository implements IOrderRepository {
     });
   }
 
+   /**
+   * Buy now order
+   */
+  async getOrderItemsFromBuyNow(
+  items: { productId: string; variantId?: string; quantity: number }[]
+) {
+  const result: any[] = [];
+
+  for (const i of items) {
+    const productId = BigInt(i.productId);
+    const variantId = i.variantId ? BigInt(i.variantId) : undefined;
+
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        media: true,
+      },
+    });
+
+    if (!product) {
+      throw new Error(`Product not found: ${i.productId}`);
+    }
+
+    let variant = null;
+
+    if (variantId) {
+      variant = await this.prisma.productVariant.findUnique({
+        where: { id: variantId },
+      });
+
+      if (!variant) {
+        throw new Error(`Variant not found: ${i.variantId}`);
+      }
+    }
+
+    result.push({
+      productId,
+      variantId,
+      quantity: i.quantity,
+      product,
+      variant,
+    });
+  }
+
+  return result;
+}
+
+
   /**
    * Update order
    */

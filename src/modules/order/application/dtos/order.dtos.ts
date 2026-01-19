@@ -7,6 +7,15 @@ export const CreateOrderDTOSchema = z.object({
   billingAddressId: z.string().min(1, "Billing address is required"),
   couponCode: z.string().optional(),
   paymentMethod: z.nativeEnum(PaymentMethod),
+  items: z
+  .array(
+    z.object({
+      productId: z.string(),
+      variantId: z.string().optional(),
+      quantity: z.number().min(1),
+    })
+  )
+  .optional(),
 });
 
 export type CreateOrderDTO = z.infer<typeof CreateOrderDTOSchema>;
