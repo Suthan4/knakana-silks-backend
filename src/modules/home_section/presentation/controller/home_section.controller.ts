@@ -12,7 +12,9 @@ export class HomeSectionController {
 
   async createHomeSection(req: Request, res: Response) {
     try {
-      const data = CreateHomeSectionDTOSchema.parse(req.body);
+      // FIXED: Handle both wrapped and unwrapped data
+      const requestData = req.body.data || req.body;
+      const data = CreateHomeSectionDTOSchema.parse(requestData);
       const section = await this.homeSectionService.createHomeSection(data);
 
       res.status(201).json({
@@ -34,7 +36,10 @@ export class HomeSectionController {
           .json({ success: false, message: "Section ID is required" });
         return;
       }
-      const data = UpdateHomeSectionDTOSchema.parse(req.body);
+      
+      // FIXED: Handle both wrapped and unwrapped data
+      const requestData = req.body.data || req.body;
+      const data = UpdateHomeSectionDTOSchema.parse(requestData);
       const section = await this.homeSectionService.updateHomeSection(id, data);
 
       res.json({

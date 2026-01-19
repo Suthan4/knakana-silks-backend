@@ -569,15 +569,24 @@ model Order {
   userId            BigInt
   orderNumber       String       @unique
   status            OrderStatus  @default(PENDING)
+
+  // Financial fields
   subtotal          Decimal      @db.Decimal(10, 2)
   discount          Decimal      @db.Decimal(10, 2) @default(0)
   shippingCost      Decimal      @db.Decimal(10, 2)
+  gstAmount         Decimal      @db.Decimal(10, 2) @default(0)  // ✅ NEW
   total             Decimal      @db.Decimal(10, 2)
+
+  // Addresses
   shippingAddressId BigInt
   billingAddressId  BigInt
   shippingAddressSnapshot   Json?        // 👈 ADD THIS
-  billingAddressSnapshot    Json?        
+  billingAddressSnapshot    Json? 
+
+  // Coupon       
   couponId          BigInt?
+
+  // Timestamps
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   
@@ -597,6 +606,9 @@ model Order {
   @@index([userId])
   @@index([orderNumber])
   @@index([status])
+  @@index([couponId])  // ✅ NEW
+  @@index([createdAt]) 
+  
   @@map("orders")
 }
 

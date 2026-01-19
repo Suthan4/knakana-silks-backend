@@ -27,6 +27,8 @@ export class ShiprocketService {
 
   private async getToken(): Promise<string> {
     if (this.auth && this.auth.expiresAt > Date.now()) {
+      console.log("SHIPROCKET_EMAIL:", process.env.SHIPROCKET_EMAIL);
+      console.log("SHIPROCKET_PASSWORD:", process.env.SHIPROCKET_PASSWORD ? "✅SET" : "❌MISSING");
       return this.auth.token;
     }
 

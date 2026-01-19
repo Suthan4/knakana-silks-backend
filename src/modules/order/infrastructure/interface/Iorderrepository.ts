@@ -26,9 +26,10 @@ export type OrderWithRelations = Prisma.OrderGetPayload<{
     payment: true;
     shipment: true;
     coupon: true;
-    shippingInfo: true; // 🆕 Include shipping info
+    shippingInfo: true;
   };
 }>;
+
 export type BuyNowItemDTO = {
   productId: string;
   variantId?: string;
@@ -39,9 +40,10 @@ export type BuyNowOrderItem = {
   productId: bigint;
   variantId?: bigint;
   quantity: number;
-  product: any; // you can type it properly if you want
+  product: any;
   variant: any | null;
 };
+
 export interface IOrderRepository {
   // Find operations
   findById(id: bigint): Promise<OrderWithRelations | null>;
@@ -69,6 +71,7 @@ export interface IOrderRepository {
     subtotal: number;
     discount: number;
     shippingCost: number;
+    gstAmount: number; // ✅ Added GST field
     total: number;
     shippingAddressId: bigint;
     billingAddressId: bigint;
@@ -89,5 +92,6 @@ export interface IOrderRepository {
     quantity: number;
     price: number;
   }): Promise<OrderItem>;
-    getOrderItemsFromBuyNow(items: BuyNowItemDTO[]): Promise<BuyNowOrderItem[]>;
+
+  getOrderItemsFromBuyNow(items: BuyNowItemDTO[]): Promise<BuyNowOrderItem[]>;
 }

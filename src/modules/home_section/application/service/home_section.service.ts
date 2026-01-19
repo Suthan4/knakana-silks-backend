@@ -175,38 +175,22 @@ export class HomeSectionService {
       }
     }
 
-    // Update products if provided
+    // FIXED: Use 'set' operation directly instead of remove + add
     if (data.productIds !== undefined) {
-      const existingProductIds = section.products.map((p) => p.id);
-      if (existingProductIds.length > 0) {
-        await this.homeSectionRepository.removeProducts(
-          sectionId,
-          existingProductIds
-        );
-      }
-      if (data.productIds.length > 0) {
-        await this.homeSectionRepository.addProducts(
-          sectionId,
-          data.productIds.map((id) => BigInt(id))
-        );
-      }
+      // Use 'set' to replace all products in one operation
+      await this.homeSectionRepository.addProducts(
+        sectionId,
+        data.productIds.map((id) => BigInt(id))
+      );
     }
 
-    // Update categories if provided
+    // FIXED: Use 'set' operation directly instead of remove + add
     if (data.categoryIds !== undefined) {
-      const existingCategoryIds = section.categories.map((c) => c.id);
-      if (existingCategoryIds.length > 0) {
-        await this.homeSectionRepository.removeCategories(
-          sectionId,
-          existingCategoryIds
-        );
-      }
-      if (data.categoryIds.length > 0) {
-        await this.homeSectionRepository.addCategories(
-          sectionId,
-          data.categoryIds.map((id) => BigInt(id))
-        );
-      }
+      // Use 'set' to replace all categories in one operation
+      await this.homeSectionRepository.addCategories(
+        sectionId,
+        data.categoryIds.map((id) => BigInt(id))
+      );
     }
 
     return this.homeSectionRepository.findById(sectionId);

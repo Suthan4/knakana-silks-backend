@@ -14,9 +14,6 @@ import {
 export class OrderRepository implements IOrderRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
-  /**
-   * Find order by ID with all relations including shippingInfo
-   */
   async findById(id: bigint): Promise<OrderWithRelations | null> {
     return this.prisma.order.findUnique({
       where: { id },
@@ -49,14 +46,11 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
-        shippingInfo: true, // 🆕 Include shipping info
+        shippingInfo: true,
       },
     });
   }
 
-  /**
-   * Find order by order number with all relations
-   */
   async findByOrderNumber(
     orderNumber: string
   ): Promise<OrderWithRelations | null> {
@@ -91,14 +85,11 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
-        shippingInfo: true, // 🆕 Include shipping info
+        shippingInfo: true,
       },
     });
   }
 
-  /**
-   * Find orders by user ID with pagination
-   */
   async findByUserId(
     userId: bigint,
     params: { skip: number; take: number; where?: any; orderBy?: any }
@@ -137,23 +128,17 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
-        shippingInfo: true, // 🆕 Include shipping info
+        shippingInfo: true,
       },
     });
   }
 
-  /**
-   * Count orders by user ID
-   */
   async countByUserId(userId: bigint, where?: any): Promise<number> {
     return this.prisma.order.count({
       where: { userId, ...where },
     });
   }
 
-  /**
-   * Find all orders with pagination (Admin)
-   */
   async findAll(params: {
     skip: number;
     take: number;
@@ -194,20 +179,17 @@ export class OrderRepository implements IOrderRepository {
         payment: true,
         shipment: true,
         coupon: true,
-        shippingInfo: true, // 🆕 Include shipping info
+        shippingInfo: true,
       },
     });
   }
 
-  /**
-   * Count all orders
-   */
   async count(where?: any): Promise<number> {
     return this.prisma.order.count({ where });
   }
 
   /**
-   * Create new order
+   * ✅ UPDATED: Create order with GST amount
    */
   async create(data: {
     userId: bigint;
@@ -216,6 +198,7 @@ export class OrderRepository implements IOrderRepository {
     subtotal: number;
     discount: number;
     shippingCost: number;
+    gstAmount: number; // ✅ Added GST field
     total: number;
     shippingAddressId: bigint;
     billingAddressId: bigint;
@@ -231,6 +214,7 @@ export class OrderRepository implements IOrderRepository {
         subtotal: data.subtotal,
         discount: data.discount,
         shippingCost: data.shippingCost,
+        gstAmount: data.gstAmount, // ✅ Store GST amount
         total: data.total,
         shippingAddressId: data.shippingAddressId,
         billingAddressId: data.billingAddressId,
@@ -241,57 +225,53 @@ export class OrderRepository implements IOrderRepository {
     });
   }
 
-   /**
-   * Buy now order
+  /**
+   * Get order items from Buy Now data
    */
   async getOrderItemsFromBuyNow(
-  items: { productId: string; variantId?: string; quantity: number }[]
-) {
-  const result: any[] = [];
+    items: { productId: string; variantId?: string; quantity: number }[]
+  ) {
+    const result: any[] = [];
 
-  for (const i of items) {
-    const productId = BigInt(i.productId);
-    const variantId = i.variantId ? BigInt(i.variantId) : undefined;
+    for (const i of items) {
+      const productId = BigInt(i.productId);
+      const variantId = i.variantId ? BigInt(i.variantId) : undefined;
 
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      include: {
-        media: true,
-      },
-    });
-
-    if (!product) {
-      throw new Error(`Product not found: ${i.productId}`);
-    }
-
-    let variant = null;
-
-    if (variantId) {
-      variant = await this.prisma.productVariant.findUnique({
-        where: { id: variantId },
+      const product = await this.prisma.product.findUnique({
+        where: { id: productId },
+        include: {
+          media: true,
+        },
       });
 
-      if (!variant) {
-        throw new Error(`Variant not found: ${i.variantId}`);
+      if (!product) {
+        throw new Error(`Product not found: ${i.productId}`);
       }
+
+      let variant = null;
+
+      if (variantId) {
+        variant = await this.prisma.productVariant.findUnique({
+          where: { id: variantId },
+        });
+
+        if (!variant) {
+          throw new Error(`Variant not found: ${i.variantId}`);
+        }
+      }
+
+      result.push({
+        productId,
+        variantId,
+        quantity: i.quantity,
+        product,
+        variant,
+      });
     }
 
-    result.push({
-      productId,
-      variantId,
-      quantity: i.quantity,
-      product,
-      variant,
-    });
+    return result;
   }
 
-  return result;
-}
-
-
-  /**
-   * Update order
-   */
   async update(
     id: bigint,
     data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput
@@ -302,9 +282,6 @@ export class OrderRepository implements IOrderRepository {
     });
   }
 
-  /**
-   * Add item to order
-   */
   async addItem(data: {
     orderId: bigint;
     productId: bigint;

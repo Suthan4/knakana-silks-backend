@@ -14,7 +14,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
   async findById(id: bigint): Promise<HomeSectionWithRelations | null> {
-    return this.prisma.homeSection.findUnique({
+    const section = await this.prisma.homeSection.findUnique({
       where: { id },
       include: {
         products: {
@@ -44,6 +44,8 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
       },
     });
+
+    return section;
   }
 
   async findAll(params: {
@@ -52,7 +54,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     where?: any;
     orderBy?: any;
   }): Promise<HomeSectionWithRelations[]> {
-    return this.prisma.homeSection.findMany({
+    const sections = await this.prisma.homeSection.findMany({
       skip: params.skip,
       take: params.take,
       where: params.where,
@@ -85,6 +87,8 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
       },
     });
+
+    return sections;
   }
 
   async count(where?: any): Promise<number> {
@@ -124,7 +128,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
   }
 
   async findActive(): Promise<HomeSectionWithRelations[]> {
-    return this.prisma.homeSection.findMany({
+    const sections = await this.prisma.homeSection.findMany({
       where: { isActive: true },
       orderBy: { order: "asc" },
       include: {
@@ -155,15 +159,17 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
       },
     });
+
+    return sections;
   }
 
-  // Product Relations
+  // Product Relations - FIXED: Use 'set' instead of connect/disconnect
   async addProducts(sectionId: bigint, productIds: bigint[]): Promise<void> {
     await this.prisma.homeSection.update({
       where: { id: sectionId },
       data: {
         products: {
-          connect: productIds.map((id) => ({ id })),
+          set: productIds.map((id) => ({ id })),
         },
       },
     });
@@ -180,13 +186,13 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     });
   }
 
-  // Category Relations
+  // Category Relations - FIXED: Use 'set' instead of connect/disconnect
   async addCategories(sectionId: bigint, categoryIds: bigint[]): Promise<void> {
     await this.prisma.homeSection.update({
       where: { id: sectionId },
       data: {
         categories: {
-          connect: categoryIds.map((id) => ({ id })),
+          set: categoryIds.map((id) => ({ id })),
         },
       },
     });

@@ -4,6 +4,7 @@ import { ICartRepository } from "@/modules/cart/infrastructure/interface/Icartre
 import { IPaymentRepository } from "@/modules/payment/infrastructure/interface/Ipaymentrepository.js";
 import { IAddressRepository } from "@/modules/address/infrastructure/interface/Iaddressrepository.js";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
+import { ICouponRepository } from "@/modules/coupon/infrastructure/interface/Icouponrepository.js";
 import { RazorpayService } from "@/modules/payment/application/service/razorpay.service.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
 import { NumberUtil } from "@/shared/utils/index.js";
@@ -11,6 +12,7 @@ import {
   OrderStatus,
   PaymentStatus,
   PaymentMethod,
+  DiscountType,
 } from "@/generated/prisma/enums.js";
 import { IOrderShippingInfoRepository } from "../../infrastructure/interface/Iordershippinginforepository.js";
 
@@ -23,8 +25,30 @@ interface ShippingDimensions {
   height: number;
 }
 
+interface OrderBreakdown {
+  subtotal: number;
+  discount: number;
+  shippingCost: number;
+  gstAmount: number;
+  total: number;
+  couponDiscount: number;
+  taxableAmount: number;
+}
+
+interface CartItem {
+  productId: string;
+  categoryId?: string;
+  quantity: number;
+  price: number;
+}
+
 @injectable()
 export class OrderService {
+  // Constants
+  private readonly GST_RATE = 0.18; // 18%
+  private readonly FREE_SHIPPING_THRESHOLD = 1000;
+  private readonly DEFAULT_SHIPPING_COST = 50;
+
   constructor(
     @inject("IOrderRepository") private orderRepository: IOrderRepository,
     @inject("ICartRepository") private cartRepository: ICartRepository,
@@ -36,6 +60,8 @@ export class OrderService {
     private warehouseRepository: IWarehouseRepository,
     @inject("IOrderShippingInfoRepository")
     private orderShippingInfoRepository: IOrderShippingInfoRepository,
+    @inject("ICouponRepository")
+    private couponRepository: ICouponRepository,
     @inject(RazorpayService) private razorpayService: RazorpayService,
     @inject(EmailService) private emailService: EmailService
   ) {}
@@ -53,7 +79,6 @@ export class OrderService {
 
   /**
    * Calculate shipping dimensions for order
-   * Combines weights and dimensions from all order items
    */
   private calculateShippingDimensions(items: any[]): ShippingDimensions {
     let totalWeight = 0;
@@ -64,18 +89,16 @@ export class OrderService {
     for (const item of items) {
       const quantity = item.quantity;
 
-      // Get weight - priority: variant > product > default (0.5kg)
-      let weight = 0.5; // Default weight
+      let weight = 0.5;
       if (item.variant?.weight) {
         weight = Number(item.variant.weight);
       } else if (item.product?.weight) {
         weight = Number(item.product.weight);
       }
 
-      // Get dimensions - priority: variant > product > defaults
-      let length = 35; // Default length in cm
-      let breadth = 25; // Default breadth in cm
-      let height = 5; // Default height in cm
+      let length = 35;
+      let breadth = 25;
+      let height = 5;
 
       if (item.variant) {
         length = item.variant.length ? Number(item.variant.length) : length;
@@ -87,25 +110,22 @@ export class OrderService {
         height = item.product.height ? Number(item.product.height) : height;
       }
 
-      // Calculate totals
       totalWeight += weight * quantity;
       maxLength = Math.max(maxLength, length);
       maxBreadth = Math.max(maxBreadth, breadth);
-      totalHeight += height * quantity; // Stack items vertically
+      totalHeight += height * quantity;
     }
 
-    // Calculate volumetric weight
     const volumetricWeight = this.calculateVolumetricWeight(
       maxLength,
       maxBreadth,
       totalHeight
     );
 
-    // Chargeable weight is the higher of actual or volumetric
     const chargeableWeight = Math.max(totalWeight, volumetricWeight);
 
     return {
-      totalWeight: Math.round(totalWeight * 1000) / 1000, // Round to 3 decimals
+      totalWeight: Math.round(totalWeight * 1000) / 1000,
       volumetricWeight: Math.round(volumetricWeight * 1000) / 1000,
       chargeableWeight: Math.round(chargeableWeight * 1000) / 1000,
       length: Math.ceil(maxLength),
@@ -115,10 +135,9 @@ export class OrderService {
   }
 
   /**
-   * Get default pickup warehouse for shipments
+   * Get default pickup warehouse
    */
   private async getPickupWarehouse() {
-    // Try to get warehouse marked as default pickup
     const defaultWarehouses = await this.warehouseRepository.findAll({
       skip: 0,
       take: 1,
@@ -129,7 +148,6 @@ export class OrderService {
       return defaultWarehouses[0];
     }
 
-    // Fallback to any active warehouse
     const activeWarehouses = await this.warehouseRepository.findAll({
       skip: 0,
       take: 1,
@@ -146,229 +164,569 @@ export class OrderService {
   }
 
   /**
-   * Create order from cart with weight calculation and shipping info
+   * Calculate shipping cost based on subtotal
+   */
+  private calculateShippingCost(subtotal: number): number {
+    if (subtotal >= this.FREE_SHIPPING_THRESHOLD) {
+      return 0;
+    }
+    return this.DEFAULT_SHIPPING_COST;
+  }
+
+  /**
+   * ✅ NEW: Validate and apply coupon
+   */
+  private async validateAndApplyCoupon(
+    couponCode: string,
+    userId: string,
+    orderItems: any[]
+  ): Promise<{
+    coupon: any;
+    discount: number;
+  }> {
+    const coupon = await this.couponRepository.findByCode(
+      couponCode.toUpperCase()
+    );
+
+    if (!coupon) {
+      throw new Error("Invalid coupon code");
+    }
+
+    // Check if active
+    if (!coupon.isActive) {
+      throw new Error("Coupon is not active");
+    }
+
+    // Check validity dates
+    const now = new Date();
+    if (now < coupon.validFrom) {
+      throw new Error("Coupon is not yet valid");
+    }
+    if (now > coupon.validUntil) {
+      throw new Error("Coupon has expired");
+    }
+
+    // Check max usage
+    if (coupon.maxUsage && coupon.usageCount >= coupon.maxUsage) {
+      throw new Error("Coupon usage limit exceeded");
+    }
+
+    // Check per-user limit
+    if (coupon.perUserLimit) {
+      const userUsageCount = await this.couponRepository.getUserUsageCount(
+        coupon.id,
+        BigInt(userId)
+      );
+      if (userUsageCount >= coupon.perUserLimit) {
+        throw new Error("You have already used this coupon maximum times");
+      }
+    }
+
+    // Check scope validity
+    const productIds = orderItems.map((item) => item.productId);
+    const categoryIds = orderItems
+      .filter((item) => item.product?.categoryId)
+      .map((item) => item.product.categoryId);
+
+    const scopeValid = await this.couponRepository.isScopeValid(
+      coupon.id,
+      productIds,
+      categoryIds
+    );
+
+    if (!scopeValid) {
+      throw new Error("This coupon is not applicable to items in your cart");
+    }
+
+    // Check user eligibility
+    const userIdBigInt = BigInt(userId);
+    const isEligible = await this.couponRepository.isUserEligible(
+      coupon.id,
+      userIdBigInt
+    );
+
+    if (!isEligible && coupon.userEligibility !== "ALL") {
+      throw new Error("You are not eligible for this coupon");
+    }
+
+    // Calculate subtotal for eligible items only
+    let eligibleSubtotal = 0;
+
+    if (coupon.scope === "ALL") {
+      // All items are eligible
+      eligibleSubtotal = orderItems.reduce((sum, item) => {
+        const price = item.variant
+          ? Number(item.variant.price)
+          : Number(item.product.sellingPrice);
+        return sum + price * item.quantity;
+      }, 0);
+    } else if (coupon.scope === "CATEGORY") {
+      // Only items from specific categories
+      const couponCategoryIds = coupon.categories.map((c) => c.id);
+      eligibleSubtotal = orderItems
+        .filter((item) =>
+          couponCategoryIds.includes(item.product?.categoryId)
+        )
+        .reduce((sum, item) => {
+          const price = item.variant
+            ? Number(item.variant.price)
+            : Number(item.product.sellingPrice);
+          return sum + price * item.quantity;
+        }, 0);
+    } else if (coupon.scope === "PRODUCT") {
+      // Only specific products
+      const couponProductIds = coupon.products.map((p) => p.id);
+      eligibleSubtotal = orderItems
+        .filter((item) => couponProductIds.includes(item.productId))
+        .reduce((sum, item) => {
+          const price = item.variant
+            ? Number(item.variant.price)
+            : Number(item.product.sellingPrice);
+          return sum + price * item.quantity;
+        }, 0);
+    }
+
+    // Check minimum order value
+    if (eligibleSubtotal < Number(coupon.minOrderValue)) {
+      throw new Error(
+        `Minimum order value of ₹${coupon.minOrderValue} required`
+      );
+    }
+
+    // Calculate discount
+    let discount = 0;
+    if (coupon.discountType === DiscountType.PERCENTAGE) {
+      discount = (eligibleSubtotal * Number(coupon.discountValue)) / 100;
+    } else {
+      discount = Number(coupon.discountValue);
+    }
+
+    // Apply max discount cap
+    if (coupon.maxDiscountAmount) {
+      discount = Math.min(discount, Number(coupon.maxDiscountAmount));
+    }
+
+    // Ensure discount doesn't exceed eligible subtotal
+    discount = Math.min(discount, eligibleSubtotal);
+
+    return {
+      coupon,
+      discount: Math.round(discount * 100) / 100,
+    };
+  }
+
+  /**
+   * ✅ UPDATED: Calculate order breakdown with GST and coupon
+   */
+  private calculateOrderBreakdown(params: {
+    subtotal: number;
+    couponDiscount: number;
+    shippingCost: number;
+  }): OrderBreakdown {
+    const { subtotal, couponDiscount, shippingCost } = params;
+
+    // Taxable amount = subtotal - coupon discount + shipping
+    const taxableAmount = subtotal - couponDiscount + shippingCost;
+
+    // GST on taxable amount
+    const gstAmount = taxableAmount * this.GST_RATE;
+
+    // Total includes GST
+    const total = taxableAmount + gstAmount;
+
+    return {
+      subtotal,
+      discount: couponDiscount, // For backward compatibility
+      shippingCost,
+      gstAmount: Math.round(gstAmount * 100) / 100,
+      total: Math.round(total * 100) / 100,
+      couponDiscount,
+      taxableAmount: Math.round(taxableAmount * 100) / 100,
+    };
+  }
+
+  /**
+   * ✅ UPDATED: Get order preview with coupon support
+   */
+  async getOrderPreview(
+    userId: string,
+    data: {
+      shippingAddressId: string;
+      couponCode?: string;
+      items?: Array<{
+        productId: string;
+        variantId?: string;
+        quantity: number;
+      }>;
+    }
+  ) {
+    const userIdBigInt = BigInt(userId);
+    const isBuyNow = !!data.items?.length;
+
+    // 1. Get items (Buy Now or Cart)
+    let orderItems: any[] = [];
+    if (isBuyNow) {
+      orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
+        data.items!
+      );
+      if (!orderItems || orderItems.length === 0) {
+        throw new Error("Buy now items not found");
+      }
+    } else {
+      const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+      if (!cart || cart.items.length === 0) {
+        throw new Error("Cart is empty");
+      }
+      orderItems = cart.items;
+    }
+
+    // 2. Validate address
+    const address = await this.addressRepository.findById(
+      BigInt(data.shippingAddressId)
+    );
+    if (!address || address.userId !== userIdBigInt) {
+      throw new Error("Invalid shipping address");
+    }
+
+    // 3. Calculate subtotal
+    let subtotal = 0;
+    for (const item of orderItems) {
+      const price = item.variant
+        ? Number(item.variant.price)
+        : Number(item.product.sellingPrice);
+      subtotal += price * item.quantity;
+    }
+
+    // 4. Calculate shipping cost
+    const shippingCost = this.calculateShippingCost(subtotal);
+
+    // 5. ✅ Apply coupon if provided
+    let couponDiscount = 0;
+    let appliedCoupon: any = null;
+
+    if (data.couponCode) {
+      try {
+        const couponResult = await this.validateAndApplyCoupon(
+          data.couponCode,
+          userId,
+          orderItems
+        );
+        couponDiscount = couponResult.discount;
+        appliedCoupon = {
+          id: couponResult.coupon.id.toString(),
+          code: couponResult.coupon.code,
+          description: couponResult.coupon.description,
+          discountType: couponResult.coupon.discountType,
+          discountValue: Number(couponResult.coupon.discountValue),
+        };
+      } catch (error: any) {
+ // Return preview without coupon but with error message
+  const breakdown = this.calculateOrderBreakdown({
+    subtotal,
+    couponDiscount: 0,
+    shippingCost,
+  });
+          return {
+          breakdown: {
+            subtotal,
+            discount: 0,
+            couponDiscount: 0,
+            shippingCost,
+            gstAmount: 0,
+            total: 0,
+            taxableAmount: 0,
+          },
+          estimatedDelivery: "3-5 business days",
+          itemCount: orderItems.length,
+          isServiceable: true,
+          couponError: error.message,
+        };
+      }
+    }
+
+    // 6. Calculate breakdown with GST
+    const breakdown = this.calculateOrderBreakdown({
+      subtotal,
+      couponDiscount,
+      shippingCost,
+    });
+
+    return {
+      breakdown,
+      estimatedDelivery: "3-5 business days",
+      itemCount: orderItems.length,
+      isServiceable: true,
+      appliedCoupon,
+    };
+  }
+
+  /**
+   * ✅ UPDATED: Create order with coupon support
    */
   async createOrder(
-  userId: string,
-  data: {
-    shippingAddressId: string;
-    billingAddressId: string;
-    couponCode?: string;
-    paymentMethod: PaymentMethod;
-
-    // ✅ BUY NOW ITEMS SUPPORT
-    items?: Array<{
-      productId: string;
-      variantId?: string;
-      quantity: number;
-    }>;
-  }
-) {
-  const userIdBigInt = BigInt(userId);
-  const isBuyNow = !!data.items?.length;
-
-  // 1. Get items source (Cart OR BuyNow)
-  let cart: any = null;
-  let orderItems: any[] = [];
-
-  if (isBuyNow) {
-    // ✅ BUY NOW FLOW
-    orderItems = await this.orderRepository.getOrderItemsFromBuyNow(data.items!);
-
-    if (!orderItems || orderItems.length === 0) {
-      throw new Error("Buy now item not found");
+    userId: string,
+    data: {
+      shippingAddressId: string;
+      billingAddressId: string;
+      couponCode?: string;
+      paymentMethod: PaymentMethod;
+      items?: Array<{
+        productId: string;
+        variantId?: string;
+        quantity: number;
+      }>;
     }
-  } else {
-    // ✅ CART FLOW
-    cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+  ) {
+    const userIdBigInt = BigInt(userId);
+    const isBuyNow = !!data.items?.length;
 
-    if (!cart || cart.items.length === 0) {
-      throw new Error("Cart is empty");
+    // 1. Get items source (Cart OR Buy Now)
+    let cart: any = null;
+    let orderItems: any[] = [];
+
+    if (isBuyNow) {
+      orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
+        data.items!
+      );
+      if (!orderItems || orderItems.length === 0) {
+        throw new Error("Buy now items not found");
+      }
+      console.log(`🛒 Buy Now mode: ${orderItems.length} item(s)`);
+    } else {
+      cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+      if (!cart || cart.items.length === 0) {
+        throw new Error("Cart is empty");
+      }
+      orderItems = cart.items;
+      console.log(`🛒 Cart mode: ${orderItems.length} item(s)`);
     }
 
-    orderItems = cart.items;
-  }
+    // 2. Validate addresses
+    const [shippingAddress, billingAddress] = await Promise.all([
+      this.addressRepository.findById(BigInt(data.shippingAddressId)),
+      this.addressRepository.findById(BigInt(data.billingAddressId)),
+    ]);
 
-  // 2. Validate addresses exist and belong to user
-  const [shippingAddress, billingAddress] = await Promise.all([
-    this.addressRepository.findById(BigInt(data.shippingAddressId)),
-    this.addressRepository.findById(BigInt(data.billingAddressId)),
-  ]);
+    if (!shippingAddress || shippingAddress.userId !== userIdBigInt) {
+      throw new Error("Invalid shipping address");
+    }
 
-  if (!shippingAddress || shippingAddress.userId !== userIdBigInt) {
-    throw new Error("Invalid shipping address");
-  }
+    if (!billingAddress || billingAddress.userId !== userIdBigInt) {
+      throw new Error("Invalid billing address");
+    }
 
-  if (!billingAddress || billingAddress.userId !== userIdBigInt) {
-    throw new Error("Invalid billing address");
-  }
+    // 3. Get pickup warehouse
+    const pickupWarehouse = await this.getPickupWarehouse();
+    console.log(`📦 Pickup warehouse: ${pickupWarehouse.name}`);
 
-  // 3. Get pickup warehouse (for shipment creation)
-  const pickupWarehouse = await this.getPickupWarehouse();
-  console.log(`📦 Pickup warehouse selected: ${pickupWarehouse.name}`);
+    // 4. Calculate shipping dimensions
+    const shippingDimensions = this.calculateShippingDimensions(orderItems);
 
-  // 4. Calculate shipping dimensions and weights ✅ (use orderItems)
-  const shippingDimensions = this.calculateShippingDimensions(orderItems);
+    // 5. Calculate subtotal
+    let subtotal = 0;
+    for (const item of orderItems) {
+      const price = item.variant
+        ? Number(item.variant.price)
+        : Number(item.product.sellingPrice);
+      subtotal += price * item.quantity;
+    }
 
-  console.log("📏 Shipping Dimensions:", {
-    totalWeight: `${shippingDimensions.totalWeight}kg`,
-    volumetricWeight: `${shippingDimensions.volumetricWeight}kg`,
-    chargeableWeight: `${shippingDimensions.chargeableWeight}kg`,
-    dimensions: `${shippingDimensions.length} × ${shippingDimensions.breadth} × ${shippingDimensions.height} cm`,
-  });
+    // 6. Calculate shipping cost
+    const shippingCost = this.calculateShippingCost(subtotal);
 
-  // 5. Calculate order totals ✅ (use orderItems)
-  let subtotal = 0;
-  for (const item of orderItems) {
-    const price = item.variant
-      ? Number(item.variant.price)
-      : Number(item.product.sellingPrice);
+    // 7. ✅ Apply coupon if provided
+    let couponDiscount = 0;
+    let couponId: bigint | undefined;
+    let appliedCoupon: any = null;
 
-    subtotal += price * item.quantity;
-  }
+    if (data.couponCode) {
+      const couponResult = await this.validateAndApplyCoupon(
+        data.couponCode,
+        userId,
+        orderItems
+      );
+      couponDiscount = couponResult.discount;
+      couponId = couponResult.coupon.id;
+      appliedCoupon = couponResult.coupon;
 
-  const shippingCost = this.calculateShippingCost(subtotal);
-  let discount = 0;
-  let couponId: bigint | undefined;
+      console.log(`🎟️ Coupon applied: ${data.couponCode} (-₹${couponDiscount})`);
+    }
 
-  // 6. Apply coupon if provided (TODO: Implement coupon validation)
-  if (data.couponCode) {
-    // Future: Validate and apply coupon logic
-  }
-
-  const total = subtotal + shippingCost - discount;
-
-  // 7. Generate unique order number
-  const orderNumber = NumberUtil.generateOrderNumber();
-
-  // 8. Create address snapshots for historical record
-  const shippingAddressSnapshot = {
-    fullName: shippingAddress.fullName,
-    phone: shippingAddress.phone,
-    addressLine1: shippingAddress.addressLine1,
-    addressLine2: shippingAddress.addressLine2,
-    city: shippingAddress.city,
-    state: shippingAddress.state,
-    pincode: shippingAddress.pincode,
-    country: shippingAddress.country,
-  };
-
-  const billingAddressSnapshot = {
-    fullName: billingAddress.fullName,
-    phone: billingAddress.phone,
-    addressLine1: billingAddress.addressLine1,
-    addressLine2: billingAddress.addressLine2,
-    city: billingAddress.city,
-    state: billingAddress.state,
-    pincode: billingAddress.pincode,
-    country: billingAddress.country,
-  };
-
-  // 9. Create order
-  const order = await this.orderRepository.create({
-    userId: userIdBigInt,
-    orderNumber,
-    status: OrderStatus.PENDING,
-    subtotal,
-    discount,
-    shippingCost,
-    total,
-    shippingAddressId: BigInt(data.shippingAddressId),
-    billingAddressId: BigInt(data.billingAddressId),
-    shippingAddressSnapshot,
-    billingAddressSnapshot,
-    couponId,
-  });
-
-  // 10. Create OrderShippingInfo record
-  await this.orderShippingInfoRepository.create({
-    orderId: order.id,
-    warehouseId: pickupWarehouse.id,
-    warehouseName: pickupWarehouse.name,
-    warehouseCode: pickupWarehouse.code,
-    pickupAddress: pickupWarehouse.address,
-    pickupAddressLine2: pickupWarehouse.addressLine2,
-    pickupCity: pickupWarehouse.city,
-    pickupState: pickupWarehouse.state,
-    pickupPincode: pickupWarehouse.pincode,
-    pickupCountry: pickupWarehouse.country || "India",
-    pickupPhone: pickupWarehouse.phone,
-    pickupEmail: pickupWarehouse.email,
-    pickupContactPerson: pickupWarehouse.contactPerson,
-    totalWeight: shippingDimensions.totalWeight,
-    volumetricWeight: shippingDimensions.volumetricWeight,
-    chargeableWeight: shippingDimensions.chargeableWeight,
-    length: shippingDimensions.length,
-    breadth: shippingDimensions.breadth,
-    height: shippingDimensions.height,
-  });
-
-  console.log(`✅ Shipping info created for order: ${orderNumber}`);
-
-  // 11. Add order items ✅ (use orderItems)
-  for (const item of orderItems) {
-    const price = item.variant
-      ? Number(item.variant.price)
-      : Number(item.product.sellingPrice);
-
-    await this.orderRepository.addItem({
-      orderId: order.id,
-      productId: item.productId,
-      variantId: item.variantId ?? undefined,
-      quantity: item.quantity,
-      price,
+    // 8. Calculate order breakdown WITH GST and coupon
+    const breakdown = this.calculateOrderBreakdown({
+      subtotal,
+      couponDiscount,
+      shippingCost,
     });
-  }
 
-  // 12. Create Razorpay order
-  const razorpayOrder = await this.razorpayService.createOrder({
-    amount: Math.round(total * 100), // Convert to paise
-    currency: "INR",
-    receipt: orderNumber,
-    notes: {
-      orderId: order.id.toString(),
-      userId: userId,
-      warehouse: pickupWarehouse.name,
-      chargeableWeight: shippingDimensions.chargeableWeight.toString(),
-    },
-  });
+    console.log("💰 Order Breakdown:", {
+      subtotal: `₹${breakdown.subtotal}`,
+      couponDiscount: `₹${breakdown.couponDiscount}`,
+      shipping: `₹${breakdown.shippingCost}`,
+      taxableAmount: `₹${breakdown.taxableAmount}`,
+      gst: `₹${breakdown.gstAmount}`,
+      total: `₹${breakdown.total}`,
+    });
 
-  // 13. Create payment record
-  await this.paymentRepository.create({
-    orderId: order.id,
-    razorpayOrderId: razorpayOrder.id,
-    method: data.paymentMethod,
-    status: PaymentStatus.PENDING,
-    amount: total,
-  });
+    // 9. Generate unique order number
+    const orderNumber = NumberUtil.generateOrderNumber();
 
-  // 14. Clear cart ONLY for cart checkout ✅
-  if (!isBuyNow && cart) {
-    await this.cartRepository.clearCart(cart.id);
-  }
+    // 10. Create address snapshots
+    const shippingAddressSnapshot = {
+      fullName: shippingAddress.fullName,
+      phone: shippingAddress.phone,
+      addressLine1: shippingAddress.addressLine1,
+      addressLine2: shippingAddress.addressLine2,
+      city: shippingAddress.city,
+      state: shippingAddress.state,
+      pincode: shippingAddress.pincode,
+      country: shippingAddress.country,
+    };
 
-  // 15. Get complete order details with shipping info
-  const completeOrder = await this.orderRepository.findById(order.id);
+    const billingAddressSnapshot = {
+      fullName: billingAddress.fullName,
+      phone: billingAddress.phone,
+      addressLine1: billingAddress.addressLine1,
+      addressLine2: billingAddress.addressLine2,
+      city: billingAddress.city,
+      state: billingAddress.state,
+      pincode: billingAddress.pincode,
+      country: billingAddress.country,
+    };
 
-  console.log(`✅ Order created: ${orderNumber}`);
-  console.log(`📦 Chargeable weight: ${shippingDimensions.chargeableWeight}kg`);
-  console.log(`🏢 Pickup from: ${pickupWarehouse.name}, ${pickupWarehouse.city}`);
+    // 11. Create order with GST and coupon
+    const order = await this.orderRepository.create({
+      userId: userIdBigInt,
+      orderNumber,
+      status: OrderStatus.PENDING,
+      subtotal: breakdown.subtotal,
+      discount: breakdown.couponDiscount, // ✅ Coupon discount
+      shippingCost: breakdown.shippingCost,
+      gstAmount: breakdown.gstAmount,
+      total: breakdown.total,
+      shippingAddressId: BigInt(data.shippingAddressId),
+      billingAddressId: BigInt(data.billingAddressId),
+      shippingAddressSnapshot,
+      billingAddressSnapshot,
+      couponId, // ✅ Store coupon reference
+    });
 
-  return {
-    order: completeOrder,
-    razorpayOrderId: razorpayOrder.id,
-    razorpayKeyId: process.env.RAZORPAY_KEY_ID,
-    shippingInfo: {
-      warehouse: {
-        name: pickupWarehouse.name,
-        city: pickupWarehouse.city,
-        pincode: pickupWarehouse.pincode,
+    // 12. ✅ Increment coupon usage if applied
+    if (couponId) {
+      await this.couponRepository.incrementUsage(couponId);
+      console.log(`✅ Coupon usage incremented: ${appliedCoupon.code}`);
+    }
+
+    // 13. Create OrderShippingInfo
+    await this.orderShippingInfoRepository.create({
+      orderId: order.id,
+      warehouseId: pickupWarehouse.id,
+      warehouseName: pickupWarehouse.name,
+      warehouseCode: pickupWarehouse.code,
+      pickupAddress: pickupWarehouse.address,
+      pickupAddressLine2: pickupWarehouse.addressLine2,
+      pickupCity: pickupWarehouse.city,
+      pickupState: pickupWarehouse.state,
+      pickupPincode: pickupWarehouse.pincode,
+      pickupCountry: pickupWarehouse.country || "India",
+      pickupPhone: pickupWarehouse.phone,
+      pickupEmail: pickupWarehouse.email,
+      pickupContactPerson: pickupWarehouse.contactPerson,
+      totalWeight: shippingDimensions.totalWeight,
+      volumetricWeight: shippingDimensions.volumetricWeight,
+      chargeableWeight: shippingDimensions.chargeableWeight,
+      length: shippingDimensions.length,
+      breadth: shippingDimensions.breadth,
+      height: shippingDimensions.height,
+    });
+
+    // 14. Add order items
+    for (const item of orderItems) {
+      const price = item.variant
+        ? Number(item.variant.price)
+        : Number(item.product.sellingPrice);
+
+      await this.orderRepository.addItem({
+        orderId: order.id,
+        productId: item.productId,
+        variantId: item.variantId ?? undefined,
+        quantity: item.quantity,
+        price,
+      });
+    }
+
+    // 15. Create Razorpay order with TOTAL (including GST)
+    const razorpayOrder = await this.razorpayService.createOrder({
+      amount: Math.round(breakdown.total * 100), // Total WITH GST in paise
+      currency: "INR",
+      receipt: orderNumber,
+      notes: {
+        orderId: order.id.toString(),
+        userId: userId,
+        warehouse: pickupWarehouse.name,
+        chargeableWeight: shippingDimensions.chargeableWeight.toString(),
+        subtotal: breakdown.subtotal.toString(),
+        couponDiscount: breakdown.couponDiscount.toString(),
+        couponCode: appliedCoupon?.code || "",
+        shipping: breakdown.shippingCost.toString(),
+        gst: breakdown.gstAmount.toString(),
+        total: breakdown.total.toString(),
       },
-      dimensions: shippingDimensions,
-    },
-  };
-}
+    });
 
+    // 16. Create payment record
+    await this.paymentRepository.create({
+      orderId: order.id,
+      razorpayOrderId: razorpayOrder.id,
+      method: data.paymentMethod,
+      status: PaymentStatus.PENDING,
+      amount: breakdown.total,
+    });
+
+    // 17. Clear cart ONLY for cart checkout
+    if (!isBuyNow && cart) {
+      await this.cartRepository.clearCart(cart.id);
+      console.log("🛒 Cart cleared");
+    }
+
+    // 18. Get complete order details
+    const completeOrder = await this.orderRepository.findById(order.id);
+
+    console.log(`✅ Order created: ${orderNumber}`);
+    console.log(
+      `💳 Razorpay amount: ₹${breakdown.total} (incl. GST ₹${breakdown.gstAmount})`
+    );
+
+    return {
+      order: completeOrder,
+      razorpayOrderId: razorpayOrder.id,
+      razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+      amountInPaise: Math.round(breakdown.total * 100),
+      breakdown: {
+        subtotal: breakdown.subtotal,
+        discount: breakdown.couponDiscount,
+        couponDiscount: breakdown.couponDiscount,
+        shippingCost: breakdown.shippingCost,
+        gstAmount: breakdown.gstAmount,
+        taxableAmount: breakdown.taxableAmount,
+        total: breakdown.total,
+      },
+      appliedCoupon: appliedCoupon
+        ? {
+            code: appliedCoupon.code,
+            discount: breakdown.couponDiscount,
+          }
+        : null,
+      shippingInfo: {
+        warehouse: {
+          name: pickupWarehouse.name,
+          city: pickupWarehouse.city,
+          pincode: pickupWarehouse.pincode,
+        },
+        dimensions: shippingDimensions,
+      },
+    };
+  }
 
   /**
    * Verify payment and update order
@@ -378,14 +736,12 @@ export class OrderService {
     razorpay_payment_id: string;
     razorpay_signature: string;
   }) {
-    // 1. Verify signature
     const isValid = this.razorpayService.verifyPaymentSignature(params);
 
     if (!isValid) {
       throw new Error("Invalid payment signature");
     }
 
-    // 2. Find payment by Razorpay order ID
     const payment = await this.paymentRepository.findByRazorpayOrderId(
       params.razorpay_order_id
     );
@@ -394,34 +750,23 @@ export class OrderService {
       throw new Error("Payment not found");
     }
 
-    // 3. Update payment status
     await this.paymentRepository.update(payment.id, {
       razorpayPaymentId: params.razorpay_payment_id,
       status: PaymentStatus.SUCCESS,
     });
 
-    // 4. Update order status to PROCESSING
     await this.orderRepository.update(payment.orderId, {
       status: OrderStatus.PROCESSING,
     });
 
-    // 5. Get complete order details with shipping info
     const order = await this.orderRepository.findById(payment.orderId);
 
     if (!order) {
       throw new Error("Order not found after payment");
     }
 
-    // 6. Log that order is ready for shipment
     console.log(`✅ Payment verified for order: ${order.orderNumber}`);
-    console.log(`📦 Order ready for shipment creation`);
-    
-    if (order.shippingInfo) {
-      console.log(`🏢 Pickup: ${order.shippingInfo.warehouseName}`);
-      console.log(`⚖️ Weight: ${order.shippingInfo.chargeableWeight}kg`);
-    }
 
-    // 7. Send order confirmation email
     try {
       await this.emailService.sendOrderConfirmation({
         email: order.user.email,
@@ -438,17 +783,12 @@ export class OrderService {
       console.error("Failed to send order confirmation email:", error);
     }
 
-    // 8. TODO: Create Shiprocket shipment automatically
-    // This is where you'll integrate shipment creation:
-    // const shippingInfo = order.shippingInfo;
-    // await this.shipmentService.createShipment(order.id.toString(), shippingInfo);
-
     return order;
   }
 
-  /**
-   * Get shipping info for order (useful for Shiprocket integration)
-   */
+  // ... (rest of the methods remain the same: cancelOrder, canCancelOrder, getUserOrders, etc.)
+  // Copy from previous order.service.updated.ts
+
   async getOrderShippingInfo(orderId: string) {
     const shippingInfo = await this.orderShippingInfoRepository.findByOrderId(
       BigInt(orderId)
@@ -461,9 +801,6 @@ export class OrderService {
     return shippingInfo;
   }
 
-  /**
-   * Cancel order
-   */
   async cancelOrder(userId: string, orderId: string, reason?: string) {
     const order = await this.orderRepository.findById(BigInt(orderId));
 
@@ -471,12 +808,9 @@ export class OrderService {
       throw new Error("Order not found");
     }
 
-    // Verify user owns the order
     if (order.userId !== BigInt(userId)) {
       throw new Error("Unauthorized: You can only cancel your own orders");
     }
-
-    // ===== CANCELLATION VALIDATION =====
 
     if (order.status === OrderStatus.CANCELLED) {
       throw new Error("Order is already cancelled");
@@ -498,7 +832,6 @@ export class OrderService {
       );
     }
 
-    // Check time window (24 hours from order creation)
     const ORDER_CANCELLATION_WINDOW_HOURS = 24;
     const orderAge = Date.now() - order.createdAt.getTime();
     const maxCancellationTime =
@@ -513,14 +846,25 @@ export class OrderService {
       );
     }
 
-    // ===== PERFORM CANCELLATION =====
-
-    // Update order status to CANCELLED
     await this.orderRepository.update(order.id, {
       status: OrderStatus.CANCELLED,
     });
 
-    // Process refund if payment was successful
+    // ✅ Decrement coupon usage if coupon was used
+    if (order.couponId) {
+      try {
+        const coupon = await this.couponRepository.findById(order.couponId);
+        if (coupon && coupon.usageCount > 0) {
+          await this.couponRepository.update(order.couponId, {
+            usageCount: coupon.usageCount - 1,
+          });
+          console.log(`✅ Coupon usage decremented: ${coupon.code}`);
+        }
+      } catch (error) {
+        console.error("Failed to decrement coupon usage:", error);
+      }
+    }
+
     let refundProcessed = false;
     if (order.payment && order.payment.status === PaymentStatus.SUCCESS) {
       try {
@@ -532,7 +876,6 @@ export class OrderService {
       }
     }
 
-    // Send cancellation email
     try {
       await this.emailService.sendOrderCancellation({
         email: order.user.email,
@@ -557,9 +900,6 @@ export class OrderService {
     };
   }
 
-  /**
-   * Check if order can be cancelled
-   */
   async canCancelOrder(
     userId: string,
     orderId: string
@@ -621,9 +961,6 @@ export class OrderService {
     return { canCancel: true };
   }
 
-  /**
-   * Get user orders with pagination and filtering
-   */
   async getUserOrders(
     userId: string,
     params: {
@@ -677,9 +1014,6 @@ export class OrderService {
     };
   }
 
-  /**
-   * Get order by ID (with permission check)
-   */
   async getOrder(userId: string, orderId: string) {
     const order = await this.orderRepository.findById(BigInt(orderId));
 
@@ -694,9 +1028,6 @@ export class OrderService {
     return order;
   }
 
-  /**
-   * Get order by order number
-   */
   async getOrderByNumber(userId: string, orderNumber: string) {
     const order = await this.orderRepository.findByOrderNumber(orderNumber);
 
@@ -711,9 +1042,6 @@ export class OrderService {
     return order;
   }
 
-  /**
-   * Admin: Update order status
-   */
   async updateOrderStatus(orderId: string, status: OrderStatus) {
     const order = await this.orderRepository.findById(BigInt(orderId));
 
@@ -744,9 +1072,6 @@ export class OrderService {
     return this.orderRepository.findById(order.id);
   }
 
-  /**
-   * Admin: Get all orders with pagination and filtering
-   */
   async getAllOrders(params: {
     page: number;
     limit: number;
@@ -797,19 +1122,6 @@ export class OrderService {
     };
   }
 
-  /**
-   * Calculate shipping cost
-   */
-  private calculateShippingCost(subtotal: number): number {
-    if (subtotal >= 1000) {
-      return 0;
-    }
-    return 50;
-  }
-
-  /**
-   * Refund payment via Razorpay
-   */
   private async refundPayment(paymentId: bigint) {
     const payment = await this.paymentRepository.findById(paymentId);
 

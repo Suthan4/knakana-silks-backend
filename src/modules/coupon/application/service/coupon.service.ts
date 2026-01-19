@@ -276,13 +276,7 @@ export class CouponService {
 
     return {
       valid: true,
-      coupon: {
-        id: coupon.id.toString(),
-        code: coupon.code,
-        description: coupon.description,
-        discountType: coupon.discountType,
-        discountValue: Number(coupon.discountValue),
-      },
+      coupon: this.mapCouponResponse(coupon),
       discount,
       finalAmount: orderAmount - discount,
     };
@@ -357,7 +351,7 @@ export class CouponService {
       if (validation.valid) {
         const discount = this.calculateDiscount(coupon, orderAmount);
         applicableCoupons.push({
-          ...coupon,
+          ...this.mapCouponResponse(coupon),
           estimatedDiscount: discount,
           estimatedFinalAmount: orderAmount - discount,
         });
@@ -513,4 +507,44 @@ export class CouponService {
     const now = new Date();
     return this.couponRepository.findActive(now);
   }
+
+  private mapCouponResponse(coupon: any) {
+  return {
+    id: coupon.id.toString(),
+    code: coupon.code,
+    description: coupon.description,
+
+    discountType: coupon.discountType,
+    discountValue: Number(coupon.discountValue),
+
+    minOrderValue: Number(coupon.minOrderValue),
+    maxDiscountAmount: coupon.maxDiscountAmount
+      ? Number(coupon.maxDiscountAmount)
+      : null,
+
+    scope: coupon.scope,
+    userEligibility: coupon.userEligibility,
+
+    newUserDays: coupon.newUserDays ?? null,
+    maxUsage: coupon.maxUsage ?? null,
+    perUserLimit: coupon.perUserLimit ?? null,
+
+    usageCount: coupon.usageCount ?? 0,
+
+    validFrom: coupon.validFrom,
+    validUntil: coupon.validUntil,
+    isActive: coupon.isActive,
+
+    categoryIds:
+  coupon.categories?.map((c: any) => String(c.categoryId ?? c.category?.id))?.filter(Boolean) ?? [],
+
+productIds:
+  coupon.products?.map((p: any) => String(p.productId ?? p.product?.id))?.filter(Boolean) ?? [],
+
+eligibleUserIds:
+  coupon.eligibleUsers?.map((u: any) => String(u.userId ?? u.user?.id))?.filter(Boolean) ?? [],
+
+  };
+}
+
 }

@@ -1,17 +1,60 @@
 import { Request, Response } from "express";
 import { inject, injectable } from "tsyringe";
 import { OrderService } from "../../application/service/order.service.js";
-
 import { z } from "zod";
-import { CreateOrderDTOSchema, QueryOrderDTOSchema, UpdateOrderStatusDTOSchema, VerifyPaymentDTOSchema } from "../../application/dtos/order.dtos.js";
+import {
+  CreateOrderDTOSchema,
+  QueryOrderDTOSchema,
+  UpdateOrderStatusDTOSchema,
+  VerifyPaymentDTOSchema,
+} from "../../application/dtos/order.dtos.js";
 
 const CancelOrderDTOSchema = z.object({
   reason: z.string().optional(),
 });
 
+// ✅ NEW: Order Preview DTO Schema
+const OrderPreviewDTOSchema = z.object({
+  shippingAddressId: z.string().min(1, "Shipping address is required"),
+  couponCode: z.string().optional(),
+  items: z
+    .array(
+      z.object({
+        productId: z.string(),
+        variantId: z.string().optional(),
+        quantity: z.number().min(1),
+      })
+    )
+    .optional(),
+});
+
 @injectable()
 export class OrderController {
   constructor(@inject(OrderService) private orderService: OrderService) {}
+
+  /**
+   * ✅ NEW: Get order preview with accurate totals
+   * POST /api/orders/preview
+   */
+  async getOrderPreview(req: Request, res: Response) {
+    try {
+      const userId = req.user!.userId;
+      const data = OrderPreviewDTOSchema.parse(req.body);
+
+      const preview = await this.orderService.getOrderPreview(userId, {
+        shippingAddressId: data.shippingAddressId,
+        couponCode: data.couponCode,
+        items: data.items,
+      });
+
+      res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
 
   async createOrder(req: Request, res: Response) {
     try {
@@ -118,9 +161,6 @@ export class OrderController {
     }
   }
 
-  /**
-   * Cancel order with proper validation
-   */
   async cancelOrder(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
@@ -145,7 +185,6 @@ export class OrderController {
         message: result.message,
         data: {
           order: result.order,
-          shiprocketCancelled: result.shiprocketCancelled,
           refundProcessed: result.refundProcessed,
         },
       });
@@ -154,10 +193,6 @@ export class OrderController {
     }
   }
 
-  /**
-   * Check if order can be cancelled
-   * Used by frontend to show/hide cancel button
-   */
   async canCancelOrder(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;

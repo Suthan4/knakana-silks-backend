@@ -13,9 +13,22 @@ const getOrderController = () => container.resolve(OrderController);
 // ==================== USER ROUTES (Authenticated) ====================
 
 /**
- * Create order from cart
+ * ✅ NEW: Get order preview (calculate totals without creating order)
+ * POST /api/orders/preview
+ * Body: { shippingAddressId, couponCode?, items? }
+ * 
+ * Use Cases:
+ * - Cart checkout: { shippingAddressId, couponCode }
+ * - Buy Now checkout: { shippingAddressId, items: [...] }
+ */
+router.post("/orders/preview", authenticate, (req, res) =>
+  getOrderController().getOrderPreview(req, res)
+);
+
+/**
+ * Create order from cart or Buy Now
  * POST /api/orders
- * Body: { shippingAddressId, billingAddressId, couponCode?, paymentMethod }
+ * Body: { shippingAddressId, billingAddressId, couponCode?, paymentMethod, items? }
  */
 router.post("/orders", authenticate, (req, res) =>
   getOrderController().createOrder(req, res)

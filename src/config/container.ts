@@ -32,11 +32,11 @@ export function setupContainer() {
   registerWishlistModule();
   registerBannerModule()
   registerHomeSectionModule()
+  registerCouponModule()
   registerOrderModule()
   registerPaymentModule()
   registerShipmentModule()
   registerEmailModule()
-  registerCouponModule()
   registerConsultationModule()
   console.log("🎉 All modules registered successfully");
 }
