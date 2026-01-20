@@ -10,6 +10,10 @@ export const CreateCategoryDTOSchema = z.object({
   image: z.string().url().optional(),
   isActive: z.boolean().default(true),
   order: z.number().int().default(0),
+  // Add after order field:
+hasVideoConsultation: z.boolean().optional().default(false),
+videoPurchasingEnabled: z.boolean().optional().default(false),
+videoConsultationNote: z.string().optional(),
 });
 
 export type CreateCategoryDTO = z.infer<typeof CreateCategoryDTOSchema>;
@@ -24,6 +28,10 @@ export const UpdateCategoryDTOSchema = z.object({
   image: z.string().url().optional(),
   isActive: z.boolean().optional(),
   order: z.number().int().optional(),
+  // Add after order field:
+hasVideoConsultation: z.boolean().optional().default(false),
+videoPurchasingEnabled: z.boolean().optional().default(false),
+videoConsultationNote: z.string().optional(),
 });
 
 export type UpdateCategoryDTO = z.infer<typeof UpdateCategoryDTOSchema>;

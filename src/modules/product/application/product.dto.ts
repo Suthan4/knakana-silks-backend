@@ -95,6 +95,10 @@ export const CreateProductDTOSchema = z
     artisanName: z.string().optional(),
     artisanAbout: z.string().optional(),
     artisanLocation: z.string().optional(),
+    allowOutOfStockOrders: z.boolean().optional().default(false),
+    hasVideoConsultation: z.boolean().optional().default(false),
+    videoPurchasingEnabled: z.boolean().optional().default(false),
+    videoConsultationNote: z.string().optional(),
 
     // 🆕 Shipping Dimensions (Required for Shiprocket)
     weight: z
@@ -164,6 +168,10 @@ export const UpdateProductDTOSchema = z.object({
   artisanName: z.string().optional(),
   artisanAbout: z.string().optional(),
   artisanLocation: z.string().optional(),
+allowOutOfStockOrders: z.boolean().optional().default(false),
+hasVideoConsultation: z.boolean().optional().default(false),
+videoPurchasingEnabled: z.boolean().optional().default(false),
+videoConsultationNote: z.string().optional(),
 
   // 🆕 Shipping Dimensions (Optional in update)
   weight: z.number().positive().max(50).optional(),

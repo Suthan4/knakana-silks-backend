@@ -345,120 +345,146 @@ export class OrderService {
     };
   }
 
-  /**
-   * ✅ UPDATED: Get order preview with coupon support
-   */
-  async getOrderPreview(
-    userId: string,
-    data: {
-      shippingAddressId: string;
-      couponCode?: string;
-      items?: Array<{
-        productId: string;
-        variantId?: string;
-        quantity: number;
-      }>;
-    }
-  ) {
-    const userIdBigInt = BigInt(userId);
-    const isBuyNow = !!data.items?.length;
+// BACKEND FIX: src/modules/order/application/service/order.service.ts
+// This is the critical fix for the getOrderPreview method
 
-    // 1. Get items (Buy Now or Cart)
-    let orderItems: any[] = [];
-    if (isBuyNow) {
-      orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
-        data.items!
-      );
-      if (!orderItems || orderItems.length === 0) {
-        throw new Error("Buy now items not found");
-      }
-    } else {
-      const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
-      if (!cart || cart.items.length === 0) {
-        throw new Error("Cart is empty");
-      }
-      orderItems = cart.items;
-    }
+/**
+ * ✅ UPDATED: Get order preview with coupon support
+ */
+async getOrderPreview(
+  userId: string,
+  data: {
+    shippingAddressId: string;
+    couponCode?: string;
+    items?: Array<{
+      productId: string;
+      variantId?: string;
+      quantity: number;
+    }>;
+  }
+) {
+  const userIdBigInt = BigInt(userId);
+  const isBuyNow = !!data.items?.length;
 
-    // 2. Validate address
-    const address = await this.addressRepository.findById(
-      BigInt(data.shippingAddressId)
+  console.log("📦 getOrderPreview called with:", {
+    userId,
+    couponCode: data.couponCode,
+    isBuyNow,
+    itemsCount: data.items?.length
+  });
+
+  // 1. Get items (Buy Now or Cart)
+  let orderItems: any[] = [];
+  if (isBuyNow) {
+    orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
+      data.items!
     );
-    if (!address || address.userId !== userIdBigInt) {
-      throw new Error("Invalid shipping address");
+    if (!orderItems || orderItems.length === 0) {
+      throw new Error("Buy now items not found");
     }
-
-    // 3. Calculate subtotal
-    let subtotal = 0;
-    for (const item of orderItems) {
-      const price = item.variant
-        ? Number(item.variant.price)
-        : Number(item.product.sellingPrice);
-      subtotal += price * item.quantity;
+  } else {
+    const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+    if (!cart || cart.items.length === 0) {
+      throw new Error("Cart is empty");
     }
+    orderItems = cart.items;
+  }
 
-    // 4. Calculate shipping cost
-    const shippingCost = this.calculateShippingCost(subtotal);
+  // 2. Validate address
+  const address = await this.addressRepository.findById(
+    BigInt(data.shippingAddressId)
+  );
+  if (!address || address.userId !== userIdBigInt) {
+    throw new Error("Invalid shipping address");
+  }
 
-    // 5. ✅ Apply coupon if provided
-    let couponDiscount = 0;
-    let appliedCoupon: any = null;
+  // 3. Calculate subtotal
+  let subtotal = 0;
+  for (const item of orderItems) {
+    const price = item.variant
+      ? Number(item.variant.price)
+      : Number(item.product.sellingPrice);
+    subtotal += price * item.quantity;
+  }
 
-    if (data.couponCode) {
-      try {
-        const couponResult = await this.validateAndApplyCoupon(
-          data.couponCode,
-          userId,
-          orderItems
-        );
-        couponDiscount = couponResult.discount;
-        appliedCoupon = {
-          id: couponResult.coupon.id.toString(),
-          code: couponResult.coupon.code,
-          description: couponResult.coupon.description,
-          discountType: couponResult.coupon.discountType,
-          discountValue: Number(couponResult.coupon.discountValue),
-        };
-      } catch (error: any) {
- // Return preview without coupon but with error message
+  console.log("💰 Calculated subtotal:", subtotal);
+
+  // 4. Calculate shipping cost
+  const shippingCost = this.calculateShippingCost(subtotal);
+
+  // 5. ✅ Apply coupon if provided
+  let couponDiscount = 0;
+  let appliedCoupon: any = null;
+  let couponError: string | undefined;
+
+  if (data.couponCode) {
+    console.log("🎟️ Attempting to apply coupon:", data.couponCode);
+    
+    try {
+      const couponResult = await this.validateAndApplyCoupon(
+        data.couponCode,
+        userId,
+        orderItems
+      );
+      
+      couponDiscount = couponResult.discount;
+      appliedCoupon = {
+        id: couponResult.coupon.id.toString(),
+        code: couponResult.coupon.code,
+        description: couponResult.coupon.description,
+        discountType: couponResult.coupon.discountType,
+        discountValue: Number(couponResult.coupon.discountValue),
+        minOrderValue: Number(couponResult.coupon.minOrderValue),
+        maxDiscountAmount: couponResult.coupon.maxDiscountAmount
+          ? Number(couponResult.coupon.maxDiscountAmount)
+          : null,
+        scope: couponResult.coupon.scope,
+        userEligibility: couponResult.coupon.userEligibility,
+        validFrom: couponResult.coupon.validFrom,
+        validUntil: couponResult.coupon.validUntil,
+        isActive: couponResult.coupon.isActive,
+      };
+
+      console.log("✅ Coupon applied successfully:", {
+        code: appliedCoupon.code,
+        discount: couponDiscount
+      });
+    } catch (error: any) {
+      // ✅ CRITICAL FIX: Return error but don't throw
+      // This allows preview to continue without coupon
+      couponError = error.message;
+      console.log("❌ Coupon validation failed:", error.message);
+      
+      // Still return preview without discount
+      couponDiscount = 0;
+      appliedCoupon = null;
+    }
+  }
+
+  // 6. Calculate breakdown with GST
   const breakdown = this.calculateOrderBreakdown({
     subtotal,
-    couponDiscount: 0,
+    couponDiscount,
     shippingCost,
   });
-          return {
-          breakdown: {
-            subtotal,
-            discount: 0,
-            couponDiscount: 0,
-            shippingCost,
-            gstAmount: 0,
-            total: 0,
-            taxableAmount: 0,
-          },
-          estimatedDelivery: "3-5 business days",
-          itemCount: orderItems.length,
-          isServiceable: true,
-          couponError: error.message,
-        };
-      }
-    }
 
-    // 6. Calculate breakdown with GST
-    const breakdown = this.calculateOrderBreakdown({
-      subtotal,
-      couponDiscount,
-      shippingCost,
-    });
+  // console.log("📊 Final breakdown:", {
+  //   subtotal: breakdown.subtotal,
+  //   couponDiscount: breakdown.couponDiscount,
+  //   shippingCost: breakdown.shippingCost,
+  //   gstAmount: breakdown.gstAmount,
+  //   total: breakdown.total
+  // });
 
-    return {
-      breakdown,
-      estimatedDelivery: "3-5 business days",
-      itemCount: orderItems.length,
-      isServiceable: true,
-      appliedCoupon,
-    };
-  }
+  return {
+    breakdown,
+    estimatedDelivery: "3-5 business days",
+    itemCount: orderItems.length,
+    isServiceable: true,
+    appliedCoupon,
+    couponError, // ✅ Return error to frontend
+  };
+}
 
   /**
    * ✅ UPDATED: Create order with coupon support

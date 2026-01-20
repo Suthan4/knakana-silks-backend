@@ -17,6 +17,9 @@ export const CreateConsultationDTOSchema = z
         /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
         "Invalid time format (HH:MM)"
       ),
+      // Add after preferredTime:
+isPurchaseConsultation: z.boolean().optional().default(false),
+consultationNotes: z.string().optional(),
   })
   .refine((data) => data.productId || data.categoryId, {
     message: "Either productId or categoryId must be provided",

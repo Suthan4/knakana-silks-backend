@@ -153,6 +153,14 @@ enum AddressType {
   BOTH
 }
 
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FULFILLED
+  CANCELLED
+}
+
 model User {
   id             BigInt           @id @default(autoincrement())
   email          String           @unique
@@ -181,6 +189,8 @@ model User {
   reviewHelpfulVotes  ReviewHelpfulVote[]
   eligibleCoupons     Coupon[]    @relation("CouponEligibleUsers")
   returns             Return[]
+  productRequests    ProductRequest[]
+
 
   @@index([email])
   @@index([role])
@@ -232,6 +242,11 @@ model Category {
   order               Int                   @default(0)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
+    // 🆕 NEW: Category-level video features
+  hasVideoConsultation   Boolean @default(false)
+  videoPurchasingEnabled Boolean @default(false)
+  videoConsultationNote  String? @db.Text
+
 
   parent              Category?            @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children            Category[]           @relation("CategoryHierarchy")
@@ -275,6 +290,14 @@ model Product {
   height           Decimal?   @db.Decimal(8, 2)  // Height in cm
   volumetricWeight Decimal?   @db.Decimal(8, 3)  // (L × B × H) / 5000
 
+   // 🆕 NEW: Out-of-stock ordering
+  allowOutOfStockOrders Boolean  @default(false)
+
+   // 🆕 NEW: Video consultation/purchasing
+  hasVideoConsultation  Boolean  @default(false)
+  videoPurchasingEnabled Boolean @default(false)
+  videoConsultationNote  String?  @db.Text
+
   category            Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   homeSections        HomeSection[]        @relation("SectionProducts")
   coupons             Coupon[]             @relation("CouponProducts")
@@ -289,6 +312,8 @@ model Product {
   viewHistory         ProductView[]
   consultationConfigs ConsultationConfig[]
   returnItems         ReturnItem[]
+  productRequests     ProductRequest[]
+
 
 
   @@index([slug])
@@ -351,6 +376,8 @@ model ProductVariant {
   
   // 🆕 NEW: Variant-specific media relation
   media      ProductVariantMedia[]
+  productRequests ProductRequest[]
+
 
   @@index([productId])
   @@index([sku])
@@ -413,6 +440,39 @@ model ProductMedia {
   @@index([type])                                 // NEW: Index for filtering by media type
   @@index([isActive])                             // NEW: Index for active media
   @@map("product_media")
+}
+
+model ProductRequest {
+  id                BigInt         @id @default(autoincrement())
+  userId            BigInt
+  productId         BigInt
+  variantId         BigInt?
+  quantity          Int            @default(1)
+  status            RequestStatus  @default(PENDING)
+  customerNote      String?        @db.Text
+  adminNote         String?        @db.Text
+  notifyWhenAvailable Boolean      @default(true)
+  estimatedAvailability DateTime?
+  requestNumber     String         @unique
+  
+  // If approved and fulfilled, link to actual order
+  orderId           BigInt?        @unique
+  
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  approvedAt        DateTime?
+  fulfilledAt       DateTime?
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product           Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant           ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  order             Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+  @@index([requestNumber])
+  @@map("product_requests")
 }
 
 model Warehouse {
@@ -600,6 +660,8 @@ model Order {
   shipment          Shipment?
   reviews           Review[]
   returns           Return[]
+  productRequest     ProductRequest?
+  consultation       Consultation?
 
 
 
@@ -894,6 +956,14 @@ model ConsultationConfig {
   categoryId BigInt?
   productId  BigInt?
   isActive   Boolean    @default(true)
+
+  // 🆕 NEW: Enhanced video features
+  enableVideoConsultation    Boolean @default(true)
+  enableVideoPurchasing      Boolean @default(false)
+  consultationDuration       Int?    @default(30)
+  consultationNote           String? @db.Text
+  videoPurchasingInstructions String? @db.Text
+
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -915,15 +985,26 @@ model Consultation {
   preferredTime   String
   status          ConsultationStatus    @default(REQUESTED)
   meetingLink     String?
+
+   // 🆕 NEW: Video purchasing fields
+  isPurchaseConsultation Boolean          @default(false)
+  purchaseCompleted      Boolean          @default(false)
+  orderId                BigInt?          @unique
+  consultationNotes      String?          @db.Text
+
   approvedBy      String?
   rejectionReason String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
+  completedAt     DateTime?
 
   user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order           Order?               @relation(fields: [orderId], references: [id], onDelete: SetNull)  // 🆕 NEW
+
 
   @@index([userId])
   @@index([status])
+  @@index([isPurchaseConsultation])     // 🆕 NEW
   @@map("consultations")
 }
 
