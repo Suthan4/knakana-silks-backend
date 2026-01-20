@@ -25,6 +25,8 @@ import couponRoutes from "./modules/coupon/presentation/routes/coupon.routes.js"
 import consultationRoutes from "./modules/consultation/presentation/routes/consultation.routes.js";
 import warehouseRoutes from "./modules/warehouse/presentation/routes/warehouse.routes.js";
 import uploadRoutes from "./shared/common/routes/s3.routes.js";
+import productRequestRoutes from "./modules/product-request/presentation/routes/product-request.routes.js";
+import searchRoutes from "./modules/search/presentation/routes/search.routes.js";
 
 export const createApp = (): Application => {
   const app = express();
@@ -106,6 +108,8 @@ app.options("*", cors(corsOptions));
   app.use("/api", couponRoutes);
   app.use("/api", consultationRoutes);
   app.use("/api", warehouseRoutes);
+  app.use("/api", productRequestRoutes);
+  app.use("/api", searchRoutes);
 
   /* --------------------------------------------------
    * Health check

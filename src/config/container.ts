@@ -16,6 +16,8 @@ import { registerShipmentModule } from "@/modules/shipment/container.js";
 import { registerCouponModule } from "@/modules/coupon/container.js";
 import { registerConsultationModule } from "@/modules/consultation/container.js";
 import { registerWarehouseModule } from "@/modules/warehouse/container.js";
+import { registerProductRequestModule } from "@/modules/product-request/container.js";
+import { registerSearchModule } from "@/modules/search/container.js";
 // import { registerUploadModule } from "@/modules/upload/container.js";
 
 export function setupContainer() {
@@ -23,7 +25,6 @@ export function setupContainer() {
   container.registerInstance(PrismaClient, getPrismaClient);
 
   registerAuthModule();
-  // registerUploadModule();
   registerWarehouseModule();
   registerCategoryModule();
   registerProductModule();
@@ -37,6 +38,8 @@ export function setupContainer() {
   registerPaymentModule()
   registerShipmentModule()
   registerEmailModule()
+  registerProductRequestModule()
   registerConsultationModule()
+  registerSearchModule()
   console.log("🎉 All modules registered successfully");
 }

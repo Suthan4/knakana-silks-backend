@@ -1,5 +1,6 @@
-import { Product, ProductVariant } from "@/generated/prisma/client.js";
+import { Prisma, Product, ProductVariant } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
+
 
 export interface IProductRepository {
   create(data: {
@@ -33,7 +34,13 @@ export interface IProductRepository {
   findById(id: bigint): Promise<Product | null>;
   findBySlug(slug: string): Promise<Product | null>;
   findBySku(sku: string): Promise<Product | null>;
-  findAll(params: any): Promise<Product[]>;
+  findAll( params: {
+    skip: number;
+    take: number;
+    where?: Prisma.ProductWhereInput;
+    orderBy?: Prisma.ProductOrderByWithRelationInput;
+    include?: Prisma.ProductInclude;
+  }): Promise<Product[]>;
   count(where: any): Promise<number>;
 
   // Specifications

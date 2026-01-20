@@ -1,4 +1,4 @@
-import { Category } from "@/generated/prisma/client.js";
+import { Category, Prisma } from "@/generated/prisma/client.js";
 
 export interface ICategoryRepository {
   findById(id: bigint): Promise<Category | null>;
@@ -6,8 +6,9 @@ export interface ICategoryRepository {
   findAll(params: {
     skip: number;
     take: number;
-    where?: any;
-    orderBy?: any;
+    where?: Prisma.CategoryWhereInput;
+    orderBy?: Prisma.CategoryOrderByWithRelationInput;
+    include?: Prisma.CategoryInclude;
   }): Promise<Category[]>;
   count(where?: any): Promise<number>;
   create(data: {
