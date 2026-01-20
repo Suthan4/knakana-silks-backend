@@ -134,8 +134,8 @@ export class PaymentWebhookController {
         email: order.user.email,
         firstName: order.user.firstName,
         orderNumber: order.orderNumber,
-        total: Number(order.total),
-        items: order.items.map((item) => ({
+        orderTotal: Number(order.total),
+        orderItems: order.items.map((item) => ({
           name: item.product.name,
           quantity: item.quantity,
           price: Number(item.price),
