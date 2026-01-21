@@ -77,53 +77,64 @@ export class CartRepository implements ICartRepository {
     productId: bigint,
     variantId?: bigint
   ): Promise<CartItem | null> {
-    if (variantId !== undefined) {
-      return this.prisma.cartItem.findUnique({
-        where: {
-          cartId_productId_variantId: {
-            cartId,
-            productId,
-            variantId,
-          },
-        },
-      });
-    } else {
-      return this.prisma.cartItem.findFirst({
-        where: {
-          cartId,
-          productId,
-          variantId: null,
-        },
-      });
-    }
+      // ✅ CRITICAL FIX: Use proper query to leverage partial indexes
+  
+  if (variantId !== undefined && variantId !== null) {
+    // For items WITH variants
+    return this.prisma.cartItem.findFirst({
+      where: {
+        cartId,
+        productId,
+        variantId, // This will use the variantId index
+      },
+    });
+  } else {
+    // For items WITHOUT variants  
+    return this.prisma.cartItem.findFirst({
+      where: {
+        cartId,
+        productId,
+        variantId: null, // This will use the no_variant index
+      },
+    });
+  }
   }
 
-  async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
-    return this.prisma.cart.findUnique({
-      where: { userId },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                media: {
-                  take: 1,
-                  where: { isActive: true },
-                  orderBy: { order: "asc" },
-                },
-                stock: true,
+async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
+  return this.prisma.cart.findUnique({
+    where: { userId },
+    include: {
+      items: {
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sellingPrice: true,
+              basePrice: true,
+              media: {
+                take: 1,
+                where: { isActive: true },
+                orderBy: { order: "asc" },
               },
+              stock: true,
             },
-            variant: {
-              include: {
-                stock: true,
-              },
+          },
+          variant: {
+            select: {
+              id: true,
+              price: true,
+              sellingPrice: true, // ✅ IMPORTANT
+              basePrice: true,    // ✅ optional but useful
+              stock: true,
             },
           },
         },
       },
-    });
-  }
+    },
+  });
+}
+
 
   async clearCart(cartId: bigint): Promise<void> {
     await this.prisma.cartItem.deleteMany({ where: { cartId } });

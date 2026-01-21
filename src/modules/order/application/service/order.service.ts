@@ -351,6 +351,144 @@ export class OrderService {
 /**
  * ✅ UPDATED: Get order preview with coupon support
  */
+// async getOrderPreview(
+//   userId: string,
+//   data: {
+//     shippingAddressId: string;
+//     couponCode?: string;
+//     items?: Array<{
+//       productId: string;
+//       variantId?: string;
+//       quantity: number;
+//     }>;
+//   }
+// ) {
+//   const userIdBigInt = BigInt(userId);
+//   const isBuyNow = !!data.items?.length;
+
+//   console.log("📦 getOrderPreview called with:", {
+//     userId,
+//     couponCode: data.couponCode,
+//     isBuyNow,
+//     itemsCount: data.items?.length
+//   });
+
+//   // 1. Get items (Buy Now or Cart)
+//   let orderItems: any[] = [];
+//   if (isBuyNow) {
+//     orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
+//       data.items!
+//     );
+//     if (!orderItems || orderItems.length === 0) {
+//       throw new Error("Buy now items not found");
+//     }
+//   } else {
+//     const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
+//     if (!cart || cart.items.length === 0) {
+//       throw new Error("Cart is empty");
+//     }
+//     orderItems = cart.items;
+//   }
+
+//   // 2. Validate address
+//   const address = await this.addressRepository.findById(
+//     BigInt(data.shippingAddressId)
+//   );
+//   if (!address || address.userId !== userIdBigInt) {
+//     throw new Error("Invalid shipping address");
+//   }
+
+//   // 3. Calculate subtotal
+//   let subtotal = 0;
+//   for (const item of orderItems) {
+//     const price = item.variant
+//       ? Number(item.variant.price)
+//       : Number(item.product.sellingPrice);
+//     subtotal += price * item.quantity;
+//   }
+
+//   console.log("💰 Calculated subtotal:", subtotal);
+
+//   // 4. Calculate shipping cost
+//   const shippingCost = this.calculateShippingCost(subtotal);
+
+//   // 5. ✅ Apply coupon if provided
+//   let couponDiscount = 0;
+//   let appliedCoupon: any = null;
+//   let couponError: string | undefined;
+
+//   if (data.couponCode) {
+//     console.log("🎟️ Attempting to apply coupon:", data.couponCode);
+    
+//     try {
+//       const couponResult = await this.validateAndApplyCoupon(
+//         data.couponCode,
+//         userId,
+//         orderItems
+//       );
+      
+//       couponDiscount = couponResult.discount;
+//       appliedCoupon = {
+//         id: couponResult.coupon.id.toString(),
+//         code: couponResult.coupon.code,
+//         description: couponResult.coupon.description,
+//         discountType: couponResult.coupon.discountType,
+//         discountValue: Number(couponResult.coupon.discountValue),
+//         minOrderValue: Number(couponResult.coupon.minOrderValue),
+//         maxDiscountAmount: couponResult.coupon.maxDiscountAmount
+//           ? Number(couponResult.coupon.maxDiscountAmount)
+//           : null,
+//         scope: couponResult.coupon.scope,
+//         userEligibility: couponResult.coupon.userEligibility,
+//         validFrom: couponResult.coupon.validFrom,
+//         validUntil: couponResult.coupon.validUntil,
+//         isActive: couponResult.coupon.isActive,
+//       };
+
+//       console.log("✅ Coupon applied successfully:", {
+//         code: appliedCoupon.code,
+//         discount: couponDiscount
+//       });
+//     } catch (error: any) {
+//       // ✅ CRITICAL FIX: Return error but don't throw
+//       // This allows preview to continue without coupon
+//       couponError = error.message;
+//       console.log("❌ Coupon validation failed:", error.message);
+      
+//       // Still return preview without discount
+//       couponDiscount = 0;
+//       appliedCoupon = null;
+//     }
+//   }
+
+//   // 6. Calculate breakdown with GST
+//   const breakdown = this.calculateOrderBreakdown({
+//     subtotal,
+//     couponDiscount,
+//     shippingCost,
+//   });
+
+//   // console.log("📊 Final breakdown:", {
+//   //   subtotal: breakdown.subtotal,
+//   //   couponDiscount: breakdown.couponDiscount,
+//   //   shippingCost: breakdown.shippingCost,
+//   //   gstAmount: breakdown.gstAmount,
+//   //   total: breakdown.total
+//   // });
+
+//   return {
+//     breakdown,
+//     estimatedDelivery: "3-5 business days",
+//     itemCount: orderItems.length,
+//     isServiceable: true,
+//     appliedCoupon,
+//     couponError, // ✅ Return error to frontend
+//   };
+// }
+
+/**
+ * ✅ FIXED: Get order preview with proper subtotal calculation
+ */
 async getOrderPreview(
   userId: string,
   data: {
@@ -383,12 +521,24 @@ async getOrderPreview(
       throw new Error("Buy now items not found");
     }
   } else {
+    // ✅ CART MODE - Get cart with items
     const cart = await this.cartRepository.getCartWithItems(userIdBigInt);
     if (!cart || cart.items.length === 0) {
       throw new Error("Cart is empty");
     }
     orderItems = cart.items;
   }
+
+  console.log("🛒 Order items structure:", {
+    itemCount: orderItems.length,
+    firstItem: orderItems[0] ? {
+      productId: orderItems[0].productId,
+      variantId: orderItems[0].variantId,
+      quantity: orderItems[0].quantity,
+      productPrice: orderItems[0].product?.sellingPrice,
+      variantPrice: orderItems[0].variant?.price,
+    } : null
+  });
 
   // 2. Validate address
   const address = await this.addressRepository.findById(
@@ -398,16 +548,40 @@ async getOrderPreview(
     throw new Error("Invalid shipping address");
   }
 
-  // 3. Calculate subtotal
+  // 3. ✅ CRITICAL FIX: Calculate subtotal with detailed logging
   let subtotal = 0;
   for (const item of orderItems) {
-    const price = item.variant
-      ? Number(item.variant.price)
-      : Number(item.product.sellingPrice);
-    subtotal += price * item.quantity;
+    // Determine the correct price to use
+    let itemPrice = 0;
+
+if (item.variant?.sellingPrice) {
+  itemPrice = Number(item.variant.sellingPrice);
+} else if (item.variant?.price) {
+  itemPrice = Number(item.variant.price);
+} else if (item.product?.sellingPrice) {
+  itemPrice = Number(item.product.sellingPrice);
+} else {
+  throw new Error("Product price not found");
+}
+
+
+    const itemSubtotal = itemPrice * item.quantity;
+    subtotal += itemSubtotal;
+
+    console.log(`💰 Item calculation:`, {
+      productName: item.product?.name,
+      price: itemPrice,
+      quantity: item.quantity,
+      itemSubtotal,
+      runningSubtotal: subtotal
+    });
   }
 
-  console.log("💰 Calculated subtotal:", subtotal);
+  console.log("💰 Final subtotal calculated:", {
+    subtotal,
+    mode: isBuyNow ? "BuyNow" : "Cart",
+    itemCount: orderItems.length
+  });
 
   // 4. Calculate shipping cost
   const shippingCost = this.calculateShippingCost(subtotal);
@@ -418,7 +592,7 @@ async getOrderPreview(
   let couponError: string | undefined;
 
   if (data.couponCode) {
-    console.log("🎟️ Attempting to apply coupon:", data.couponCode);
+    console.log("🎟️ Attempting to apply coupon:", data.couponCode, "to subtotal:", subtotal);
     
     try {
       const couponResult = await this.validateAndApplyCoupon(
@@ -447,15 +621,13 @@ async getOrderPreview(
 
       console.log("✅ Coupon applied successfully:", {
         code: appliedCoupon.code,
-        discount: couponDiscount
+        discountAmount: couponDiscount,
+        subtotalBefore: subtotal,
+        subtotalAfter: subtotal - couponDiscount
       });
     } catch (error: any) {
-      // ✅ CRITICAL FIX: Return error but don't throw
-      // This allows preview to continue without coupon
       couponError = error.message;
       console.log("❌ Coupon validation failed:", error.message);
-      
-      // Still return preview without discount
       couponDiscount = 0;
       appliedCoupon = null;
     }
@@ -468,13 +640,14 @@ async getOrderPreview(
     shippingCost,
   });
 
-  // console.log("📊 Final breakdown:", {
-  //   subtotal: breakdown.subtotal,
-  //   couponDiscount: breakdown.couponDiscount,
-  //   shippingCost: breakdown.shippingCost,
-  //   gstAmount: breakdown.gstAmount,
-  //   total: breakdown.total
-  // });
+  console.log("📊 Final breakdown:", {
+    subtotal: breakdown.subtotal,
+    couponDiscount: breakdown.couponDiscount,
+    shippingCost: breakdown.shippingCost,
+    taxableAmount: breakdown.taxableAmount,
+    gstAmount: breakdown.gstAmount,
+    total: breakdown.total
+  });
 
   return {
     breakdown,
@@ -482,7 +655,7 @@ async getOrderPreview(
     itemCount: orderItems.length,
     isServiceable: true,
     appliedCoupon,
-    couponError, // ✅ Return error to frontend
+    couponError,
   };
 }
 

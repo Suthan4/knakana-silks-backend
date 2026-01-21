@@ -64,16 +64,29 @@ export class CartService {
     if (!product.isActive) {
       throw new Error("Product is not available");
     }
-
+    // ✅ CRITICAL FIX: Properly check for existing item
+    const variantIdBigInt = variantId ? BigInt(variantId) : undefined
+     console.log("🔍 Checking for existing cart item:", {
+    cartId: cart.id.toString(),
+    productId,
+    variantId: variantId || "none",
+  })
     // Check if item already exists in cart
     const existingItem = await this.cartRepository.findItem(
       cart.id,
       BigInt(productId),
       variantId ? BigInt(variantId) : undefined
     );
+      console.log("📦 Existing item found:", !!existingItem);
+
 
     if (existingItem) {
       // Update quantity
+       console.log("✏️ Updating existing item quantity:", {
+      oldQuantity: existingItem.quantity,
+      newQuantity: existingItem.quantity + quantity,
+    });
+    
       return this.cartRepository.updateItem(
         existingItem.id,
         existingItem.quantity + quantity
@@ -81,6 +94,8 @@ export class CartService {
     }
 
     // Add new item
+    console.log("➕ Adding new cart item");
+
     return this.cartRepository.addItem({
       cartId: cart.id,
       productId: BigInt(productId),
