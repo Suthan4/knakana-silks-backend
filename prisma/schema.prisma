@@ -37,10 +37,13 @@ enum PaymentStatus {
 }
 
 enum PaymentMethod {
-  CARD
-  UPI
-  WALLET
-  NET_BANKING
+  CARD          // Credit/Debit Cards
+  UPI           // UPI (Google Pay, PhonePe, etc.)
+  NETBANKING    // Net Banking
+  WALLET        // Wallets (Paytm, Mobikwik, etc.)
+  EMI           // EMI/Cardless EMI
+  COD           // Cash on Delivery
+  PAYLATER      // Buy Now Pay Later (Simpl, LazyPay, etc.)
 }
 
 enum ConsultationPlatform {
@@ -739,6 +742,14 @@ model Payment {
   refundAmount      Decimal        @db.Decimal(10, 2) @default(0)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+
+  // Optional payment details
+  cardNetwork       String?       // "Visa", "Mastercard", "RuPay"
+  cardLast4         String?       // "1234"
+  cardType          String?       // "credit", "debit"
+  upiId             String?       // "user@paytm"
+  bankName          String?       // Bank name
+  walletName        String?       // Wallet name
 
   order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
 

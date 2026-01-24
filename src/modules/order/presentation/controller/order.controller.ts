@@ -3,8 +3,6 @@ import { inject, injectable } from "tsyringe";
 import { OrderService } from "../../application/service/order.service.js";
 import { z } from "zod";
 import {
-  CreateOrderDTOSchema,
-  QueryOrderDTOSchema,
   UpdateOrderStatusDTOSchema,
   VerifyPaymentDTOSchema,
 } from "../../application/dtos/order.dtos.js";
@@ -13,10 +11,26 @@ const CancelOrderDTOSchema = z.object({
   reason: z.string().optional(),
 });
 
-// ✅ NEW: Order Preview DTO Schema
 const OrderPreviewDTOSchema = z.object({
   shippingAddressId: z.string().min(1, "Shipping address is required"),
   couponCode: z.string().optional(),
+  items: z
+    .array(
+      z.object({
+        productId: z.string(),
+        variantId: z.string().optional(),
+        quantity: z.number().min(1),
+      })
+    )
+    .optional(),
+});
+
+// ✅ NEW: Initiate payment DTO
+const InitiatePaymentDTOSchema = z.object({
+  shippingAddressId: z.string().min(1, "Shipping address is required"),
+  billingAddressId: z.string().min(1, "Billing address is required"),
+  couponCode: z.string().optional(),
+  paymentMethod: z.enum(["CARD","UPI","NETBANKING","WALLET","EMI","COD","PAYLATER"]),
   items: z
     .array(
       z.object({
@@ -33,7 +47,7 @@ export class OrderController {
   constructor(@inject(OrderService) private orderService: OrderService) {}
 
   /**
-   * ✅ NEW: Get order preview with accurate totals
+   * Get order preview
    * POST /api/orders/preview
    */
   async getOrderPreview(req: Request, res: Response) {
@@ -56,16 +70,27 @@ export class OrderController {
     }
   }
 
-  async createOrder(req: Request, res: Response) {
+  /**
+   * ✅ NEW: Initiate payment (creates Razorpay order WITHOUT DB order)
+   * POST /api/orders/initiate-payment
+   */
+  async initiatePayment(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
-      const data = CreateOrderDTOSchema.parse(req.body);
+      const data = InitiatePaymentDTOSchema.parse(req.body);
 
-      const result = await this.orderService.createOrder(userId, data);
 
-      res.status(201).json({
+      const result = await this.orderService.initiatePayment(userId, {
+        shippingAddressId: data.shippingAddressId,
+        billingAddressId: data.billingAddressId,
+        couponCode: data.couponCode,
+        paymentMethod: data.paymentMethod,
+        items: data.items,
+      });
+
+      res.status(200).json({
         success: true,
-        message: "Order created successfully",
+        message: "Payment session created",
         data: result,
       });
     } catch (error: any) {
@@ -73,6 +98,10 @@ export class OrderController {
     }
   }
 
+  /**
+   * ✅ UPDATED: Verify payment AND create order
+   * POST /api/orders/verify-payment
+   */
   async verifyPayment(req: Request, res: Response) {
     try {
       const data = VerifyPaymentDTOSchema.parse(req.body);
@@ -80,7 +109,7 @@ export class OrderController {
 
       res.json({
         success: true,
-        message: "Payment verified successfully",
+        message: "Payment verified and order created successfully",
         data: order,
       });
     } catch (error: any) {
@@ -91,7 +120,7 @@ export class OrderController {
   async getUserOrders(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
-      const params = QueryOrderDTOSchema.parse({
+      const params = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 10,
         status: req.query.status as any,
@@ -99,7 +128,7 @@ export class OrderController {
         endDate: req.query.endDate as string,
         sortBy: req.query.sortBy as any,
         sortOrder: req.query.sortOrder as any,
-      });
+      };
 
       const result = await this.orderService.getUserOrders(userId, params);
 
@@ -219,7 +248,7 @@ export class OrderController {
   // Admin endpoints
   async getAllOrders(req: Request, res: Response) {
     try {
-      const params = QueryOrderDTOSchema.parse({
+      const params = {
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 10,
         status: req.query.status as any,
@@ -227,7 +256,7 @@ export class OrderController {
         endDate: req.query.endDate as string,
         sortBy: req.query.sortBy as any,
         sortOrder: req.query.sortOrder as any,
-      });
+      };
 
       const result = await this.orderService.getAllOrders(params);
 

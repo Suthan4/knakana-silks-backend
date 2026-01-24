@@ -53,6 +53,13 @@ export class PaymentRepository implements IPaymentRepository {
     status: any;
     amount: number;
     refundAmount?: number;
+     // ✅ ADD THESE:
+  cardNetwork?: string | null;
+  cardLast4?: string | null;
+  cardType?: string | null;
+  upiId?: string | null;
+  bankName?: string | null;
+  walletName?: string | null;
   }): Promise<Payment> {
     return this.prisma.payment.create({
       data: {
@@ -63,6 +70,12 @@ export class PaymentRepository implements IPaymentRepository {
         status: data.status,
         amount: data.amount,
         refundAmount: data.refundAmount ?? 0,
+         cardNetwork: data.cardNetwork,
+      cardLast4: data.cardLast4,
+      cardType: data.cardType,
+      upiId: data.upiId,
+      bankName: data.bankName,
+      walletName: data.walletName,
       },
     });
   }

@@ -13,29 +13,25 @@ const getOrderController = () => container.resolve(OrderController);
 // ==================== USER ROUTES (Authenticated) ====================
 
 /**
- * ✅ NEW: Get order preview (calculate totals without creating order)
+ * Get order preview (calculate totals without creating order)
  * POST /api/orders/preview
  * Body: { shippingAddressId, couponCode?, items? }
- * 
- * Use Cases:
- * - Cart checkout: { shippingAddressId, couponCode }
- * - Buy Now checkout: { shippingAddressId, items: [...] }
  */
 router.post("/orders/preview", authenticate, (req, res) =>
   getOrderController().getOrderPreview(req, res)
 );
 
 /**
- * Create order from cart or Buy Now
- * POST /api/orders
+ * ✅ NEW: Initiate payment session (creates Razorpay order, NO DB order yet)
+ * POST /api/orders/initiate-payment
  * Body: { shippingAddressId, billingAddressId, couponCode?, paymentMethod, items? }
  */
-router.post("/orders", authenticate, (req, res) =>
-  getOrderController().createOrder(req, res)
+router.post("/orders/initiate-payment", authenticate, (req, res) =>
+  getOrderController().initiatePayment(req, res)
 );
 
 /**
- * Verify Razorpay payment
+ * ✅ UPDATED: Verify payment AND create order in DB
  * POST /api/orders/verify-payment
  * Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
  */

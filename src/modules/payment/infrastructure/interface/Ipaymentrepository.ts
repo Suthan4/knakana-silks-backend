@@ -24,6 +24,12 @@ export interface IPaymentRepository {
     status: any;
     amount: number;
     refundAmount?: number;
+     cardNetwork?: string | null;
+    cardLast4?: string | null;
+    cardType?: string | null;
+    upiId?: string | null;
+    bankName?: string | null;
+    walletName?: string | null;
   }): Promise<Payment>;
   update(id: bigint, data: Partial<Payment>): Promise<Payment>;
   updateByOrderId(orderId: bigint, data: Partial<Payment>): Promise<Payment>;
