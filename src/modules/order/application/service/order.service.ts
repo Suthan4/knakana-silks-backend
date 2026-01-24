@@ -529,16 +529,18 @@ async getOrderPreview(
     orderItems = cart.items;
   }
 
-  console.log("🛒 Order items structure:", {
-    itemCount: orderItems.length,
-    firstItem: orderItems[0] ? {
-      productId: orderItems[0].productId,
-      variantId: orderItems[0].variantId,
-      quantity: orderItems[0].quantity,
-      productPrice: orderItems[0].product?.sellingPrice,
-      variantPrice: orderItems[0].variant?.price,
-    } : null
-  });
+  // Right after getting order items (around line 480)
+console.log("🛒 Order items structure:", {
+  itemCount: orderItems.length,
+  firstItem: orderItems[0] ? {
+    productId: orderItems[0].productId,
+    categoryId: orderItems[0].product?.categoryId, // ✅ Should now be present
+    variantId: orderItems[0].variantId,
+    quantity: orderItems[0].quantity,
+    productPrice: orderItems[0].product?.sellingPrice,
+    variantPrice: orderItems[0].variant?.sellingPrice, // ✅ Should now be present
+  } : null
+});
 
   // 2. Validate address
   const address = await this.addressRepository.findById(
