@@ -7,6 +7,8 @@ import { ShiprocketRepository } from "./infrastructure/repository/ShiprocketRepo
 import { ShiprocketService } from "./infrastructure/services/shiprocket.service.js";
 import { ShipmentService } from "./application/service/shipment.service.js";
 import { ShipmentController } from "./presentation/controller/shipment.controller.js";
+import { ShippingCalculatorService } from "./application/service/shipping.calculator.service.js";
+import { ShippingCalculatorController } from "./presentation/controller/shipping.calculator.controller.js";
 
 export function registerShipmentModule() {
   // Register Shiprocket Service (used by ShiprocketRepository)
@@ -26,6 +28,12 @@ export function registerShipmentModule() {
 
   // Register Controllers
   container.registerSingleton(ShipmentController);
+
+    // Register Shipping Calculator Service
+  container.registerSingleton(ShippingCalculatorService);
+
+  // Register Shipping Calculator Controller
+  container.registerSingleton(ShippingCalculatorController);
 
   console.log("✅ Shipment module registered (with Shiprocket Repository)");
 }

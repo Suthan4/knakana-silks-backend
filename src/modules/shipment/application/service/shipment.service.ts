@@ -40,7 +40,7 @@ export class ShipmentService {
         case PaymentMethod.CARD:
         case PaymentMethod.UPI:
         case PaymentMethod.WALLET:
-        case PaymentMethod.NET_BANKING:
+        case PaymentMethod.NETBANKING:
           return "Prepaid";
         default:
           return "Prepaid";

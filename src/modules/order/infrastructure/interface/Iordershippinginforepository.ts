@@ -61,4 +61,9 @@ export interface IOrderShippingInfoRepository {
    * Count orders by warehouse
    */
   countByWarehouseId(warehouseId: bigint): Promise<number>;
+  
+  updateByOrderId(
+  orderId: bigint,
+  data: Partial<OrderShippingInfo>
+): Promise<OrderShippingInfo>;
 }

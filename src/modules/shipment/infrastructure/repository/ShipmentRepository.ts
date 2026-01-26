@@ -46,6 +46,7 @@ export class ShipmentRepository implements IShipmentRepository {
   async create(data: {
     orderId: bigint;
     shiprocketOrderId?: string;
+    shiprocketShipmentId?: string;
     trackingNumber?: string;
     courierName?: string;
     estimatedDelivery?: Date;
@@ -54,6 +55,7 @@ export class ShipmentRepository implements IShipmentRepository {
       data: {
         orderId: data.orderId,
         shiprocketOrderId: data.shiprocketOrderId,
+        shiprocketShipmentId: data.shiprocketShipmentId,
         trackingNumber: data.trackingNumber,
         courierName: data.courierName,
         estimatedDelivery: data.estimatedDelivery,

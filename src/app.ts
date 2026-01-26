@@ -27,6 +27,7 @@ import warehouseRoutes from "./modules/warehouse/presentation/routes/warehouse.r
 import uploadRoutes from "./shared/common/routes/s3.routes.js";
 import productRequestRoutes from "./modules/product-request/presentation/routes/product-request.routes.js";
 import searchRoutes from "./modules/search/presentation/routes/search.routes.js";
+import shippingCalculatorRoutes from "./modules/shipment/presentation/routes/shipping.calculator.routes.js";
 
 export const createApp = (): Application => {
   const app = express();
@@ -110,6 +111,7 @@ app.options("*", cors(corsOptions));
   app.use("/api", warehouseRoutes);
   app.use("/api", productRequestRoutes);
   app.use("/api", searchRoutes);
+  app.use("/api", shippingCalculatorRoutes);
 
   /* --------------------------------------------------
    * Health check

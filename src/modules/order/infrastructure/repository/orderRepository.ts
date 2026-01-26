@@ -272,6 +272,63 @@ export class OrderRepository implements IOrderRepository {
     return result;
   }
 
+  async findManyForAutoAwb(params?: { take?: number }): Promise<OrderWithRelations[]> {
+  return this.prisma.order.findMany({
+    where: {
+      status: "PROCESSING",
+
+      // ✅ must have shiprocket order already created
+      shipment: {
+        is: {
+          shiprocketOrderId: { not: null },
+          trackingNumber: null, // ✅ no AWB yet
+        },
+      },
+
+      // ✅ must have shipping info (courierPreference)
+      shippingInfo: {
+        isNot: null,
+      },
+    },
+
+    take: params?.take ?? 20, // ✅ process small batch
+    orderBy: { createdAt: "asc" }, // ✅ oldest first
+
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+        },
+      },
+      items: {
+        include: {
+          product: {
+            include: {
+              media: {
+                take: 1,
+                where: { isActive: true },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          variant: true,
+        },
+      },
+      shippingAddress: true,
+      billingAddress: true,
+      payment: true,
+      shipment: true,
+      coupon: true,
+      shippingInfo: true,
+    },
+  });
+}
+
+
   async update(
     id: bigint,
     data: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput

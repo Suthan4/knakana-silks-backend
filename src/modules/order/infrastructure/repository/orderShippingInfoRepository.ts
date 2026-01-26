@@ -123,4 +123,14 @@ export class OrderShippingInfoRepository
       where: { warehouseId },
     });
   }
+
+  async updateByOrderId(
+  orderId: bigint,
+  data: Partial<OrderShippingInfo>
+): Promise<OrderShippingInfo> {
+  return this.prisma.orderShippingInfo.update({
+    where: { orderId },
+    data,
+  });
+}
 }

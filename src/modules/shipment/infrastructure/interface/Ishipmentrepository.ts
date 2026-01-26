@@ -19,6 +19,7 @@ export interface IShipmentRepository {
   create(data: {
     orderId: bigint;
     shiprocketOrderId?: string;
+    shiprocketShipmentId?: string;
     trackingNumber?: string;
     courierName?: string;
     estimatedDelivery?: Date;

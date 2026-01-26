@@ -159,6 +159,7 @@ export interface ShiprocketCancelResponse {
 
 export interface AvailableCouriersResponse {
   data: {
+    shiprocket_recommended_courier_id: any;
     available_courier_companies: Array<{
       id: number;
       courier_company_id: number;

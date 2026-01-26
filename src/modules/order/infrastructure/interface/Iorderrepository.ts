@@ -94,4 +94,5 @@ export interface IOrderRepository {
   }): Promise<OrderItem>;
 
   getOrderItemsFromBuyNow(items: BuyNowItemDTO[]): Promise<BuyNowOrderItem[]>;
+  findManyForAutoAwb(params?: { take?: number }): Promise<OrderWithRelations[]>;
 }

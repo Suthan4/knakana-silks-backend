@@ -15,6 +15,9 @@ import {
   DiscountType,
 } from "@/generated/prisma/enums.js";
 import { IOrderShippingInfoRepository } from "../../infrastructure/interface/Iordershippinginforepository.js";
+import { ShippingCalculatorService } from "@/modules/shipment/application/service/shipping.calculator.service.js";
+import { IShipmentRepository } from "@/modules/shipment/infrastructure/interface/Ishipmentrepository.js";
+import { ShiprocketService } from "@/modules/shipment/infrastructure/services/shiprocket.service.js";
 
 interface ShippingDimensions {
   totalWeight: number;
@@ -62,8 +65,14 @@ export class OrderService {
     private orderShippingInfoRepository: IOrderShippingInfoRepository,
     @inject("ICouponRepository")
     private couponRepository: ICouponRepository,
+    @inject("IShipmentRepository")
+    private shipmentRepository: IShipmentRepository,
     @inject(RazorpayService) private razorpayService: RazorpayService,
-    @inject(EmailService) private emailService: EmailService
+    @inject(EmailService) private emailService: EmailService,
+    @inject(ShippingCalculatorService) 
+    private shippingCalculatorService: ShippingCalculatorService,
+    @inject(ShiprocketService) 
+    private shiprocketService: ShiprocketService
   ) {}
 
   /**
@@ -344,6 +353,7 @@ export class OrderService {
     const userIdBigInt = BigInt(userId);
     const isBuyNow = !!data.items?.length;
 
+    // ✅ 1) Get order items (BuyNow OR Cart)
     let orderItems: any[] = [];
     if (isBuyNow) {
       orderItems = await this.orderRepository.getOrderItemsFromBuyNow(
@@ -360,13 +370,14 @@ export class OrderService {
       orderItems = cart.items;
     }
 
+    // ✅ 2) Validate shipping address
     const address = await this.addressRepository.findById(
       BigInt(data.shippingAddressId)
     );
     if (!address || address.userId !== userIdBigInt) {
       throw new Error("Invalid shipping address");
     }
-
+    // ✅ 3) Calculate subtotal
     let subtotal = 0;
     for (const item of orderItems) {
       let itemPrice = 0;
@@ -383,8 +394,7 @@ export class OrderService {
       subtotal += itemSubtotal;
     }
 
-    const shippingCost = this.calculateShippingCost(subtotal);
-
+  // ✅ 4) Coupon calculation (optional)
     let couponDiscount = 0;
     let appliedCoupon: any = null;
     let couponError: string | undefined;
@@ -420,6 +430,15 @@ export class OrderService {
         appliedCoupon = null;
       }
     }
+  // ✅ 5) Shipping calculation from ShippingCalculatorService
+  // NOTE: use BuyNow items if exist otherwise undefined for cart
+  const shippingInfo = await this.shippingCalculatorService.calculateCartShipping(
+    userId,
+    address.pincode,
+    data.items // ✅ pass BuyNow items (if any)
+  );
+// ✅ 6) Final breakdown calculation (GST on subtotal - couponDiscount + shippingCost)
+  const shippingCost = Number(shippingInfo.shippingCost ?? 0);
 
     const breakdown = this.calculateOrderBreakdown({
       subtotal,
@@ -429,9 +448,20 @@ export class OrderService {
 
     return {
       breakdown,
-      estimatedDelivery: "3-5 business days",
+      estimatedDelivery:  shippingInfo.estimatedDelivery ?? "3-5 business days",
       itemCount: orderItems.length,
       isServiceable: true,
+       // ✅ shipping extra info for UI
+    shippingInfo: {
+      serviceable: shippingInfo.serviceable,
+      isFreeShipping: shippingInfo.isFreeShipping,
+      freeShippingThreshold: shippingInfo.freeShippingThreshold,
+      amountNeededForFreeShipping: shippingInfo.amountNeededForFreeShipping,
+      chargeableWeight: shippingInfo.chargeableWeight,
+      availableCouriers: shippingInfo.availableCouriers,
+      cheapestCourier: shippingInfo.cheapestCourier,
+      fastestCourier: shippingInfo.fastestCourier,
+    },
       appliedCoupon,
       couponError,
     };
@@ -519,6 +549,10 @@ export class OrderService {
       couponDiscount,
       shippingCost,
     });
+
+    if (data.paymentMethod === "COD" && breakdown.total > 2000) {
+      throw new Error("COD is available only for orders up to ₹2000");
+    }
 
     // 5. Generate order number
     const orderNumber = NumberUtil.generateOrderNumber();
@@ -698,6 +732,71 @@ export class OrderService {
       });
     }
 
+// ✅ 11.1 Create Shiprocket Order
+const orderData = {
+  orderNumber: order.orderNumber,
+  orderDate: new Date().toISOString(),
+
+  pickupLocation: pickupWarehouse.name,
+  pickupName: pickupWarehouse.contactPerson || pickupWarehouse.name,
+  pickupAddress: pickupWarehouse.address,
+  pickupAddress2: pickupWarehouse.addressLine2 || undefined,
+  pickupCity: pickupWarehouse.city,
+  pickupPincode: pickupWarehouse.pincode,
+  pickupState: pickupWarehouse.state,
+  pickupCountry: pickupWarehouse.country || "India",
+  pickupEmail: pickupWarehouse.email,
+  pickupPhone: pickupWarehouse.phone,
+
+  billingCustomerName: shippingAddress.fullName,
+  billingAddress: shippingAddress.addressLine1,
+  billingAddress2: shippingAddress.addressLine2 || undefined,
+  billingCity: shippingAddress.city,
+  billingPincode: shippingAddress.pincode,
+  billingState: shippingAddress.state,
+  billingCountry: shippingAddress.country,
+  // billingEmail: shippingAddress?.email,
+  billingPhone: shippingAddress.phone,
+
+  shippingIsBilling: true,
+  shippingCustomerName: shippingAddress.fullName,
+  shippingAddress: shippingAddress.addressLine1,
+  shippingAddress2: shippingAddress.addressLine2 || undefined,
+  shippingCity: shippingAddress.city,
+  shippingPincode: shippingAddress.pincode,
+  shippingState: shippingAddress.state,
+  shippingCountry: shippingAddress.country,
+  // shippingEmail: shippingAddress.email,
+  shippingPhone: shippingAddress.phone,
+
+  orderItems: orderItems.map((item) => ({
+    name: item.product.name,
+    sku: item.product.sku,
+    units: item.quantity,
+    sellingPrice: Number(item.price),
+    discount: 0,
+    tax: 0,
+  })),
+
+  paymentMethod: "Prepaid",
+  subTotal: Number(order.subtotal),
+
+  length: shippingDimensions.length,
+  breadth: shippingDimensions.breadth,
+  height: shippingDimensions.height,
+  weight: shippingDimensions.chargeableWeight,
+};
+
+// ✅ Create Shiprocket order
+const shiprocketOrder = await this.shiprocketService.createOrder(orderData);
+
+// ✅ Save shipment record in DB
+await this.shipmentRepository.create({
+  orderId: order.id,
+  shiprocketOrderId: String(shiprocketOrder.order_id),
+  shiprocketShipmentId: String(shiprocketOrder.shipment_id),
+});
+
     // 12. Fetch payment details to get actual payment method and additional info
     const paymentDetails = await this.razorpayService.fetchPayment(
       params.razorpay_payment_id
@@ -806,11 +905,12 @@ export class OrderService {
   }
 
   async cancelOrder(userId: string, orderId: string, reason?: string) {
-    const order = await this.orderRepository.findById(BigInt(orderId));
+    const ORDER_CANCELLATION_WINDOW_HOURS = 24;
+    const orderBigId = BigInt(orderId);
 
-    if (!order) {
-      throw new Error("Order not found");
-    }
+    const order = await this.orderRepository.findById(orderBigId);
+
+    if (!order) throw new Error("Order not found");
 
     if (order.userId !== BigInt(userId)) {
       throw new Error("Unauthorized: You can only cancel your own orders");
@@ -825,35 +925,54 @@ export class OrderService {
     }
 
     if (order.status === OrderStatus.DELIVERED) {
-      throw new Error(
-        "Delivered orders cannot be cancelled. Please raise a return request instead"
-      );
+      throw new Error("Delivered orders cannot be cancelled. Please raise a return request instead");
     }
 
+    // ✅ if shipped already → no cancel allowed (because pickup done)
     if (order.status === OrderStatus.SHIPPED) {
-      throw new Error(
-        "Order has been shipped and cannot be cancelled. Please reject the shipment upon delivery or raise a return request"
-      );
+      throw new Error("Order has been shipped and cannot be cancelled. Please reject upon delivery or raise return request");
     }
 
-    const ORDER_CANCELLATION_WINDOW_HOURS = 24;
+    // ✅ Check cancellation window (24hr)
     const orderAge = Date.now() - order.createdAt.getTime();
-    const maxCancellationTime =
-      ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
+    const maxCancellationTime = ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
 
-    if (
-      order.status === OrderStatus.PROCESSING &&
-      orderAge > maxCancellationTime
-    ) {
-      throw new Error(
-        `Order can only be cancelled within ${ORDER_CANCELLATION_WINDOW_HOURS} hours of placement`
-      );
+    if (order.status === OrderStatus.PROCESSING && orderAge > maxCancellationTime) {
+      throw new Error(`Order can only be cancelled within ${ORDER_CANCELLATION_WINDOW_HOURS} hours of placement`);
     }
 
+    // ✅ EXTRA SAFETY RULE:
+    // If AWB already generated (trackingNumber exists), don't allow cancel
+    if (order.shipment?.trackingNumber) {
+      throw new Error("Courier already assigned (AWB generated). Cancellation not allowed now.");
+    }
+
+    // ✅ STEP A: Cancel in Shiprocket (if shiprocketOrderId exists)
+    let shiprocketCancelled = false;
+
+    try {
+      if (order.shipment?.shiprocketOrderId) {
+        await this.shiprocketService.cancelShipment([
+          Number(order.shipment.shiprocketOrderId),
+        ]);
+        shiprocketCancelled = true;
+        console.log(`✅ Shiprocket cancelled for order: ${order.orderNumber}`);
+      }
+    } catch (err) {
+      console.error("❌ Shiprocket cancellation failed:", err);
+
+      // ✅ IMPORTANT:
+      // If Shiprocket cancel fails, DO NOT cancel DB order.
+      // This prevents mismatch: DB cancelled but Shiprocket still active.
+      throw new Error("Failed to cancel shipment in Shiprocket. Please try again.");
+    }
+
+    // ✅ STEP B: Cancel order in DB
     await this.orderRepository.update(order.id, {
       status: OrderStatus.CANCELLED,
     });
 
+    // ✅ STEP C: Decrement coupon usage (if used)
     if (order.couponId) {
       try {
         const coupon = await this.couponRepository.findById(order.couponId);
@@ -868,17 +987,20 @@ export class OrderService {
       }
     }
 
+    // ✅ STEP D: Refund payment if prepaid
     let refundProcessed = false;
+
     if (order.payment && order.payment.status === PaymentStatus.SUCCESS) {
       try {
         await this.refundPayment(order.payment.id);
         refundProcessed = true;
         console.log(`✅ Refund processed for order: ${order.orderNumber}`);
       } catch (error) {
-        console.error("Refund processing failed:", error);
+        console.error("❌ Refund processing failed:", error);
       }
     }
 
+    // ✅ STEP E: Send email
     try {
       await this.emailService.sendOrderCancellation({
         email: order.user.email,
@@ -899,70 +1021,59 @@ export class OrderService {
     return {
       order: updatedOrder,
       refundProcessed,
+      shiprocketCancelled,
       message: "Order cancelled successfully",
     };
   }
 
+
   async canCancelOrder(
-    userId: string,
-    orderId: string
-  ): Promise<{
-    canCancel: boolean;
-    reason?: string;
-  }> {
-    const order = await this.orderRepository.findById(BigInt(orderId));
+  userId: string,
+  orderId: string
+): Promise<{ canCancel: boolean; reason?: string }> {
+  const order = await this.orderRepository.findById(BigInt(orderId));
 
-    if (!order) {
-      return { canCancel: false, reason: "Order not found" };
-    }
+  if (!order) return { canCancel: false, reason: "Order not found" };
 
-    if (order.userId !== BigInt(userId)) {
-      return { canCancel: false, reason: "Unauthorized" };
-    }
-
-    if (order.status === OrderStatus.CANCELLED) {
-      return { canCancel: false, reason: "Order is already cancelled" };
-    }
-
-    if (order.status === OrderStatus.COMPLETED) {
-      return {
-        canCancel: false,
-        reason: "Completed orders cannot be cancelled",
-      };
-    }
-
-    if (order.status === OrderStatus.DELIVERED) {
-      return {
-        canCancel: false,
-        reason: "Please raise a return request for delivered orders",
-      };
-    }
-
-    if (order.status === OrderStatus.SHIPPED) {
-      return {
-        canCancel: false,
-        reason:
-          "Order has been shipped. Reject upon delivery or raise return request",
-      };
-    }
-
-    const ORDER_CANCELLATION_WINDOW_HOURS = 24;
-    const orderAge = Date.now() - order.createdAt.getTime();
-    const maxCancellationTime =
-      ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
-
-    if (
-      order.status === OrderStatus.PROCESSING &&
-      orderAge > maxCancellationTime
-    ) {
-      return {
-        canCancel: false,
-        reason: `Cancellation window of ${ORDER_CANCELLATION_WINDOW_HOURS} hours has passed`,
-      };
-    }
-
-    return { canCancel: true };
+  if (order.userId !== BigInt(userId)) {
+    return { canCancel: false, reason: "Unauthorized" };
   }
+
+  if (order.status === OrderStatus.CANCELLED) {
+    return { canCancel: false, reason: "Order is already cancelled" };
+  }
+
+  if (order.status === OrderStatus.COMPLETED) {
+    return { canCancel: false, reason: "Completed orders cannot be cancelled" };
+  }
+
+  if (order.status === OrderStatus.DELIVERED) {
+    return { canCancel: false, reason: "Please raise return request for delivered orders" };
+  }
+
+  if (order.status === OrderStatus.SHIPPED) {
+    return { canCancel: false, reason: "Order already shipped. Reject or return." };
+  }
+
+  // ✅ No cancel allowed if AWB generated
+  if (order.shipment?.trackingNumber) {
+    return { canCancel: false, reason: "AWB already generated. Cannot cancel now." };
+  }
+
+  const ORDER_CANCELLATION_WINDOW_HOURS = 24;
+  const orderAge = Date.now() - order.createdAt.getTime();
+  const maxCancellationTime = ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
+
+  if (order.status === OrderStatus.PROCESSING && orderAge > maxCancellationTime) {
+    return {
+      canCancel: false,
+      reason: `Cancellation window of ${ORDER_CANCELLATION_WINDOW_HOURS} hours has passed`,
+    };
+  }
+
+  return { canCancel: true };
+}
+
 
   async getUserOrders(
     userId: string,
@@ -1124,6 +1235,8 @@ export class OrderService {
       },
     };
   }
+
+  
 
   private async refundPayment(paymentId: bigint) {
     const payment = await this.paymentRepository.findById(paymentId);
