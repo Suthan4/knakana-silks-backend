@@ -5,7 +5,6 @@ import {
   CreateReturnDTOSchema,
   UpdateReturnStatusDTOSchema,
   QueryReturnDTOSchema,
-  ScheduleReturnPickupDTOSchema,
 } from "../../application/dtos/return.dtos.js";
 
 @injectable()
@@ -13,7 +12,39 @@ export class ReturnController {
   constructor(@inject(ReturnService) private returnService: ReturnService) {}
 
   /**
+   * ✅ Check return eligibility (User)
+   * GET /api/returns/eligibility/:orderId
+   * Used by frontend to show/hide return button and display countdown
+   */
+  async checkReturnEligibility(req: Request, res: Response) {
+    try {
+      const userId = req.user!.userId;
+      const { orderId } = req.params;
+
+      if (!orderId) {
+        res
+          .status(400)
+          .json({ success: false, message: "Order ID is required" });
+        return;
+      }
+
+      const eligibility = await this.returnService.checkReturnEligibility(
+        userId,
+        orderId
+      );
+
+      res.json({
+        success: true,
+        data: eligibility,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  /**
    * Create return request (User)
+   * POST /api/returns
    */
   async createReturn(req: Request, res: Response) {
     try {
@@ -34,6 +65,7 @@ export class ReturnController {
 
   /**
    * Get user returns (User)
+   * GET /api/returns/my-returns
    */
   async getUserReturns(req: Request, res: Response) {
     try {
@@ -61,6 +93,7 @@ export class ReturnController {
 
   /**
    * Get return by ID (User)
+   * GET /api/returns/:id
    */
   async getReturn(req: Request, res: Response) {
     try {
@@ -87,6 +120,7 @@ export class ReturnController {
 
   /**
    * Track return shipment (User)
+   * GET /api/returns/:id/track
    */
   async trackReturnShipment(req: Request, res: Response) {
     try {
@@ -112,6 +146,7 @@ export class ReturnController {
 
   /**
    * Get all returns (Admin)
+   * GET /api/admin/returns
    */
   async getAllReturns(req: Request, res: Response) {
     try {
@@ -137,12 +172,13 @@ export class ReturnController {
   }
 
   /**
-   * Update return status (Admin)
+   * ✅ Approve return (Admin)
+   * POST /api/admin/returns/:id/approve
    */
-  async updateReturnStatus(req: Request, res: Response) {
+  async approveReturn(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const data = UpdateReturnStatusDTOSchema.parse(req.body);
+      const { adminNotes } = req.body;
 
       if (!id) {
         res
@@ -151,14 +187,14 @@ export class ReturnController {
         return;
       }
 
-      const returnRequest = await this.returnService.updateReturnStatus(
+      const returnRequest = await this.returnService.approveReturn(
         id,
-        data
+        adminNotes
       );
 
       res.json({
         success: true,
-        message: "Return status updated successfully",
+        message: "Return approved successfully",
         data: returnRequest,
       });
     } catch (error: any) {
@@ -167,21 +203,37 @@ export class ReturnController {
   }
 
   /**
-   * Schedule return pickup (Admin)
+   * ✅ Reject return (Admin)
+   * POST /api/admin/returns/:id/reject
    */
-  async scheduleReturnPickup(req: Request, res: Response) {
+  async rejectReturn(req: Request, res: Response) {
     try {
-      const data = ScheduleReturnPickupDTOSchema.parse(req.body);
-      const pickupDate = new Date(data.pickupDate);
+      const { id } = req.params;
+      const { rejectionReason, adminNotes } = req.body;
 
-      const returnRequest = await this.returnService.scheduleReturnPickup(
-        data.returnId,
-        pickupDate
+      if (!id) {
+        res
+          .status(400)
+          .json({ success: false, message: "Return ID is required" });
+        return;
+      }
+
+      if (!rejectionReason) {
+        res
+          .status(400)
+          .json({ success: false, message: "Rejection reason is required" });
+        return;
+      }
+
+      const returnRequest = await this.returnService.rejectReturn(
+        id,
+        rejectionReason,
+        adminNotes
       );
 
       res.json({
         success: true,
-        message: "Return pickup scheduled successfully",
+        message: "Return rejected successfully",
         data: returnRequest,
       });
     } catch (error: any) {
@@ -191,6 +243,7 @@ export class ReturnController {
 
   /**
    * Process refund (Admin)
+   * POST /api/admin/returns/:id/process-refund
    */
   async processRefund(req: Request, res: Response) {
     try {
@@ -208,32 +261,6 @@ export class ReturnController {
       res.json({
         success: true,
         message: "Refund initiated successfully",
-        data: returnRequest,
-      });
-    } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
-    }
-  }
-
-  /**
-   * Complete return (Admin)
-   */
-  async completeReturn(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-
-      if (!id) {
-        res
-          .status(400)
-          .json({ success: false, message: "Return ID is required" });
-        return;
-      }
-
-      const returnRequest = await this.returnService.completeReturn(id);
-
-      res.json({
-        success: true,
-        message: "Return completed successfully",
         data: returnRequest,
       });
     } catch (error: any) {

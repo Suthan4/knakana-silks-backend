@@ -2,15 +2,12 @@ import { inject, injectable } from "tsyringe";
 import {
   Return,
   ReturnItem,
-  ReturnShipment,
-  ReturnMedia, // NEW
-  PrismaClient,
   Prisma,
+  PrismaClient,
 } from "@/generated/prisma/client.js";
-import { MediaType } from "@/generated/prisma/enums.js";
 import {
-  IReturnRepository,
   ReturnWithRelations,
+  IReturnRepository,
 } from "../interface/Ireturnrepository.js";
 
 @injectable()
@@ -32,13 +29,11 @@ export class ReturnRepository implements IReturnRepository {
         },
         order: {
           include: {
-            shippingAddress: true,
             items: {
               include: {
                 product: {
                   include: {
                     media: {
-                      // UPDATED
                       take: 1,
                       where: { isActive: true },
                       orderBy: { order: "asc" },
@@ -48,6 +43,19 @@ export class ReturnRepository implements IReturnRepository {
                 variant: true,
               },
             },
+            shippingAddress: true,
+            billingAddress: true,
+            shippingInfo: true,
+            payment: true,
+            shipment: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
         returnItems: {
@@ -55,7 +63,6 @@ export class ReturnRepository implements IReturnRepository {
             product: {
               include: {
                 media: {
-                  // UPDATED
                   take: 1,
                   where: { isActive: true },
                   orderBy: { order: "asc" },
@@ -67,7 +74,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
-        media: true, // NEW: Include return media
+        media: true,
       },
     });
   }
@@ -89,13 +96,11 @@ export class ReturnRepository implements IReturnRepository {
         },
         order: {
           include: {
-            shippingAddress: true,
             items: {
               include: {
                 product: {
                   include: {
                     media: {
-                      // UPDATED
                       take: 1,
                       where: { isActive: true },
                       orderBy: { order: "asc" },
@@ -105,6 +110,19 @@ export class ReturnRepository implements IReturnRepository {
                 variant: true,
               },
             },
+            shippingAddress: true,
+            billingAddress: true,
+            shippingInfo: true,
+            payment: true,
+            shipment: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
         returnItems: {
@@ -112,7 +130,6 @@ export class ReturnRepository implements IReturnRepository {
             product: {
               include: {
                 media: {
-                  // UPDATED
                   take: 1,
                   where: { isActive: true },
                   orderBy: { order: "asc" },
@@ -124,7 +141,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
-        media: true, // NEW
+        media: true,
       },
     });
   }
@@ -150,13 +167,11 @@ export class ReturnRepository implements IReturnRepository {
         },
         order: {
           include: {
-            shippingAddress: true,
             items: {
               include: {
                 product: {
                   include: {
                     media: {
-                      // UPDATED
                       take: 1,
                       where: { isActive: true },
                       orderBy: { order: "asc" },
@@ -166,6 +181,19 @@ export class ReturnRepository implements IReturnRepository {
                 variant: true,
               },
             },
+            shippingAddress: true,
+            billingAddress: true,
+            shippingInfo: true,
+            payment: true,
+            shipment: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
         returnItems: {
@@ -173,7 +201,6 @@ export class ReturnRepository implements IReturnRepository {
             product: {
               include: {
                 media: {
-                  // UPDATED
                   take: 1,
                   where: { isActive: true },
                   orderBy: { order: "asc" },
@@ -185,7 +212,72 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
-        media: true, // NEW
+        media: true,
+      },
+    });
+  }
+
+  async findByOrderId(orderId: bigint): Promise<ReturnWithRelations[]> {
+    return this.prisma.return.findMany({
+      where: { orderId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+        order: {
+          include: {
+            items: {
+              include: {
+                product: {
+                  include: {
+                    media: {
+                      take: 1,
+                      where: { isActive: true },
+                      orderBy: { order: "asc" },
+                    },
+                  },
+                },
+                variant: true,
+              },
+            },
+            shippingAddress: true,
+            billingAddress: true,
+            shippingInfo: true,
+            payment: true,
+            shipment: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        returnItems: {
+          include: {
+            product: {
+              include: {
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
+              },
+            },
+            variant: true,
+            orderItem: true,
+          },
+        },
+        returnShipment: true,
+        media: true,
       },
     });
   }
@@ -219,13 +311,11 @@ export class ReturnRepository implements IReturnRepository {
         },
         order: {
           include: {
-            shippingAddress: true,
             items: {
               include: {
                 product: {
                   include: {
                     media: {
-                      // UPDATED
                       take: 1,
                       where: { isActive: true },
                       orderBy: { order: "asc" },
@@ -235,6 +325,19 @@ export class ReturnRepository implements IReturnRepository {
                 variant: true,
               },
             },
+            shippingAddress: true,
+            billingAddress: true,
+            shippingInfo: true,
+            payment: true,
+            shipment: true,
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
         returnItems: {
@@ -242,7 +345,6 @@ export class ReturnRepository implements IReturnRepository {
             product: {
               include: {
                 media: {
-                  // UPDATED
                   take: 1,
                   where: { isActive: true },
                   orderBy: { order: "asc" },
@@ -254,7 +356,7 @@ export class ReturnRepository implements IReturnRepository {
           },
         },
         returnShipment: true,
-        media: true, // NEW
+        media: true,
       },
     });
   }
@@ -264,23 +366,35 @@ export class ReturnRepository implements IReturnRepository {
   }
 
   async create(data: {
-    returnNumber: string;
     userId: bigint;
     orderId: bigint;
+    returnNumber: string;
     reason: any;
     reasonDetails: string;
-    images: string[];
-    status: any;
+    images?: string[];
     refundAmount: number;
     refundMethod: any;
     bankDetails?: any;
   }): Promise<Return> {
     return this.prisma.return.create({
-      data,
+      data: {
+        userId: data.userId,
+        orderId: data.orderId,
+        returnNumber: data.returnNumber,
+        reason: data.reason,
+        reasonDetails: data.reasonDetails,
+        images: data.images || [],
+        refundAmount: data.refundAmount,
+        refundMethod: data.refundMethod,
+        bankDetails: data.bankDetails,
+      },
     });
   }
 
-  async update(id: bigint, data: Prisma.ReturnUpdateInput): Promise<Return> {
+  async update(
+    id: bigint,
+    data: Prisma.ReturnUpdateInput | Prisma.ReturnUncheckedUpdateInput
+  ): Promise<Return> {
     return this.prisma.return.update({
       where: { id },
       data,
@@ -314,55 +428,23 @@ export class ReturnRepository implements IReturnRepository {
     pickupDate: Date;
     trackingUrl?: string;
     status: string;
-  }): Promise<ReturnShipment> {
+  }): Promise<any> {
     return this.prisma.returnShipment.create({
       data,
     });
   }
 
-  async updateReturnShipment(id: bigint, data: any): Promise<ReturnShipment> {
+  async updateReturnShipment(id: bigint, data: any): Promise<any> {
     return this.prisma.returnShipment.update({
       where: { id },
       data,
     });
   }
 
-  // NEW: ReturnMedia methods
-  async addReturnMedia(
-    returnId: bigint,
-    data: {
-      type: MediaType;
-      url: string;
-      key?: string;
-      thumbnailUrl?: string;
-      mimeType?: string;
-      fileSize?: bigint;
-      duration?: number;
-      width?: number;
-      height?: number;
-      order?: number;
-      description?: string;
-    }
-  ): Promise<ReturnMedia> {
-    return this.prisma.returnMedia.create({
-      data: {
-        returnId,
-        type: data.type,
-        url: data.url,
-        key: data.key,
-        thumbnailUrl: data.thumbnailUrl,
-        mimeType: data.mimeType,
-        fileSize: data.fileSize,
-        duration: data.duration,
-        width: data.width,
-        height: data.height,
-        order: data.order ?? 0,
-        description: data.description,
-      },
+  async hasReturnForOrderItem(orderItemId: bigint): Promise<boolean> {
+    const count = await this.prisma.returnItem.count({
+      where: { orderItemId },
     });
-  }
-
-  async deleteReturnMedia(id: bigint): Promise<void> {
-    await this.prisma.returnMedia.delete({ where: { id } });
+    return count > 0;
   }
 }

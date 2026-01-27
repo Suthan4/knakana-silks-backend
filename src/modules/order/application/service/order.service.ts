@@ -624,6 +624,7 @@ console.log("pickupWarehouse",pickupWarehouse);
     } else {
       selectedCourier = shippingInfo.cheapestCourier;
     }
+    console.log("selectedCourierCompanyId",selectedCourierCompanyId);
 
     // ✅ Create shipping info with courier selection
     await this.orderShippingInfoRepository.create({

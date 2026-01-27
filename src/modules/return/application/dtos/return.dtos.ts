@@ -11,7 +11,7 @@ const ReturnMediaSchema = z.object({
   type: z.nativeEnum(MediaType).default(MediaType.IMAGE),
   url: z.string().url("Invalid media URL"),
   key: z.string().optional(),
-  thumbnailUrl: z.string().url().optional(),
+  thumbnailUrl: z.string().url().optional(),  
   mimeType: z.string().optional(),
   fileSize: z.number().int().positive().optional(),
   duration: z.number().int().positive().optional(),

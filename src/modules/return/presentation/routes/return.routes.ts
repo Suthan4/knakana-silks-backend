@@ -13,6 +13,15 @@ const getReturnController = () => container.resolve(ReturnController);
 // ==================== USER ROUTES (Authenticated) ====================
 
 /**
+ * ✅ Check return eligibility
+ * GET /api/returns/eligibility/:orderId
+ * Used by frontend to determine if return button should be shown
+ */
+router.get("/returns/eligibility/:orderId", authenticate, (req, res) =>
+  getReturnController().checkReturnEligibility(req, res)
+);
+
+/**
  * Create return request
  * POST /api/returns
  */
@@ -58,25 +67,25 @@ router.get(
 );
 
 /**
- * Update return status
- * PUT /api/admin/returns/:id/status
+ * ✅ Approve return
+ * POST /api/admin/returns/:id/approve
  */
-router.put(
-  "/admin/returns/:id/status",
+router.post(
+  "/admin/returns/:id/approve",
   authenticate,
   checkPermission("returns", "update"),
-  (req, res) => getReturnController().updateReturnStatus(req, res)
+  (req, res) => getReturnController().approveReturn(req, res)
 );
 
 /**
- * Schedule return pickup
- * POST /api/admin/returns/schedule-pickup
+ * ✅ Reject return
+ * POST /api/admin/returns/:id/reject
  */
 router.post(
-  "/admin/returns/schedule-pickup",
+  "/admin/returns/:id/reject",
   authenticate,
   checkPermission("returns", "update"),
-  (req, res) => getReturnController().scheduleReturnPickup(req, res)
+  (req, res) => getReturnController().rejectReturn(req, res)
 );
 
 /**
@@ -88,17 +97,6 @@ router.post(
   authenticate,
   checkPermission("returns", "update"),
   (req, res) => getReturnController().processRefund(req, res)
-);
-
-/**
- * Complete return
- * POST /api/admin/returns/:id/complete
- */
-router.post(
-  "/admin/returns/:id/complete",
-  authenticate,
-  checkPermission("returns", "update"),
-  (req, res) => getReturnController().completeReturn(req, res)
 );
 
 export default router;

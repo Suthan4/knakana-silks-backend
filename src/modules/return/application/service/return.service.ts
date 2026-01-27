@@ -5,7 +5,6 @@ import { IPaymentRepository } from "@/modules/payment/infrastructure/interface/I
 import { ShiprocketService } from "@/modules/shipment/infrastructure/services/shiprocket.service.js";
 import { RazorpayService } from "@/modules/payment/application/service/razorpay.service.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
-import { NumberUtil } from "@/shared/utils/index.js";
 import {
   ReturnReason,
   ReturnStatus,
@@ -15,8 +14,28 @@ import {
 } from "@/generated/prisma/enums.js";
 import { Prisma } from "@/generated/prisma/client.js";
 
+interface ReturnEligibility {
+  eligible: boolean;
+  reason?: string;
+  returnWindowHours: number;
+  deliveredAt?: Date;
+  hoursRemaining?: number;
+  daysRemaining?: number;
+}
+
 @injectable()
 export class ReturnService {
+  // ✅ CRITICAL: 24-hour return window after delivery
+  private readonly RETURN_WINDOW_HOURS = 24;
+
+  // ✅ Free return reasons (customer not at fault - no shipping deduction)
+  private readonly FREE_RETURN_REASONS: ReturnReason[] = [
+    ReturnReason.DEFECTIVE,
+    ReturnReason.WRONG_ITEM,
+    ReturnReason.NOT_AS_DESCRIBED,
+    ReturnReason.DAMAGED_IN_TRANSIT,
+  ];
+
   constructor(
     @inject("IReturnRepository") private returnRepository: IReturnRepository,
     @inject("IOrderRepository") private orderRepository: IOrderRepository,
@@ -27,7 +46,146 @@ export class ReturnService {
   ) {}
 
   /**
-   * Create return request
+   * ✅ Check if order is eligible for return (24-hour window enforcement)
+   * This is called BEFORE showing the return button to the user
+   */
+  async checkReturnEligibility(
+    userId: string,
+    orderId: string
+  ): Promise<ReturnEligibility> {
+    const order = await this.orderRepository.findById(BigInt(orderId));
+
+    if (!order) {
+      return {
+        eligible: false,
+        reason: "Order not found",
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+      };
+    }
+
+    // ✅ Verify ownership
+    if (order.userId !== BigInt(userId)) {
+      return {
+        eligible: false,
+        reason: "Unauthorized",
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+      };
+    }
+
+    // ✅ CRITICAL: Must be delivered (not pending, processing, shipped, or cancelled)
+    if (order.status !== OrderStatus.DELIVERED) {
+      return {
+        eligible: false,
+        reason: "Order must be delivered before initiating a return",
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+      };
+    }
+
+    // ✅ Check delivery date exists
+    if (!order.shipment?.deliveredAt) {
+      return {
+        eligible: false,
+        reason: "Delivery date not available",
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+      };
+    }
+
+    // ✅ CRITICAL: Check 24-hour window
+    const deliveredAt = new Date(order.shipment.deliveredAt);
+    const now = new Date();
+    const hoursSinceDelivery =
+      (now.getTime() - deliveredAt.getTime()) / (1000 * 60 * 60);
+
+    if (hoursSinceDelivery > this.RETURN_WINDOW_HOURS) {
+      return {
+        eligible: false,
+        reason: `Return window has expired. Returns must be initiated within ${this.RETURN_WINDOW_HOURS} hours of delivery.`,
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+        deliveredAt,
+        hoursRemaining: 0,
+        daysRemaining: 0,
+      };
+    }
+
+    // ✅ Check for existing active returns
+    const existingReturns = await this.returnRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: {
+        orderId: order.id,
+        status: {
+          notIn: [ReturnStatus.REJECTED, ReturnStatus.CLOSED],
+        },
+      },
+    });
+
+    if (existingReturns.length > 0) {
+      return {
+        eligible: false,
+        reason: "A return request is already in progress for this order",
+        returnWindowHours: this.RETURN_WINDOW_HOURS,
+        deliveredAt,
+        hoursRemaining: 0,
+      };
+    }
+
+    // ✅ ELIGIBLE: Return window is still open
+    const hoursRemaining = Math.max(
+      0,
+      this.RETURN_WINDOW_HOURS - hoursSinceDelivery
+    );
+
+    return {
+      eligible: true,
+      returnWindowHours: this.RETURN_WINDOW_HOURS,
+      deliveredAt,
+      hoursRemaining: Math.floor(hoursRemaining * 10) / 10, // Round to 1 decimal
+      daysRemaining: Math.floor((hoursRemaining / 24) * 10) / 10,
+    };
+  }
+
+  /**
+   * ✅ Calculate reverse shipping cost using Shiprocket (for paid returns only)
+   */
+  private async calculateReverseShippingCost(order: any): Promise<number> {
+    if (!order.shippingInfo) {
+      console.warn("⚠️ No shipping info found, using default reverse shipping cost");
+      return 50; // Default fallback
+    }
+
+    try {
+      // ✅ Get reverse logistics quote (from customer to warehouse)
+      const couriers = await this.shiprocketService.getAvailableCouriers({
+        pickupPostcode: order.shippingAddress.pincode, // Customer location (pickup)
+        deliveryPostcode: order.shippingInfo.pickupPincode, // Warehouse (delivery)
+        weight: order.shippingInfo.chargeableWeight,
+        cod: 0, // No COD for returns
+      });
+
+      if (
+        couriers.data?.available_courier_companies &&
+        couriers.data.available_courier_companies.length > 0
+      ) {
+        // ✅ Get cheapest courier for reverse shipping
+        const cheapest = couriers.data.available_courier_companies.reduce(
+          (prev: any, curr: any) =>
+            curr.freight_charge < prev.freight_charge ? curr : prev
+        );
+        console.log(
+          `📦 Reverse shipping cost: ₹${cheapest.freight_charge} (${cheapest.courier_name})`
+        );
+        return cheapest.freight_charge;
+      }
+    } catch (error) {
+      console.error("❌ Shiprocket reverse logistics quote failed:", error);
+    }
+
+    console.warn("⚠️ Using default reverse shipping cost");
+    return 50; // Default fallback
+  }
+
+  /**
+   * ✅ Create return request with smart refund calculation
    */
   async createReturn(
     userId: string,
@@ -44,40 +202,16 @@ export class ReturnService {
       bankDetails?: any;
     }
   ) {
+    // ✅ CRITICAL: Check eligibility first
+    const eligibility = await this.checkReturnEligibility(userId, data.orderId);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason || "Order not eligible for return");
+    }
+
     const order = await this.orderRepository.findById(BigInt(data.orderId));
+    if (!order) throw new Error("Order not found");
 
-    if (!order) {
-      throw new Error("Order not found");
-    }
-
-    // Verify user owns the order
-    if (order.userId !== BigInt(userId)) {
-      throw new Error("Unauthorized: You can only return your own orders");
-    }
-
-    // Check if order is eligible for return
-    if (order.status !== OrderStatus.DELIVERED) {
-      throw new Error("Only delivered orders can be returned");
-    }
-
-    // Check return window (7 days from delivery)
-    const RETURN_WINDOW_DAYS = 7;
-    const deliveryDate = order.shipment?.deliveredAt;
-    if (!deliveryDate) {
-      throw new Error("Delivery date not found");
-    }
-
-    const daysSinceDelivery = Math.floor(
-      (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (daysSinceDelivery > RETURN_WINDOW_DAYS) {
-      throw new Error(
-        `Return window of ${RETURN_WINDOW_DAYS} days has expired`
-      );
-    }
-
-    // Validate order items belong to this order
+    // ✅ Validate order items
     const orderItemIds = order.items.map((item) => item.id);
     const requestedItemIds = data.orderItems.map((item) =>
       BigInt(item.orderItemId)
@@ -89,7 +223,7 @@ export class ReturnService {
       }
     }
 
-    // Check if items already have return requests
+    // ✅ Check if items already have returns
     for (const item of data.orderItems) {
       const existingReturn = await this.returnRepository.findAll({
         skip: 0,
@@ -114,39 +248,87 @@ export class ReturnService {
       }
     }
 
-    // Calculate refund amount
-    let refundAmount = 0;
+    // ✅ Calculate items refund
+    const totalOrderAmount = Number(order.total);
+    const totalOrderItems = order.items.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
+    const returnItemsCount = data.orderItems.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
+
+    let itemsRefund = 0;
     for (const item of data.orderItems) {
       const orderItem = order.items.find(
         (oi) => oi.id === BigInt(item.orderItemId)
       );
       if (orderItem) {
-        refundAmount += Number(orderItem.price) * item.quantity;
+        itemsRefund += Number(orderItem.price) * item.quantity;
       }
     }
 
-    // Generate return number
-    const returnNumber = this.generateReturnNumber();
+    // ✅ CRITICAL: Proportional shipping refund
+    const shippingRefund =
+      (Number(order.shippingCost) * returnItemsCount) / totalOrderItems;
 
-    if (!data.orderItems || data.orderItems.length === 0) {
-      throw new Error("At least one order item is required for return");
+    let refundAmount = itemsRefund + shippingRefund;
+
+    // ✅ CRITICAL: Determine if free return or paid return
+    const primaryReason = data.orderItems[0]?.reason;
+    const isFreeReturn = this.FREE_RETURN_REASONS.includes(primaryReason);
+
+    if (!isFreeReturn) {
+      // ✅ PAID RETURN: Deduct reverse shipping cost
+      try {
+        const reverseShippingCost = await this.calculateReverseShippingCost(
+          order
+        );
+        console.log(
+          `💰 Return type: PAID (deducting ₹${reverseShippingCost} reverse shipping)`
+        );
+        refundAmount = Math.max(0, refundAmount - reverseShippingCost);
+      } catch (error) {
+        console.error("Failed to calculate reverse shipping:", error);
+        const defaultReverseShipping = 50;
+        refundAmount = Math.max(0, refundAmount - defaultReverseShipping);
+      }
+    } else {
+      console.log(`🎁 Return type: FREE (no shipping charges deducted)`);
     }
 
-    // Create return - use empty array if images not provided
+    // ✅ Validate bank details for BANK_TRANSFER
+    if (
+      data.refundMethod === RefundMethod.BANK_TRANSFER &&
+      (!data.bankDetails ||
+        !data.bankDetails.accountNumber ||
+        !data.bankDetails.ifscCode ||
+        !data.bankDetails.accountHolderName)
+    ) {
+      throw new Error(
+        "Bank details are required for bank transfer refund method"
+      );
+    }
+
+    // ✅ Generate return number
+    const returnNumber = this.generateReturnNumber();
+
+    // ✅ Create return
     const returnRequest = await this.returnRepository.create({
       returnNumber,
       userId: BigInt(userId),
       orderId: order.id,
-      reason: data.orderItems?.[0]?.reason ?? ReturnReason.OTHER,
+      reason: primaryReason ?? ReturnReason.OTHER,
       reasonDetails: data.reasonDetails,
-      images: data.images || [], // Provide default empty array
+      images: data.images || [],
       status: ReturnStatus.PENDING,
       refundAmount,
       refundMethod: data.refundMethod,
       bankDetails: data.bankDetails,
     });
 
-    // Add return items
+    // ✅ Add return items
     for (const item of data.orderItems) {
       const orderItem = order.items.find(
         (oi) => oi.id === BigInt(item.orderItemId)
@@ -163,7 +345,11 @@ export class ReturnService {
       }
     }
 
-    // Send notification email
+    console.log(
+      `✅ Return created: ${returnNumber} (Free: ${isFreeReturn}, Refund: ₹${refundAmount.toFixed(2)})`
+    );
+
+    // ✅ Send email
     try {
       await this.emailService.sendEmail({
         to: order.user.email,
@@ -171,28 +357,136 @@ export class ReturnService {
         html: this.getReturnRequestEmailTemplate(
           order.user.firstName,
           returnNumber,
-          refundAmount
+          refundAmount,
+          isFreeReturn
         ),
       });
     } catch (error) {
       console.error("Failed to send return request email:", error);
     }
 
-    console.log(`✅ Return request created: ${returnNumber}`);
+    return this.returnRepository.findById(returnRequest.id);
+  }
+
+  /**
+   * Admin: Approve return and create Shiprocket reverse order
+   */
+  async approveReturn(returnId: string, adminNotes?: string) {
+    const returnRequest = await this.returnRepository.findById(
+      BigInt(returnId)
+    );
+
+    if (!returnRequest) {
+      throw new Error("Return request not found");
+    }
+
+    if (returnRequest.status !== ReturnStatus.PENDING) {
+      throw new Error("Only pending returns can be approved");
+    }
+
+    const order = returnRequest.order;
+
+    // ✅ Create return order in Shiprocket for reverse logistics
+    try {
+      const returnOrderData = {
+        orderId: `RET-${returnRequest.returnNumber}`,
+        orderDate: new Date().toISOString(),
+        channelId: "custom",
+        pickupCustomerName: order.shippingAddress.fullName,
+        pickupAddress: order.shippingAddress.addressLine1,
+        pickupCity: order.shippingAddress.city,
+        pickupPincode: order.shippingAddress.pincode,
+        pickupState: order.shippingAddress.state,
+        pickupCountry: order.shippingAddress.country,
+        pickupEmail: returnRequest.user.email,
+        pickupPhone: order.shippingAddress.phone,
+        shippingCustomerName:
+          order.shippingInfo?.warehouseName || "Warehouse",
+        shippingAddress:
+          order.shippingInfo?.pickupAddress ||
+          process.env.WAREHOUSE_ADDRESS ||
+          "",
+        shippingCity:
+          order.shippingInfo?.pickupCity || process.env.WAREHOUSE_CITY || "",
+        shippingPincode:
+          order.shippingInfo?.pickupPincode ||
+          process.env.WAREHOUSE_PINCODE ||
+          "",
+        shippingState:
+          order.shippingInfo?.pickupState ||
+          process.env.WAREHOUSE_STATE ||
+          "",
+        shippingCountry: "India",
+        shippingEmail: process.env.WAREHOUSE_EMAIL || "",
+        shippingPhone:
+          order.shippingInfo?.pickupPhone ||
+          process.env.WAREHOUSE_PHONE ||
+          "",
+        orderItems: returnRequest.returnItems.map((item) => ({
+          name: item.product.name,
+          sku: item.product.sku,
+          units: item.quantity,
+          sellingPrice: item.price,
+        })),
+      };
+
+      const shiprocketOrder = await this.shiprocketService.createReturnOrder(
+        returnOrderData
+      );
+
+      // ✅ Create return shipment record
+      const returnShipment = await this.returnRepository.createReturnShipment({
+        shiprocketOrderId: shiprocketOrder.order_id.toString(),
+        awb: shiprocketOrder.shipment_id?.toString() || "",
+        courierName: "Pending",
+        pickupDate: new Date(),
+        status: "PICKUP_SCHEDULED",
+      });
+
+      // ✅ Link shipment and approve return
+      await this.returnRepository.update(returnRequest.id, {
+        returnShipmentId: returnShipment.id,
+        status: ReturnStatus.APPROVED,
+        adminNotes,
+      });
+
+      console.log(`✅ Return approved: ${returnRequest.returnNumber}`);
+    } catch (error) {
+      console.error("Shiprocket return order creation failed:", error);
+      // Still approve the return even if Shiprocket fails
+      await this.returnRepository.update(returnRequest.id, {
+        status: ReturnStatus.APPROVED,
+        adminNotes: adminNotes
+          ? `${adminNotes}\n\nNote: Shiprocket order creation failed, needs manual handling`
+          : "Shiprocket order creation failed, needs manual handling",
+      });
+    }
+
+    // ✅ Send approval email
+    try {
+      await this.emailService.sendEmail({
+        to: returnRequest.user.email,
+        subject: `Return Approved - ${returnRequest.returnNumber}`,
+        html: this.getReturnStatusEmailTemplate(
+          returnRequest.user.firstName,
+          returnRequest.returnNumber,
+          ReturnStatus.APPROVED
+        ),
+      });
+    } catch (error) {
+      console.error("Failed to send approval email:", error);
+    }
 
     return this.returnRepository.findById(returnRequest.id);
   }
 
   /**
-   * Admin: Update return status
+   * Admin: Reject return
    */
-  async updateReturnStatus(
+  async rejectReturn(
     returnId: string,
-    data: {
-      status: ReturnStatus;
-      adminNotes?: string;
-      rejectionReason?: string;
-    }
+    rejectionReason: string,
+    adminNotes?: string
   ) {
     const returnRequest = await this.returnRepository.findById(
       BigInt(returnId)
@@ -202,135 +496,35 @@ export class ReturnService {
       throw new Error("Return request not found");
     }
 
-    // Validate status transition
-    if (returnRequest.status === ReturnStatus.CLOSED) {
-      throw new Error("Cannot update closed return requests");
+    if (returnRequest.status !== ReturnStatus.PENDING) {
+      throw new Error("Only pending returns can be rejected");
     }
 
-    const updateData: any = {
-      status: data.status,
-      adminNotes: data.adminNotes,
-    };
+    await this.returnRepository.update(returnRequest.id, {
+      status: ReturnStatus.REJECTED,
+      rejectionReason,
+      adminNotes,
+    });
 
-    if (data.status === ReturnStatus.REJECTED) {
-      if (!data.rejectionReason) {
-        throw new Error("Rejection reason is required");
-      }
-      updateData.rejectionReason = data.rejectionReason;
-    }
-
-    const updated = await this.returnRepository.update(
-      returnRequest.id,
-      updateData
-    );
-
-    // Send status update email
+    // ✅ Send rejection email
     try {
       await this.emailService.sendEmail({
         to: returnRequest.user.email,
-        subject: `Return Status Update - ${returnRequest.returnNumber}`,
+        subject: `Return Rejected - ${returnRequest.returnNumber}`,
         html: this.getReturnStatusEmailTemplate(
           returnRequest.user.firstName,
           returnRequest.returnNumber,
-          data.status,
-          data.rejectionReason
+          ReturnStatus.REJECTED,
+          rejectionReason
         ),
       });
     } catch (error) {
-      console.error("Failed to send status update email:", error);
+      console.error("Failed to send rejection email:", error);
     }
 
-    console.log(
-      `✅ Return status updated: ${returnRequest.returnNumber} -> ${data.status}`
-    );
+    console.log(`✅ Return rejected: ${returnRequest.returnNumber}`);
 
     return this.returnRepository.findById(returnRequest.id);
-  }
-
-  /**
-   * Admin: Schedule return pickup via Shiprocket
-   */
-  async scheduleReturnPickup(returnId: string, pickupDate: Date) {
-    const returnRequest = await this.returnRepository.findById(
-      BigInt(returnId)
-    );
-
-    if (!returnRequest) {
-      throw new Error("Return request not found");
-    }
-
-    if (returnRequest.status !== ReturnStatus.APPROVED) {
-      throw new Error("Return must be approved before scheduling pickup");
-    }
-
-    const order = returnRequest.order;
-
-    // Create return order in Shiprocket
-    const returnOrderData = {
-      orderId: `RET-${returnRequest.returnNumber}`,
-      orderDate: new Date().toISOString(),
-      channelId: "custom",
-      pickupCustomerName: order.shippingAddress.fullName,
-      pickupAddress: order.shippingAddress.addressLine1,
-      pickupCity: order.shippingAddress.city,
-      pickupPincode: order.shippingAddress.pincode,
-      pickupState: order.shippingAddress.state,
-      pickupCountry: order.shippingAddress.country,
-      pickupEmail: returnRequest.user.email,
-      pickupPhone: order.shippingAddress.phone,
-      shippingCustomerName: process.env.WAREHOUSE_NAME || "Kangana Silks",
-      shippingAddress: process.env.WAREHOUSE_ADDRESS || "",
-      shippingCity: process.env.WAREHOUSE_CITY || "",
-      shippingPincode: process.env.WAREHOUSE_PINCODE || "",
-      shippingState: process.env.WAREHOUSE_STATE || "",
-      shippingCountry: "India",
-      shippingEmail: process.env.WAREHOUSE_EMAIL || "",
-      shippingPhone: process.env.WAREHOUSE_PHONE || "",
-      orderItems: returnRequest.returnItems.map((item) => ({
-        name: item.product.name,
-        sku: item.product.sku,
-        units: item.quantity,
-        sellingPrice: item.price,
-      })),
-    };
-
-    const shiprocketOrder = await this.shiprocketService.createReturnOrder(
-      returnOrderData
-    );
-
-    // Create return shipment record
-    const returnShipment = await this.returnRepository.createReturnShipment({
-      shiprocketOrderId: shiprocketOrder.order_id.toString(),
-      awb: shiprocketOrder.shipment_id?.toString() || "",
-      courierName: "Pending",
-      pickupDate,
-      status: "PICKUP_SCHEDULED",
-    });
-
-    // Link return shipment to return
-    await this.returnRepository.update(returnRequest.id, {
-      returnShipmentId: returnShipment.id,
-      status: ReturnStatus.PICKUP_SCHEDULED,
-    });
-
-    console.log(`✅ Return pickup scheduled: ${returnRequest.returnNumber}`);
-
-    return this.returnRepository.findById(returnRequest.id);
-  }
-
-  /**
-   * Track return shipment
-   */
-  async trackReturnShipment(returnId: string) {
-    const returnRequest = await this.returnRepository.findById(
-      BigInt(returnId)
-    );
-
-    if (!returnRequest || !returnRequest.returnShipment) {
-      throw new Error("Return shipment not found");
-    }
-
-    return this.shiprocketService.trackByAwb(returnRequest.returnShipment.awb);
   }
 
   /**
@@ -357,7 +551,7 @@ export class ReturnService {
       throw new Error("Original payment not found or not successful");
     }
 
-    // Process refund based on method
+    // ✅ Process refund based on method
     if (returnRequest.refundMethod === RefundMethod.ORIGINAL_PAYMENT) {
       if (!payment.razorpayPaymentId) {
         throw new Error("Razorpay payment ID not found");
@@ -365,7 +559,7 @@ export class ReturnService {
 
       const refundResponse = await this.razorpayService.refundPayment(
         payment.razorpayPaymentId,
-        Math.round(returnRequest.refundAmount * 100) // Convert to paise
+        Math.round(returnRequest.refundAmount * 100)
       );
 
       await this.returnRepository.update(returnRequest.id, {
@@ -379,55 +573,37 @@ export class ReturnService {
         ),
       });
     } else {
-      // For other refund methods, mark as refund initiated
       await this.returnRepository.update(returnRequest.id, {
         status: ReturnStatus.REFUND_INITIATED,
       });
     }
 
     console.log(
-      `✅ Refund initiated for return: ${returnRequest.returnNumber}`
+      `✅ Refund initiated: ${returnRequest.returnNumber} (₹${returnRequest.refundAmount})`
     );
 
-    return this.returnRepository.findById(returnRequest.id);
-  }
+    // ✅ Auto-complete after 5 seconds
+    setTimeout(async () => {
+      try {
+        await this.returnRepository.update(returnRequest.id, {
+          status: ReturnStatus.REFUND_COMPLETED,
+        });
 
-  /**
-   * Admin: Complete return
-   */
-  async completeReturn(returnId: string) {
-    const returnRequest = await this.returnRepository.findById(
-      BigInt(returnId)
-    );
+        await this.emailService.sendEmail({
+          to: returnRequest.user.email,
+          subject: `Refund Completed - ${returnRequest.returnNumber}`,
+          html: this.getRefundCompletedEmailTemplate(
+            returnRequest.user.firstName,
+            returnRequest.returnNumber,
+            returnRequest.refundAmount
+          ),
+        });
 
-    if (!returnRequest) {
-      throw new Error("Return request not found");
-    }
-
-    if (returnRequest.status !== ReturnStatus.REFUND_INITIATED) {
-      throw new Error("Refund must be initiated before completing return");
-    }
-
-    await this.returnRepository.update(returnRequest.id, {
-      status: ReturnStatus.REFUND_COMPLETED,
-    });
-
-    // Send refund completion email
-    try {
-      await this.emailService.sendEmail({
-        to: returnRequest.user.email,
-        subject: `Refund Completed - ${returnRequest.returnNumber}`,
-        html: this.getRefundCompletedEmailTemplate(
-          returnRequest.user.firstName,
-          returnRequest.returnNumber,
-          returnRequest.refundAmount
-        ),
-      });
-    } catch (error) {
-      console.error("Failed to send refund completion email:", error);
-    }
-
-    console.log(`✅ Return completed: ${returnRequest.returnNumber}`);
+        console.log(`✅ Refund completed: ${returnRequest.returnNumber}`);
+      } catch (error) {
+        console.error("Auto-complete refund failed:", error);
+      }
+    }, 5000);
 
     return this.returnRepository.findById(returnRequest.id);
   }
@@ -489,6 +665,25 @@ export class ReturnService {
   }
 
   /**
+   * Get return by ID
+   */
+  async getReturn(userId: string, returnId: string) {
+    const returnRequest = await this.returnRepository.findById(
+      BigInt(returnId)
+    );
+
+    if (!returnRequest) {
+      throw new Error("Return request not found");
+    }
+
+    if (returnRequest.userId !== BigInt(userId)) {
+      throw new Error("Unauthorized");
+    }
+
+    return returnRequest;
+  }
+
+  /**
    * Admin: Get all returns
    */
   async getAllReturns(params: {
@@ -542,23 +737,18 @@ export class ReturnService {
   }
 
   /**
-   * Get return by ID
+   * Track return shipment
    */
-  async getReturn(userId: string, returnId: string) {
+  async trackReturnShipment(returnId: string) {
     const returnRequest = await this.returnRepository.findById(
       BigInt(returnId)
     );
 
-    if (!returnRequest) {
-      throw new Error("Return request not found");
+    if (!returnRequest || !returnRequest.returnShipment) {
+      throw new Error("Return shipment not found");
     }
 
-    // Verify user owns the return
-    if (returnRequest.userId !== BigInt(userId)) {
-      throw new Error("Unauthorized");
-    }
-
-    return returnRequest;
+    return this.shiprocketService.trackByAwb(returnRequest.returnShipment.awb);
   }
 
   /**
@@ -573,12 +763,13 @@ export class ReturnService {
   }
 
   /**
-   * Helper: Get return request email template
+   * Helper: Email templates
    */
   private getReturnRequestEmailTemplate(
     firstName: string,
     returnNumber: string,
-    refundAmount: number
+    refundAmount: number,
+    isFreeReturn: boolean
   ): string {
     return `
       <!DOCTYPE html>
@@ -590,6 +781,9 @@ export class ReturnService {
           .header { background-color: #4F46E5; color: white; padding: 20px; text-align: center; }
           .content { padding: 20px; background-color: #f9fafb; }
           .info-box { background-color: white; padding: 20px; margin: 20px 0; border-radius: 5px; }
+          .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+          .badge-free { background-color: #D1FAE5; color: #065F46; }
+          .badge-paid { background-color: #FEF3C7; color: #92400E; }
         </style>
       </head>
       <body>
@@ -599,17 +793,26 @@ export class ReturnService {
           </div>
           <div class="content">
             <h2>Hi ${firstName},</h2>
-            <p>Your return request has been successfully submitted.</p>
+            <p>Your return request has been successfully submitted and is under review.</p>
             
             <div class="info-box">
               <p><strong>Return Number:</strong> ${returnNumber}</p>
-              <p><strong>Expected Refund:</strong> ₹${refundAmount.toFixed(
-                2
-              )}</p>
+              <p><strong>Expected Refund:</strong> ₹${refundAmount.toFixed(2)}</p>
+              <p>
+                <strong>Return Type:</strong> 
+                <span class="badge ${isFreeReturn ? "badge-free" : "badge-paid"}">
+                  ${isFreeReturn ? "🎉 FREE RETURN" : "💰 PAID RETURN"}
+                </span>
+              </p>
+              ${
+                !isFreeReturn
+                  ? '<p style="color: #92400E; font-size: 14px;">⚠️ Reverse shipping charges have been deducted from your refund amount</p>'
+                  : '<p style="color: #065F46; font-size: 14px;">✓ No shipping charges deducted - this is a free return</p>'
+              }
               <p><strong>Status:</strong> Pending Review</p>
             </div>
             
-            <p>Our team will review your request within 24-48 hours. You will receive an email once the return is approved.</p>
+            <p>We will review your request within 24 hours. Once approved, we'll schedule a pickup.</p>
           </div>
         </div>
       </body>
@@ -617,9 +820,6 @@ export class ReturnService {
     `;
   }
 
-  /**
-   * Helper: Get return status email template
-   */
   private getReturnStatusEmailTemplate(
     firstName: string,
     returnNumber: string,
@@ -650,10 +850,6 @@ export class ReturnService {
       case ReturnStatus.REFUND_INITIATED:
         statusMessage = "Your refund has been initiated.";
         break;
-      case ReturnStatus.REFUND_COMPLETED:
-        statusMessage = "Your refund has been completed!";
-        color = "#10B981";
-        break;
     }
 
     return `
@@ -679,12 +875,8 @@ export class ReturnService {
             
             <div class="info-box">
               <p><strong>Return Number:</strong> ${returnNumber}</p>
-              <p><strong>New Status:</strong> ${status}</p>
-              ${
-                rejectionReason
-                  ? `<p><strong>Reason:</strong> ${rejectionReason}</p>`
-                  : ""
-              }
+              <p><strong>Status:</strong> ${status}</p>
+              ${rejectionReason ? `<p><strong>Reason:</strong> ${rejectionReason}</p>` : ""}
             </div>
           </div>
         </div>
@@ -693,9 +885,6 @@ export class ReturnService {
     `;
   }
 
-  /**
-   * Helper: Get refund completed email template
-   */
   private getRefundCompletedEmailTemplate(
     firstName: string,
     returnNumber: string,
@@ -728,7 +917,7 @@ export class ReturnService {
             </div>
             
             <p>The refund will be credited to your original payment method within 5-7 business days.</p>
-            <p>Thank you for shopping with Kangana Silks!</p>
+            <p>Thank you for shopping with us!</p>
           </div>
         </div>
       </body>
