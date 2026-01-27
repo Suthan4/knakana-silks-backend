@@ -1,8 +1,7 @@
 # This creates ONE clean migration with your current schema
-npx prisma migrate dev --name init
 # 1. Create migration
-npx prisma migrate dev --name add_artisan_details_to_products
-
+npx prisma migrate dev --name init
+# 2
 npx prisma generate
 
 # 2. For production database
@@ -25,4 +24,8 @@ Invoke-WebRequest `
   -Uri "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" `
   -OutFile "C:\certs\global-bundle.pem"
 $env:NODE_EXTRA_CA_CERTS="C:\certs\global-bundle.pem"
+
 npx tsx prisma/seed.ts
+
+ssh -i kankana-api-server-key.pem ubuntu@3.111.86.16
+

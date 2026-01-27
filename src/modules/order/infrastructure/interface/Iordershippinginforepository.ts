@@ -34,6 +34,10 @@ export interface IOrderShippingInfoRepository {
     length: number;
     breadth: number;
     height: number;
+    selectedCourierCompanyId: number,
+    selectedCourierName: string,
+    selectedCourierCharge: number,
+    selectedCourierEtd: string,
   }): Promise<OrderShippingInfo>;
 
   /**

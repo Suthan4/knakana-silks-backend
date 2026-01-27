@@ -6,10 +6,7 @@ import {
   UpdateOrderStatusDTOSchema,
   VerifyPaymentDTOSchema,
 } from "../../application/dtos/order.dtos.js";
-
-const CancelOrderDTOSchema = z.object({
-  reason: z.string().optional(),
-});
+import { CourierPreference, PaymentMethod } from "@/generated/prisma/enums.js";
 
 const OrderPreviewDTOSchema = z.object({
   shippingAddressId: z.string().min(1, "Shipping address is required"),
@@ -23,14 +20,15 @@ const OrderPreviewDTOSchema = z.object({
       })
     )
     .optional(),
+    selectedCourierCompanyId: z.number(),
 });
 
-// ✅ NEW: Initiate payment DTO
+// ✅ NEW: Initiate payment with courier selection
 const InitiatePaymentDTOSchema = z.object({
   shippingAddressId: z.string().min(1, "Shipping address is required"),
   billingAddressId: z.string().min(1, "Billing address is required"),
   couponCode: z.string().optional(),
-  paymentMethod: z.enum(["CARD","UPI","NETBANKING","WALLET","EMI","COD","PAYLATER"]),
+  paymentMethod: z.nativeEnum(PaymentMethod),
   items: z
     .array(
       z.object({
@@ -40,14 +38,22 @@ const InitiatePaymentDTOSchema = z.object({
       })
     )
     .optional(),
+  courierPreference: z.nativeEnum(CourierPreference).optional(),
+  selectedCourierCompanyId: z.number().optional(),
 });
+
+
+const CancelOrderDTOSchema = z.object({
+  reason: z.string().optional(),
+});
+
 
 @injectable()
 export class OrderController {
   constructor(@inject(OrderService) private orderService: OrderService) {}
 
   /**
-   * Get order preview
+   * Get order preview with courier options
    * POST /api/orders/preview
    */
   async getOrderPreview(req: Request, res: Response) {
@@ -59,6 +65,7 @@ export class OrderController {
         shippingAddressId: data.shippingAddressId,
         couponCode: data.couponCode,
         items: data.items,
+        selectedCourierCompanyId: data.selectedCourierCompanyId
       });
 
       res.json({
@@ -71,7 +78,7 @@ export class OrderController {
   }
 
   /**
-   * ✅ NEW: Initiate payment (creates Razorpay order WITHOUT DB order)
+   * ✅ Initiate payment with courier selection
    * POST /api/orders/initiate-payment
    */
   async initiatePayment(req: Request, res: Response) {
@@ -79,13 +86,14 @@ export class OrderController {
       const userId = req.user!.userId;
       const data = InitiatePaymentDTOSchema.parse(req.body);
 
-
       const result = await this.orderService.initiatePayment(userId, {
         shippingAddressId: data.shippingAddressId,
         billingAddressId: data.billingAddressId,
         couponCode: data.couponCode,
         paymentMethod: data.paymentMethod,
         items: data.items,
+        courierPreference: data.courierPreference,
+        selectedCourierCompanyId: data.selectedCourierCompanyId,
       });
 
       res.status(200).json({
@@ -99,7 +107,7 @@ export class OrderController {
   }
 
   /**
-   * ✅ UPDATED: Verify payment AND create order
+   * ✅ Verify payment and create order
    * POST /api/orders/verify-payment
    */
   async verifyPayment(req: Request, res: Response) {
@@ -190,24 +198,22 @@ export class OrderController {
     }
   }
 
+  /**
+   * Cancel order
+   * POST /api/orders/:id/cancel
+   */
   async cancelOrder(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
       const { id } = req.params;
 
       if (!id) {
-        res
-          .status(400)
-          .json({ success: false, message: "Order ID is required" });
+        res.status(400).json({ success: false, message: "Order ID is required" });
         return;
       }
 
       const data = CancelOrderDTOSchema.parse(req.body);
-      const result = await this.orderService.cancelOrder(
-        userId,
-        id,
-        data.reason
-      );
+      const result = await this.orderService.cancelOrder(userId, id, data.reason);
 
       res.json({
         success: true,
@@ -222,15 +228,17 @@ export class OrderController {
     }
   }
 
+  /**
+   * Check if order can be cancelled
+   * GET /api/orders/:id/can-cancel
+   */
   async canCancelOrder(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
       const { id } = req.params;
 
       if (!id) {
-        res
-          .status(400)
-          .json({ success: false, message: "Order ID is required" });
+        res.status(400).json({ success: false, message: "Order ID is required" });
         return;
       }
 
@@ -244,6 +252,8 @@ export class OrderController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+  // 
 
   // Admin endpoints
   async getAllOrders(req: Request, res: Response) {

@@ -1,5 +1,6 @@
 import { inject, injectable } from "tsyringe";
 import {
+  CourierPreference,
   OrderShippingInfo,
   PrismaClient,
 } from "@/generated/prisma/client.js";
@@ -49,6 +50,10 @@ export class OrderShippingInfoRepository
     totalWeight: number;
     volumetricWeight: number;
     chargeableWeight: number;
+    courierPreference?: CourierPreference;
+    selectedCourierCompanyId?: number;
+    selectedCourierName?: string;
+    selectedCourierCharge?: number;
     length: number;
     breadth: number;
     height: number;
@@ -69,6 +74,10 @@ export class OrderShippingInfoRepository
         pickupEmail: data.pickupEmail,
         pickupContactPerson: data.pickupContactPerson,
         totalWeight: data.totalWeight,
+        courierPreference: data.courierPreference,
+        selectedCourierCompanyId: data.selectedCourierCompanyId,
+        selectedCourierName: data.selectedCourierName,
+        selectedCourierCharge: data.selectedCourierCharge,
         volumetricWeight: data.volumetricWeight,
         chargeableWeight: data.chargeableWeight,
         length: data.length,

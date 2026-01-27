@@ -1,11 +1,11 @@
-import { injectable, inject } from "tsyringe";
 import { IShipmentRepository } from "../../infrastructure/interface/Ishipmentrepository.js";
+import { injectable, inject } from "tsyringe";
 import { IOrderRepository } from "@/modules/order/infrastructure/interface/Iorderrepository.js";
 
 import { OrderStatus, PaymentMethod } from "@/generated/prisma/enums.js";
 import { IShiprocketRepository } from "../../infrastructure/interface/IshiprocketRepository.js";
-import { EmailService } from "@/modules/notification/application/service/email.service.js";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
+import { EmailService } from "@/modules/notification/application/service/email.service.js";
 
 @injectable()
 export class ShipmentService {
@@ -165,6 +165,7 @@ export class ShipmentService {
     if (!order) {
       throw new Error("Order not found");
     }
+console.log("order",order);
 
     const existingShipment = await this.shipmentRepository.findByOrderId(
       order.id
@@ -189,72 +190,59 @@ export class ShipmentService {
       height: dimensions.height,
     });
 
-    const orderData = {
-      orderNumber: order.orderNumber,
-      orderDate: order.createdAt.toISOString(),
+      const shiprocketPayload = {
+          order_id: order.orderNumber, // ✅ string/number
+          order_date: order.createdAt.toISOString(), // ✅ required
 
-      // 🆕 Pickup Address (Warehouse)
-      pickupLocation: pickupWarehouse.name,
-      pickupName: pickupWarehouse.contactPerson || pickupWarehouse.name,
-      pickupAddress: pickupWarehouse.address,
-      pickupAddress2: pickupWarehouse.addressLine2 || undefined,
-      pickupCity: pickupWarehouse.city,
-      pickupPincode: pickupWarehouse.pincode,
-      pickupState: pickupWarehouse.state,
-      pickupCountry: pickupWarehouse.country || "India",
-      pickupEmail:
-        pickupWarehouse.email ||
-        process.env.WAREHOUSE_EMAIL ||
-        order.user.email,
-      pickupPhone: pickupWarehouse.phone,
+          pickup_location: pickupWarehouse.name, // ✅ should match warehouse pickup name in Shiprocket
 
-      // Billing Address
-      billingCustomerName: order.billingAddress.fullName,
-      billingAddress: order.billingAddress.addressLine1,
-      billingAddress2: order.billingAddress.addressLine2 || undefined,
-      billingCity: order.billingAddress.city,
-      billingPincode: order.billingAddress.pincode,
-      billingState: order.billingAddress.state,
-      billingCountry: order.billingAddress.country,
-      billingEmail: order.user.email,
-      billingPhone: order.billingAddress.phone,
+          billing_customer_name: order.billingAddress.fullName,
+          billing_last_name: ".", // ✅ REQUIRED by Shiprocket (give something if you don’t have last name)
 
-      // Shipping Address
-      shippingIsBilling:
-        order.shippingAddressId === order.billingAddressId ? true : false,
-      shippingCustomerName: order.shippingAddress.fullName,
-      shippingAddress: order.shippingAddress.addressLine1,
-      shippingAddress2: order.shippingAddress.addressLine2 || undefined,
-      shippingCity: order.shippingAddress.city,
-      shippingPincode: order.shippingAddress.pincode,
-      shippingState: order.shippingAddress.state,
-      shippingCountry: order.shippingAddress.country,
-      shippingEmail: order.user.email,
-      shippingPhone: order.shippingAddress.phone,
+          billing_address: order.billingAddress.addressLine1,
+          billing_address_2: order.billingAddress.addressLine2 || "",
+          billing_city: order.billingAddress.city,
+          billing_pincode: order.billingAddress.pincode,
+          billing_state: order.billingAddress.state,
+          billing_country: order.billingAddress.country || "India",
+          billing_email: order.user.email,
+          billing_phone: order.billingAddress.phone,
 
-      // Order Items
-      orderItems: order.items.map((item) => ({
-        name: item.product.name,
-        sku: item.product.sku,
-        units: item.quantity,
-        sellingPrice: Number(item.price),
-        discount: 0,
-        tax: 0,
-        hsn: item.product.hsnCode ? parseInt(item.product.hsnCode) : undefined,
-      })),
+          shipping_is_billing: order.shippingAddressId === order.billingAddressId,
 
-      paymentMethod: paymentMethod,
-      subTotal: Number(order.subtotal),
+          shipping_customer_name: order.shippingAddress.fullName,
+          shipping_last_name: ".", // ✅ REQUIRED (same rule)
+          shipping_address: order.shippingAddress.addressLine1,
+          shipping_address_2: order.shippingAddress.addressLine2 || "",
+          shipping_city: order.shippingAddress.city,
+          shipping_pincode: order.shippingAddress.pincode,
+          shipping_state: order.shippingAddress.state,
+          shipping_country: order.shippingAddress.country || "India",
+          shipping_email: order.user.email,
+          shipping_phone: order.shippingAddress.phone,
 
-      // 🆕 Use calculated dimensions with volumetric weight
-      length: Math.ceil(dimensions.length),
-      breadth: Math.ceil(dimensions.breadth),
-      height: Math.ceil(dimensions.height),
-      weight: dimensions.chargeableWeight, // Use chargeable weight
-    };
+          order_items: order.items.map((item) => ({
+            name: item.product.name,
+            sku: item.product.sku || item.product.id.toString(), // ✅ must exist
+            units: item.quantity,
+            selling_price: Number(item.price),
+            discount: 0,
+            tax: 0,
+            hsn: item.product.hsnCode ? String(item.product.hsnCode) : "",
+          })),
+
+          payment_method: paymentMethod, // ✅ "Prepaid" or "COD"
+          sub_total: Number(order.subtotal),
+
+          length: Math.ceil(dimensions.length),
+          breadth: Math.ceil(dimensions.breadth),
+          height: Math.ceil(dimensions.height),
+          weight: Number(dimensions.chargeableWeight), // ✅ in KG
+  };
+
 
     const shiprocketOrder = await this.shiprocketRepository.createOrder(
-      orderData
+      shiprocketPayload
     );
 
     const shipment = await this.shipmentRepository.create({

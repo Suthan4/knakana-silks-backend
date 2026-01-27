@@ -258,7 +258,7 @@ export class ShippingCalculatorService {
             volumetricWeight,
             chargeableWeight,
             shippingCost,
-            isFreeShipping,
+            isFreeShipping:false,
             freeShippingThreshold: this.FREE_SHIPPING_THRESHOLD,
             amountNeededForFreeShipping,
             serviceable,

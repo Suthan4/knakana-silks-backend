@@ -7,6 +7,8 @@ import rateLimit from "express-rate-limit";
 import { errorHandler } from "./shared/middleware/errorHandler.js";
 import { setupContainer } from "./config/container.js";
 setupContainer();
+setupShipmentCronJobs(); // ✅ ADD THIS
+
 
 
 // Routes
@@ -28,6 +30,7 @@ import uploadRoutes from "./shared/common/routes/s3.routes.js";
 import productRequestRoutes from "./modules/product-request/presentation/routes/product-request.routes.js";
 import searchRoutes from "./modules/search/presentation/routes/search.routes.js";
 import shippingCalculatorRoutes from "./modules/shipment/presentation/routes/shipping.calculator.routes.js";
+import { setupShipmentCronJobs } from "./modules/shipment/shipment.corn.setup.js";
 
 export const createApp = (): Application => {
   const app = express();

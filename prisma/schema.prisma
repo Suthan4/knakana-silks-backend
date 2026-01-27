@@ -684,7 +684,6 @@ model Order {
   
   @@map("orders")
 }
-
 model OrderShippingInfo {
   id               BigInt   @id @default(autoincrement())
   orderId          BigInt   @unique
@@ -712,10 +711,11 @@ model OrderShippingInfo {
   height           Int
 
     // ✅ Courier Selection (NEW)
-  courierPreference        CourierPreference?  // "FASTEST" | "CHEAPEST" | "CUSTOM"
+  courierPreference        CourierPreference?
   selectedCourierCompanyId Int?
   selectedCourierName      String?
   selectedCourierCharge    Decimal? @db.Decimal(10, 2)
+  selectedCourierEtd       String?  
   
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
