@@ -545,13 +545,11 @@ console.log("order",order);
    * Get Shiprocket order details
    */
   async getShiprocketOrderDetails(orderId: string) {
-    const order = await this.orderRepository.findById(BigInt(orderId));
-
-    if (!order) {
-      throw new Error("Order not found");
-    }
-
-    return this.shiprocketRepository.getOrderDetails(order.orderNumber);
+    const shiprocketOrder = this.shiprocketRepository.getOrderDetails(orderId)
+  if (!shiprocketOrder) {
+    throw new Error("Shiprocket Order not found");
+  }
+  return shiprocketOrder
   }
 
   /**

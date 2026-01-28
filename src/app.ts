@@ -31,6 +31,7 @@ import productRequestRoutes from "./modules/product-request/presentation/routes/
 import searchRoutes from "./modules/search/presentation/routes/search.routes.js";
 import shippingCalculatorRoutes from "./modules/shipment/presentation/routes/shipping.calculator.routes.js";
 import { setupShipmentCronJobs } from "./modules/shipment/shipment.corn.setup.js";
+import returnRoutes from "./modules/return/presentation/routes/return.routes.js";
 
 export const createApp = (): Application => {
   const app = express();
@@ -106,6 +107,7 @@ app.options("*", cors(corsOptions));
   app.use("/api", wishlistRoutes);
   app.use("/api", bannerRoutes);
   app.use("/api", home_sectionRoutes);
+  app.use("/api", returnRoutes);
   app.use("/api", orderRoutes);
   app.use("/api", paymentRoutes);
   app.use("/api", shipmentRoutes);
