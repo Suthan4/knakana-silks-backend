@@ -2,20 +2,7 @@ import nodemailer from "nodemailer";
 import axios from "axios";
 
 function createTransporter() {
-  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "qa") {
-    return nodemailer.createTransport({
-      host: process.env.SES_SMTP_HOST!,
-      port: Number(process.env.SES_SMTP_PORT || 587),
-      secure: false,
-      auth: {
-        user: process.env.SES_SMTP_USER!,
-        pass: process.env.SES_SMTP_PASS!,
-      },
-    });
-  }
-console.log("EMAIL_PASS", process.env.EMAIL_PASS);
 
-  // ✅ development → Gmail
   return nodemailer.createTransport({
     secure:true,
     host: "smtp.gmail.com",
