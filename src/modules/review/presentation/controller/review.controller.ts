@@ -40,7 +40,7 @@ export class ReviewController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });
@@ -68,7 +68,7 @@ export class ReviewController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });
@@ -93,7 +93,7 @@ export class ReviewController {
     try {
       const { productId } = req.params;
 
-      if (!productId) {
+      if (!productId || Array.isArray(productId)) {
         res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -157,7 +157,7 @@ export class ReviewController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });
@@ -184,7 +184,7 @@ export class ReviewController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });
@@ -250,7 +250,7 @@ export class ReviewController {
       const { id } = req.params;
       const data = ApproveReviewDTOSchema.parse(req.body);
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });
@@ -281,7 +281,7 @@ export class ReviewController {
     try {
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Review ID is required" });

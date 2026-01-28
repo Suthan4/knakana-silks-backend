@@ -48,7 +48,7 @@ export class ShipmentController {
     try {
       const { orderId } = req.params;
 
-      if (!orderId) {
+      if (!orderId || Array.isArray(orderId)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
@@ -123,7 +123,7 @@ export class ShipmentController {
     try {
       const { orderId } = req.params;
 
-      if (!orderId) {
+      if (!orderId || Array.isArray(orderId)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
@@ -149,7 +149,7 @@ export class ShipmentController {
     try {
       const { trackingNumber } = req.params;
 
-      if (!trackingNumber) {
+      if (!trackingNumber || Array.isArray(trackingNumber)) {
         res
           .status(400)
           .json({ success: false, message: "Tracking number is required" });
@@ -276,7 +276,7 @@ export class ShipmentController {
     try {
       const { orderId } = req.params;
 
-      if (!orderId) {
+      if (!orderId || Array.isArray(orderId)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
@@ -303,7 +303,7 @@ export class ShipmentController {
     try {
       const { orderId } = req.params;
 
-      if (!orderId) {
+      if (!orderId || Array.isArray(orderId)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });

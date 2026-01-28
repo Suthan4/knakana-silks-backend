@@ -26,7 +26,7 @@ export class CategoryController {
   async updateCategory(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Category ID is required" });
@@ -48,7 +48,7 @@ export class CategoryController {
   async deleteCategory(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id|| Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Category ID is required" });
@@ -68,7 +68,7 @@ export class CategoryController {
   async getCategory(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Category ID is required" });
@@ -88,7 +88,7 @@ export class CategoryController {
   async getCategoryBySlug(req: Request, res: Response) {
     try {
       const { slug } = req.params;
-      if (!slug) {
+      if (!slug || Array.isArray(slug)) {
         res
           .status(400)
           .json({ success: false, message: "Category slug is required" });
@@ -136,8 +136,9 @@ export class CategoryController {
   async getCategoryTree(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const tree = await this.categoryService.getCategoryTree(id);
-
+      const tree = id && !Array.isArray(id) 
+        ? await this.categoryService.getCategoryTree(id)
+        : await this.categoryService.getCategoryTree();
       res.json({
         success: true,
         data: tree,

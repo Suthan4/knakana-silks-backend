@@ -64,7 +64,7 @@ export class ProductRequestController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Request ID is required" });
@@ -86,7 +86,7 @@ export class ProductRequestController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Request ID is required" });
@@ -134,7 +134,7 @@ export class ProductRequestController {
       const { id } = req.params;
       const data = UpdateProductRequestDTOSchema.parse(req.body);
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Request ID is required" });
@@ -160,7 +160,7 @@ export class ProductRequestController {
       const { id } = req.params;
       const { adminNote } = req.body;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Request ID is required" });
@@ -192,7 +192,7 @@ export class ProductRequestController {
       const { id } = req.params;
       const { orderId } = req.body;
 
-      if (!id || !orderId) {
+      if (!id || !orderId || Array.isArray(id)) {
         return res.status(400).json({
           success: false,
           message: "Request ID and Order ID are required",

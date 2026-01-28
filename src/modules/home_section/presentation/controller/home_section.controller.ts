@@ -30,7 +30,7 @@ export class HomeSectionController {
   async updateHomeSection(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Section ID is required" });
@@ -55,7 +55,7 @@ export class HomeSectionController {
   async deleteHomeSection(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Section ID is required" });
@@ -75,7 +75,7 @@ export class HomeSectionController {
   async getHomeSection(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Section ID is required" });

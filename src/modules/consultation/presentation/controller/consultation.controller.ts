@@ -36,7 +36,7 @@ export class ConsultationController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Consultation ID is required" });
@@ -63,7 +63,7 @@ export class ConsultationController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Consultation ID is required" });
@@ -141,7 +141,7 @@ export class ConsultationController {
     try {
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Consultation ID is required" });
@@ -166,7 +166,7 @@ export class ConsultationController {
       const { id } = req.params;
       const approvedBy = req.user!.email;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Consultation ID is required" });

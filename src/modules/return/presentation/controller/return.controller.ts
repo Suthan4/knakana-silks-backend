@@ -21,7 +21,7 @@ export class ReturnController {
       const userId = req.user!.userId;
       const { orderId } = req.params;
 
-      if (!orderId) {
+      if (!orderId || Array.isArray(orderId)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
@@ -100,7 +100,7 @@ export class ReturnController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Return ID is required" });
@@ -126,7 +126,7 @@ export class ReturnController {
     try {
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Return ID is required" });
@@ -180,7 +180,7 @@ export class ReturnController {
       const { id } = req.params;
       const { adminNotes } = req.body;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Return ID is required" });
@@ -211,7 +211,7 @@ export class ReturnController {
       const { id } = req.params;
       const { rejectionReason, adminNotes } = req.body;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Return ID is required" });
@@ -249,7 +249,7 @@ export class ReturnController {
     try {
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Return ID is required" });

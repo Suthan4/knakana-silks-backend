@@ -74,7 +74,7 @@ export class AdminController {
     try {
       const { userId } = req.params;
 
-      if (!userId) {
+      if (!userId || Array.isArray(userId)) {
         return res
           .status(400)
           .json({ success: false, message: "User ID is required" });
@@ -103,7 +103,7 @@ export class AdminController {
           .status(400)
           .json({ success: false, message: "Invalid role" });
       }
-      if (!userId) {
+      if (!userId || Array.isArray(userId)) {
         return res
           .status(400)
           .json({ success: false, message: "User ID is required" });
@@ -139,7 +139,7 @@ export class AdminController {
   async toggleUserStatus(req: Request, res: Response) {
     try {
       const { userId } = req.params;
-            if (!userId) {
+            if (!userId || Array.isArray(userId)) {
               return res
                 .status(400)
                 .json({ success: false, message: "User ID is required" });

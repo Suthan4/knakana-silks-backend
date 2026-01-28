@@ -29,7 +29,7 @@ export class BannerController {
   async updateBanner(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Banner ID is required" });
@@ -51,7 +51,7 @@ export class BannerController {
   async deleteBanner(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id||Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Banner ID is required" });
@@ -71,7 +71,7 @@ export class BannerController {
   async getBanner(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Banner ID is required" });

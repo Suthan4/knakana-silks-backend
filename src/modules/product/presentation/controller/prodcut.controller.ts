@@ -93,7 +93,7 @@ export class ProductController {
   async getProduct(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -113,7 +113,7 @@ export class ProductController {
   async getProductBySlug(req: Request, res: Response) {
     try {
       const { slug } = req.params;
-      if (!slug) {
+      if (!slug || Array.isArray(slug)) {
         return res
           .status(400)
           .json({ success: false, message: "Product slug is required" });
@@ -149,7 +149,7 @@ export class ProductController {
   async updateProduct(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -171,7 +171,7 @@ export class ProductController {
   async deleteProduct(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -197,7 +197,7 @@ export class ProductController {
       const { id } = req.params;
       const { warehouseId, variantId } = req.query;
 
-      if (!id || !warehouseId) {
+      if (!id || !warehouseId || Array.isArray(id)) {
         return res.status(400).json({
           success: false,
           message: "Product ID and warehouse ID are required",
@@ -222,7 +222,7 @@ export class ProductController {
   async updateStock(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -255,7 +255,7 @@ export class ProductController {
   async addSpecification(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -283,7 +283,7 @@ export class ProductController {
       const { specId } = req.params;
       const { value } = req.body;
 
-      if (!specId || !value) {
+      if (!specId || !value || Array.isArray(specId)) {
         return res.status(400).json({
           success: false,
           message: "Specification ID and value are required",
@@ -308,7 +308,7 @@ export class ProductController {
   async deleteSpecification(req: Request, res: Response) {
     try {
       const { specId } = req.params;
-      if (!specId) {
+      if (!specId || Array.isArray(specId)) {
         return res
           .status(400)
           .json({ success: false, message: "Specification ID is required" });
@@ -332,7 +332,7 @@ export class ProductController {
   async addMedia(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -354,7 +354,7 @@ export class ProductController {
   async deleteMedia(req: Request, res: Response) {
     try {
       const { mediaId } = req.params;
-      if (!mediaId) {
+      if (!mediaId || Array.isArray(mediaId)) {
         return res
           .status(400)
           .json({ success: false, message: "Media ID is required" });
@@ -378,7 +378,7 @@ export class ProductController {
   async addVariant(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         return res
           .status(400)
           .json({ success: false, message: "Product ID is required" });
@@ -401,7 +401,7 @@ export class ProductController {
   async updateVariant(req: Request, res: Response) {
     try {
       const { variantId } = req.params;
-      if (!variantId) {
+      if (!variantId || Array.isArray(variantId)) {
         return res
           .status(400)
           .json({ success: false, message: "Variant ID is required" });
@@ -423,7 +423,7 @@ export class ProductController {
   async deleteVariant(req: Request, res: Response) {
     try {
       const { variantId } = req.params;
-      if (!variantId) {
+      if (!variantId || Array.isArray(variantId)) {
         return res
           .status(400)
           .json({ success: false, message: "Variant ID is required" });
@@ -443,7 +443,7 @@ export class ProductController {
   async getVariant(req: Request, res: Response) {
     try {
       const { variantId } = req.params;
-      if (!variantId) {
+      if (!variantId || Array.isArray(variantId)) {
         return res
           .status(400)
           .json({ success: false, message: "Variant ID is required" });
@@ -467,7 +467,7 @@ export class ProductController {
   async addVariantMedia(req: Request, res: Response) {
     try {
       const { variantId } = req.params;
-      if (!variantId) {
+      if (!variantId || Array.isArray(variantId)) {
         return res
           .status(400)
           .json({ success: false, message: "Variant ID is required" });
@@ -489,7 +489,7 @@ export class ProductController {
   async deleteVariantMedia(req: Request, res: Response) {
     try {
       const { mediaId } = req.params;
-      if (!mediaId) {
+      if (!mediaId || Array.isArray(mediaId)) {
         return res
           .status(400)
           .json({ success: false, message: "Media ID is required" });

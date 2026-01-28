@@ -31,7 +31,7 @@ export class WarehouseController {
   async updateWarehouse(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Warehouse ID is required" });
@@ -53,7 +53,7 @@ export class WarehouseController {
   async deleteWarehouse(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Warehouse ID is required" });
@@ -73,7 +73,7 @@ export class WarehouseController {
   async getWarehouse(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Warehouse ID is required" });
@@ -133,7 +133,7 @@ export class WarehouseController {
   async getWarehouseStock(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Warehouse ID is required" });

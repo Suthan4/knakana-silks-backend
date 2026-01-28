@@ -48,8 +48,9 @@ export class CartController {
     try {
       const userId = req.user!.userId;
       const { itemId } = req.params;
+      const singleItemId = Array.isArray(itemId) ? itemId[0] : itemId;
       
-      if (!itemId) {
+      if (!singleItemId) {
         res.status(400).json({ success: false, message: "Item ID is required" });
         return;
       }
@@ -58,7 +59,7 @@ export class CartController {
 
       const item = await this.cartService.updateCartItem(
         userId,
-        itemId,
+        singleItemId,
         data.quantity
       );
 
@@ -76,8 +77,9 @@ export class CartController {
     try {
       const userId = req.user!.userId;
       const { itemId } = req.params;
+      
 
-      if (!itemId) {
+      if (!itemId || Array.isArray(itemId)) {
         res.status(400).json({ success: false, message: "Item ID is required" });
         return;
       }

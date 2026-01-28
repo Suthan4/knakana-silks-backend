@@ -49,7 +49,7 @@ export class WishlistController {
       const userId = req.user!.userId;
       const { itemId } = req.params;
 
-      if (!itemId) {
+      if (!itemId || Array.isArray(itemId)) {
         res
           .status(400)
           .json({ success: false, message: "Item ID is required" });
@@ -106,7 +106,7 @@ export class WishlistController {
       const userId = req.user!.userId;
       const { productId } = req.params;
 
-      if (!productId) {
+      if (!productId || Array.isArray(productId)) {
         res
           .status(400)
           .json({ success: false, message: "productId is required" });

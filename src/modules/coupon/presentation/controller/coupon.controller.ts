@@ -32,7 +32,7 @@ export class CouponController {
   async updateCoupon(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Coupon ID is required" });
@@ -54,7 +54,7 @@ export class CouponController {
   async deleteCoupon(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Coupon ID is required" });
@@ -74,7 +74,7 @@ export class CouponController {
   async getCoupon(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Coupon ID is required" });

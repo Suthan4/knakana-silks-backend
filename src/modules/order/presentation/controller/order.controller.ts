@@ -158,7 +158,7 @@ export class OrderController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
@@ -181,7 +181,7 @@ export class OrderController {
       const userId = req.user!.userId;
       const { orderNumber } = req.params;
 
-      if (!orderNumber) {
+      if (!orderNumber || Array.isArray(orderNumber)) {
         res
           .status(400)
           .json({ success: false, message: "Order number is required" });
@@ -211,7 +211,7 @@ export class OrderController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res.status(400).json({ success: false, message: "Order ID is required" });
         return;
       }
@@ -241,7 +241,7 @@ export class OrderController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res.status(400).json({ success: false, message: "Order ID is required" });
         return;
       }
@@ -266,7 +266,7 @@ export class OrderController {
       const userId = req.user!.userId;
       const { id } = req.params;
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res.status(400).json({ success: false, message: "Order ID is required" });
         return;
       }
@@ -318,7 +318,7 @@ export class OrderController {
       const { id } = req.params;
       const data = UpdateOrderStatusDTOSchema.parse(req.body);
 
-      if (!id) {
+      if (!id || Array.isArray(id)) {
         res
           .status(400)
           .json({ success: false, message: "Order ID is required" });
