@@ -5,10 +5,12 @@ import {
   checkPermission,
 } from "@/shared/middleware/auth.middleware.js";
 import { OrderController } from "../controller/order.controller.js";
+import { OrderAnalyticsController } from "../controller/order.anlaytics.controller.js";
 
 const router = Router();
 
 const getOrderController = () => container.resolve(OrderController);
+const getOrderAnalyticsController = () => container.resolve(OrderAnalyticsController);
 
 // ==================== USER ROUTES (Authenticated) ====================
 
@@ -81,6 +83,14 @@ router.post("/orders/:id/cancel", authenticate, (req, res) =>
   getOrderController().cancelOrder(req, res)
 );
 
+/**
+ * ✅ NEW: Download invoice PDF
+ * GET /api/orders/:id/invoice
+ */
+router.get("/orders/:id/invoice", authenticate, (req, res) =>
+  getOrderController().downloadInvoice(req, res)
+);
+
 // ==================== ADMIN ROUTES ====================
 
 /**
@@ -105,6 +115,31 @@ router.put(
   authenticate,
   checkPermission("orders", "update"),
   (req, res) => getOrderController().updateOrderStatus(req, res)
+);
+
+// ==================== ANALYTICS ROUTES (Admin) ====================
+
+/**
+ * Get comprehensive order analytics
+ * GET /api/admin/orders/analytics
+ * Query: startDate?, endDate?
+ */
+router.get(
+  "/admin/orders/analytics",
+  authenticate,
+  checkPermission("orders", "read"),
+  (req, res) => getOrderAnalyticsController().getOrderAnalytics(req, res)
+);
+
+/**
+ * Get order statistics summary
+ * GET /api/admin/orders/stats
+ */
+router.get(
+  "/admin/orders/stats",
+  authenticate,
+  checkPermission("orders", "read"),
+  (req, res) => getOrderAnalyticsController().getOrderStats(req, res)
 );
 
 export default router;

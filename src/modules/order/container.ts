@@ -6,6 +6,9 @@ import { OrderController } from "./presentation/controller/order.controller.js";
 import { OrderRepository } from "./infrastructure/repository/orderRepository.js";
 import { OrderShippingInfoRepository } from "./infrastructure/repository/orderShippingInfoRepository.js";
 import { IOrderShippingInfoRepository } from "./infrastructure/interface/Iordershippinginforepository.js";
+import { OrderAnalyticsService } from "./application/service/order.analytics.service.js";
+import { OrderAnalyticsController } from "./presentation/controller/order.anlaytics.controller.js";
+import { InvoiceService } from "./application/service/invoice.service.js";
 
 /**
  * Register Order Module with Normalized Shipping Info
@@ -29,9 +32,14 @@ export function registerOrderModule() {
 
   // Register Services
   container.registerSingleton(OrderService);
+  container.registerSingleton(InvoiceService);
 
   // Register Controllers
   container.registerSingleton(OrderController);
+
+  container.registerSingleton(OrderAnalyticsService);
+  container.registerSingleton(OrderAnalyticsController);
+
 
   console.log(
     "✅ Order module registered (with normalized OrderShippingInfo table)"

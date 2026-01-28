@@ -7,6 +7,7 @@ import {
   VerifyPaymentDTOSchema,
 } from "../../application/dtos/order.dtos.js";
 import { CourierPreference, PaymentMethod } from "@/generated/prisma/enums.js";
+import { InvoiceService } from "../../application/service/invoice.service.js";
 
 const OrderPreviewDTOSchema = z.object({
   shippingAddressId: z.string().min(1, "Shipping address is required"),
@@ -50,7 +51,10 @@ const CancelOrderDTOSchema = z.object({
 
 @injectable()
 export class OrderController {
-  constructor(@inject(OrderService) private orderService: OrderService) {}
+  constructor(
+    @inject(OrderService) private orderService: OrderService,
+    @inject(InvoiceService) private invoiceService: InvoiceService
+) {}
 
   /**
    * Get order preview with courier options
@@ -253,7 +257,37 @@ export class OrderController {
     }
   }
 
-  // 
+    /**
+   * ✅ NEW: Download invoice PDF
+   * GET /api/orders/:id/invoice
+   */
+  async downloadInvoice(req: Request, res: Response) {
+    try {
+      const userId = req.user!.userId;
+      const { id } = req.params;
+
+      if (!id) {
+        res.status(400).json({ success: false, message: "Order ID is required" });
+        return;
+      }
+
+      const pdfBuffer = await this.invoiceService.generateInvoice(id, userId);
+
+      // Get order to use order number in filename
+      const order = await this.orderService.getOrder(userId, id);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="invoice-${order.orderNumber}.pdf"`
+      );
+      res.setHeader("Content-Length", pdfBuffer.length);
+
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
 
   // Admin endpoints
   async getAllOrders(req: Request, res: Response) {
