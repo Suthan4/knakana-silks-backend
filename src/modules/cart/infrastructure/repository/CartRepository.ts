@@ -113,6 +113,7 @@ async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
               sellingPrice: true,
               basePrice: true,
               slug:true,
+              sku: true, 
               categoryId: true, // ✅ CRITICAL FIX: Needed for coupon validation
               media: {
                 take: 1,

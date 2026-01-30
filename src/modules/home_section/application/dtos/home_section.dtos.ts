@@ -52,7 +52,7 @@ export const CreateHomeSectionDTOSchema = z
       .string()
       .regex(/^#[0-9A-Fa-f]{6}$/, "Invalid hex color")
       .optional(),
-    layout: z.enum(["grid", "carousel", "list", "banner"]).default("grid"),
+    layout: z.enum(["grid", "carousel", "list", "banner", "aesthetic-fullscreen"]).default("grid"),
     columns: z.number().int().min(1).max(12).default(4),
 
     // Display Settings
@@ -118,7 +118,7 @@ export const UpdateHomeSectionDTOSchema = z
       .regex(/^#[0-9A-Fa-f]{6}$/)
       .optional()
       .nullable(),
-    layout: z.enum(["grid", "carousel", "list", "banner"]).optional(),
+    layout: z.enum(["grid", "carousel", "list", "banner","aesthetic-fullscreen"]).optional(),
     columns: z.number().int().min(1).max(12).optional(),
 
     // Display Settings
