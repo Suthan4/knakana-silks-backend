@@ -20,6 +20,7 @@ import {
   CourierPreference,
 } from "@/generated/prisma/enums.js";
 import { IUserRepository } from "@/modules/auth/interface/Iuserrepository.js";
+import { StockManagementService } from "@/modules/stock/application/stock.management.service.js";
 
 interface OrderBreakdown {
   subtotal: number;
@@ -50,7 +51,8 @@ export class OrderService {
     @inject(RazorpayService) private razorpayService: RazorpayService,
     @inject(EmailService) private emailService: EmailService,
     @inject(ShippingCalculatorService) private shippingCalculatorService: ShippingCalculatorService,
-    @inject(ShiprocketService) private shiprocketService: ShiprocketService
+    @inject(ShiprocketService) private shiprocketService: ShiprocketService,
+    @inject(StockManagementService) private stockManagementService: StockManagementService
   ) {}
 
   /**
@@ -579,7 +581,7 @@ console.log("pickupWarehouse",pickupWarehouse);
       country: billingAddress.country,
     };
 
-    // ✅ Create order
+  // ✅ CREATE ORDER FIRST
     const order = await this.orderRepository.create({
       userId: userIdBigInt,
       orderNumber: razorpayOrderDetails.receipt || NumberUtil.generateOrderNumber(),
@@ -595,6 +597,24 @@ console.log("pickupWarehouse",pickupWarehouse);
       billingAddressSnapshot,
       couponId: notes.couponId ? BigInt(notes.couponId) : undefined,
     });
+
+    // ✅ RESERVE STOCK (CRITICAL - must happen after order creation)
+    try {
+    await this.stockManagementService.reserveStockForOrder(
+      orderItems,
+      pickupWarehouse.id
+    );
+    console.log(`✅ Stock reserved for order ${order.orderNumber}`);
+  } catch (error) {
+    console.error("❌ Stock reservation failed:", error);
+    // Rollback: Cancel order if stock reservation fails
+    await this.orderRepository.update(order.id, {
+      status: OrderStatus.CANCELLED,
+    });
+    throw new Error(
+      "Failed to reserve stock. Order cancelled. Please contact support."
+    );
+  }
 
     // Increment coupon usage
     if (notes.couponId) {
@@ -815,11 +835,14 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
   }
 
    /**
-   * ✅ Cancel order (with strict validation)
+   * ✅ Cancel order (with strict validation) and with stock release
    */
   async cancelOrder(userId: string, orderId: string, reason?: string) {
     const orderBigId = BigInt(orderId);
     const order = await this.orderRepository.findById(orderBigId);
+     // ✅ Get warehouse and order items BEFORE cancellation
+    const pickupWarehouse = await this.getPickupWarehouse();
+    const orderItems = order!.items;
 
     if (!order) throw new Error("Order not found");
     if (order.userId !== BigInt(userId)) {
@@ -882,6 +905,19 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
         console.error("Failed to decrement coupon usage:", error);
       }
     }
+
+      // ✅ RELEASE STOCK (after successful cancellation)
+  try {
+    await this.stockManagementService.releaseStockForCancelledOrder(
+      orderItems,
+      pickupWarehouse.id,
+      order.orderNumber
+    );
+    console.log(`✅ Stock released for cancelled order ${order.orderNumber}`);
+  } catch (error) {
+    console.error("❌ Stock release failed:", error);
+    // Don't fail the cancellation, but log for manual intervention
+  }
 
     // ✅ Process refund
     let refundProcessed = false;

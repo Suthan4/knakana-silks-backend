@@ -13,6 +13,8 @@ import {
   PaymentStatus,
 } from "@/generated/prisma/enums.js";
 import { Prisma } from "@/generated/prisma/client.js";
+import { StockManagementService } from "@/modules/stock/application/stock.management.service.js";
+import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 
 interface ReturnEligibility {
   eligible: boolean;
@@ -42,7 +44,9 @@ export class ReturnService {
     @inject("IPaymentRepository") private paymentRepository: IPaymentRepository,
     @inject(ShiprocketService) private shiprocketService: ShiprocketService,
     @inject(RazorpayService) private razorpayService: RazorpayService,
-    @inject(EmailService) private emailService: EmailService
+    @inject(EmailService) private emailService: EmailService,
+    @inject(StockManagementService) private stockManagementService: StockManagementService,
+    @inject("IWarehouseRepository") private warehouseRepository: IWarehouseRepository  
   ) {}
 
   /**
@@ -539,9 +543,11 @@ export class ReturnService {
       throw new Error("Return request not found");
     }
 
-    if (returnRequest.status !== ReturnStatus.RECEIVED) {
-      throw new Error("Return must be received before processing refund");
-    }
+  // ✅ CRITICAL: Only restore stock when return is RECEIVED at warehouse
+  // NOT when refund is initiated (product might still be in transit)
+  if (returnRequest.status !== ReturnStatus.RECEIVED) {
+    throw new Error("Return must be received at warehouse before processing refund");
+  }
 
     const payment = await this.paymentRepository.findByOrderId(
       returnRequest.orderId
@@ -550,6 +556,38 @@ export class ReturnService {
     if (!payment || payment.status !== PaymentStatus.SUCCESS) {
       throw new Error("Original payment not found or not successful");
     }
+
+      // ✅ GET WAREHOUSE (from original order's shipping info)
+  const order = returnRequest.order;
+  let warehouseId: bigint;
+
+  if (order.shippingInfo?.warehouseId) {
+    warehouseId = order.shippingInfo.warehouseId;
+  } else {
+    // Fallback to default warehouse
+    const warehouses = await this.warehouseRepository.findAll({
+      skip: 0,
+      take: 1,
+      where: { isDefaultPickup: true, isActive: true },
+    });
+    if (warehouses.length === 0) {
+      throw new Error("No active warehouse found for stock restoration");
+    }
+    warehouseId = warehouses[0].id;
+  }
+
+  // ✅ RESTORE STOCK (add items back to inventory)
+  try {
+    await this.stockManagementService.restoreStockForReturn(
+      returnRequest.returnItems,
+      warehouseId,
+      returnRequest.returnNumber
+    );
+    console.log(`✅ Stock restored for return ${returnRequest.returnNumber}`);
+  } catch (error) {
+    console.error("❌ Stock restoration failed:", error);
+    // Don't fail the refund, but log for manual intervention
+  }
 
     // ✅ Process refund based on method
     if (returnRequest.refundMethod === RefundMethod.ORIGINAL_PAYMENT) {
@@ -750,6 +788,35 @@ export class ReturnService {
 
     return this.shiprocketService.trackByAwb(returnRequest.returnShipment.awb);
   }
+
+  /**
+ * ✅ NEW: Update return status to RECEIVED (triggers stock restoration eligibility)
+ * Admin should call this when physical product arrives at warehouse
+ */
+async markReturnAsReceived(returnId: string, adminNotes?: string) {
+  const returnRequest = await this.returnRepository.findById(BigInt(returnId));
+
+  if (!returnRequest) {
+    throw new Error("Return request not found");
+  }
+
+  if (returnRequest.status !== ReturnStatus.PICKED_UP && 
+      returnRequest.status !== ReturnStatus.IN_TRANSIT) {
+    throw new Error("Return must be picked up or in transit to mark as received");
+  }
+
+  // ✅ Update status to RECEIVED
+  await this.returnRepository.update(returnRequest.id, {
+    status: ReturnStatus.RECEIVED,
+    adminNotes: adminNotes || "Product received at warehouse",
+  });
+
+  console.log(`✅ Return marked as received: ${returnRequest.returnNumber}`);
+
+  // ✅ Now admin can call processRefund() which will restore stock + issue refund
+
+  return this.returnRepository.findById(returnRequest.id);
+}
 
   /**
    * Helper: Generate return number
