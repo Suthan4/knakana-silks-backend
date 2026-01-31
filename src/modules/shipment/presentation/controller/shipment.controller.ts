@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { inject, injectable } from "tsyringe";
 import { ShipmentService } from "../../application/service/shipment.service.js";
 import { z } from "zod";
+import { ShiprocketService } from "../../infrastructure/services/shiprocket.service.js";
 
 const CreateShipmentDTOSchema = z.object({
   orderId: z.string(),
@@ -9,6 +10,10 @@ const CreateShipmentDTOSchema = z.object({
 
 const AssignCourierDTOSchema = z.object({
   orderId: z.string(),
+  courierId: z.number(),
+});
+const GenerateAwbDTOSchema = z.object({
+  shipmentId: z.string(),
   courierId: z.number(),
 });
 
@@ -20,7 +25,8 @@ const CheckServiceabilityDTOSchema = z.object({
 @injectable()
 export class ShipmentController {
   constructor(
-    @inject(ShipmentService) private shipmentService: ShipmentService
+    @inject(ShipmentService) private shipmentService: ShipmentService,
+    @inject(ShiprocketService) private shiprocketService: ShiprocketService
   ) {}
 
   /**
@@ -89,6 +95,7 @@ export class ShipmentController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
 
   /**
    * Schedule pickup (Admin)

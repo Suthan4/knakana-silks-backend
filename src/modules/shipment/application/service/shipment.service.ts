@@ -318,14 +318,14 @@ console.log("order",order);
 
     const shipment = await this.shipmentRepository.findByOrderId(order.id);
 
-    if (!shipment || !shipment.shiprocketOrderId) {
+    if (!shipment || !shipment.shiprocketShipmentId) {
       throw new Error(
         "Shipment not found. Please create shipment first in Shiprocket."
       );
     }
 
     const awbResponse = await this.shiprocketRepository.assignCourier({
-      shipmentId: parseInt(shipment.shiprocketOrderId),
+      shipmentId: shipment.shiprocketShipmentId,
       courierId: courierId,
     });
 

@@ -66,9 +66,12 @@ export class ShiprocketService {
     }
   }
 
-  async generateAwb(params: { shipmentId: number; courierId: number }) {
+  async generateAwb(params: { shipmentId: string; courierId: number }) {
     try {
-      const response = await this.api.post("/courier/assign/awb", params);
+      const response = await this.api.post("/courier/assign/awb", {
+         shipment_id: params.shipmentId,
+         courier_id: params.courierId,
+      });
       return response.data;
     } catch (error: any) {
       console.error("AWB generation failed:", error.response?.data || error);

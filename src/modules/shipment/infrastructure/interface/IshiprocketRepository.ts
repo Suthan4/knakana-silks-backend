@@ -96,7 +96,7 @@ export interface CourierServiceabilityParams {
 }
 
 export interface AssignCourierParams {
-  shipmentId: number;
+  shipmentId: string;
   courierId: number;
 }
 

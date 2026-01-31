@@ -77,11 +77,12 @@ router.get(
  * Body: { orderId: string, courierId: number }
  */
 router.post(
-  "/admin/shipments/assign-courier",
+  "/admin/shipments/generateawb&assign-courier",
   authenticate,
   checkPermission("shipments", "update"),
   (req, res) => getShipmentController().assignCourier(req, res)
 );
+
 
 /**
  * Schedule pickup with courier

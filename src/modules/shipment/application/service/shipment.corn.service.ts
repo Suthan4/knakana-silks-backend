@@ -85,7 +85,7 @@ export class ShipmentCronService {
 
     // ✅ Call Shiprocket to generate AWB
     const awbResponse = await this.shiprocketService.generateAwb({
-      shipmentId: parseInt(shipment.shiprocketShipmentId),
+      shipmentId: shipment.shiprocketShipmentId,
       courierId: shippingInfo.selectedCourierCompanyId,
     });
 
