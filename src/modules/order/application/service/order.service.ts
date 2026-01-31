@@ -871,10 +871,6 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       throw new Error(`Order can only be cancelled within ${this.ORDER_CANCELLATION_WINDOW_HOURS} hours of placement`);
     }
 
-    // ✅ CRITICAL: If AWB already generated, cancellation not allowed
-    if (order.shipment?.awbCode) {
-      throw new Error("Courier AWB already generated. Cancellation not allowed. You can return after delivery.");
-    }
 
     // ✅ Cancel in Shiprocket FIRST (if order exists)
     if (order.shipment?.shiprocketOrderId) {
@@ -980,10 +976,6 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       return { canCancel: false, reason: "Order already shipped. Reject or return." };
     }
 
-    // ✅ Check if AWB generated
-    if (order.shipment?.awbCode) {
-      return { canCancel: false, reason: "AWB already generated. Cannot cancel now." };
-    }
 
     // ✅ Check 24-hour window
     const orderAge = Date.now() - order.createdAt.getTime();

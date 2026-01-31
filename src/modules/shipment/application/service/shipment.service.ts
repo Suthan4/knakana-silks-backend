@@ -330,8 +330,10 @@ console.log("order",order);
     });
 
     const updatedShipment = await this.shipmentRepository.update(shipment.id, {
-      trackingNumber: awbResponse.response.data.awb_code,
-      courierName: awbResponse.response.data.courier_name,
+ awbCode: awbResponse.response.data.awb_code,              // ✅ ADDED
+  trackingNumber: awbResponse.response.data.awb_code,       
+  courierName: awbResponse.response.data.courier_name,
+  courierCompanyId: awbResponse.response.data.courier_company_id,
     });
 
     console.log(
@@ -482,12 +484,12 @@ console.log("order",order);
 
     const shipment = await this.shipmentRepository.findByOrderId(order.id);
 
-    if (!shipment || !shipment.shiprocketOrderId) {
+    if (!shipment || !shipment.shiprocketShipmentId) {
       throw new Error("Shipment not found");
     }
 
     const labelResponse = await this.shiprocketRepository.generateLabel([
-      parseInt(shipment.shiprocketOrderId),
+      parseInt(shipment.shiprocketShipmentId),
     ]);
 
     return labelResponse;
@@ -505,12 +507,12 @@ console.log("order",order);
 
     const shipment = await this.shipmentRepository.findByOrderId(order.id);
 
-    if (!shipment || !shipment.shiprocketOrderId) {
+    if (!shipment || !shipment.shiprocketShipmentId) {
       throw new Error("Shipment not found");
     }
 
     const manifestResponse = await this.shiprocketRepository.generateManifest([
-      parseInt(shipment.shiprocketOrderId),
+      parseInt(shipment.shiprocketShipmentId),
     ]);
 
     return manifestResponse;

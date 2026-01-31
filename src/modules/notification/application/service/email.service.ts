@@ -112,7 +112,7 @@ export class EmailService {
             <p>We'll send you another email when your order ships.</p>
           </div>
           <div class="footer">
-            <p>© 2024 Kangana Silks. All rights reserved.</p>
+            <p>© 2026 Kangana Silks. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -392,7 +392,7 @@ export class EmailService {
             <p>If you have any questions, please contact our customer support.</p>
           </div>
           <div class="footer">
-            <p>© 2024 Kangana Silks. All rights reserved.</p>
+            <p>© 2026 Kangana Silks. All rights reserved.</p>
           </div>
         </div>
       </body>

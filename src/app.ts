@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import { errorHandler } from "./shared/middleware/errorHandler.js";
 import { setupContainer } from "./config/container.js";
 setupContainer();
-setupShipmentCronJobs(); // ✅ ADD THIS
+// setupShipmentCronJobs(); // ✅ ADD THIS
 
 
 
