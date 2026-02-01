@@ -74,6 +74,62 @@ export class AuthService {
     };
   }
 
+    // Update Profile (NEW)
+  async updateProfile(
+    userId: bigint,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      email?: string;
+    }
+  ) {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new Error("User not found");
+
+    // If email is being updated, check if it's already taken by another user
+    if (data.email && data.email !== user.email) {
+      const existingUser = await this.userRepository.findByEmail(data.email);
+      if (existingUser && existingUser.id !== userId) {
+        throw new Error("Email already in use");
+      }
+    }
+
+    // Update user
+    const updatedUser = await this.userRepository.update(userId, {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      phone: data.phone,
+      email: data.email,
+    });
+
+    const { password: _, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+    // Change Password (NEW)
+  async changePassword(
+    userId: bigint,
+    currentPassword: string,
+    newPassword: string
+  ) {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new Error("User not found");
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) throw new Error("Current password is incorrect");
+
+    // Hash and update new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.userRepository.update(userId, { password: hashedPassword });
+
+    // Revoke all refresh tokens for security
+    await this.refreshTokenRepository.deleteByUserId(userId);
+
+    return { message: "Password changed successfully. Please login again." };
+  }
+
   // Login
   async login(email: string, password: string) {
     const user = await this.userRepository.findByEmail(email);

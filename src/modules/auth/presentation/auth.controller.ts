@@ -23,6 +23,23 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8),
 });
 
+const updateProfileSchema = z.object({
+  firstName: z.string().min(1).max(50).optional(),
+  lastName: z.string().min(1).max(50).optional(),
+  phone: z.string().regex(/^[6-9]\d{9}$/).optional(),
+  email: z.string().email().optional(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+    .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+    .regex(/[0-9]/, "Password must contain at least one number"),
+});
+
 @injectable()
 export class AuthController {
   constructor(@inject(AuthService) private authService: AuthService) {}
@@ -51,6 +68,46 @@ export class AuthController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+    // NEW: Update Profile
+  async updateProfile(req: Request, res: Response) {
+    try {
+      const userId = BigInt(req.user!.userId);
+      const data = updateProfileSchema.parse(req.body);
+
+      const updatedUser = await this.authService.updateProfile(userId, data);
+
+      res.json({
+        success: true,
+        message: "Profile updated successfully",
+        data: updatedUser,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  // NEW: Change Password
+  async changePassword(req: Request, res: Response) {
+    try {
+      const userId = BigInt(req.user!.userId);
+      const data = changePasswordSchema.parse(req.body);
+
+      const result = await this.authService.changePassword(
+        userId,
+        data.currentPassword,
+        data.newPassword
+      );
+
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
 
   async login(req: Request, res: Response) {
     try {

@@ -40,6 +40,13 @@ router.get("/auth/me", authenticate, (req, res) =>
   getAuthController().getProfile(req, res)
 );
 
+router.put("/auth/profile", authenticate, (req, res) =>
+  getAuthController().updateProfile(req, res)
+);
+router.put("/auth/change-password", authenticate, (req, res) =>
+  getAuthController().changePassword(req, res)
+);
+
 // ============ Admin Routes ============
 router.post(
   "/admin/create-admin",
