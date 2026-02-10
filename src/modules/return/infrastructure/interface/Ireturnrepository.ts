@@ -1,4 +1,4 @@
-import { Return, ReturnItem, Prisma } from "@/generated/prisma/client.js";
+import { Return, ReturnItem, Prisma, MediaType } from "@/generated/prisma/client.js";
 
 export type ReturnWithRelations = Prisma.ReturnGetPayload<{
   include: {
@@ -116,4 +116,18 @@ export interface IReturnRepository {
 
   // Check if order item already has return
   hasReturnForOrderItem(orderItemId: bigint): Promise<boolean>;
+  addReturnMedia(data: {
+    returnId: bigint;
+    type: MediaType;
+    url: string;
+    key?: string;
+    thumbnailUrl?: string;
+    mimeType?: string;
+    fileSize?: number;
+    duration?: number;
+    width?: number;
+    height?: number;
+    order: number;
+    description?: string;
+  }):Promise<any>;
 }

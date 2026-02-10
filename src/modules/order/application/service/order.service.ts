@@ -26,6 +26,8 @@ interface OrderBreakdown {
   subtotal: number;
   discount: number;
   shippingCost: number;
+  cgstAmount: number;
+  sgstAmount: number;
   gstAmount: number;
   total: number;
   couponDiscount: number;
@@ -34,6 +36,9 @@ interface OrderBreakdown {
 
 @injectable()
 export class OrderService {
+  private readonly CGST_RATE = 0.025; // 2.5%
+  private readonly SGST_RATE = 0.025; // 2.5%
+  private readonly TOTAL_GST_RATE  = this.CGST_RATE + this.SGST_RATE; // 5%
   private readonly GST_RATE = 0.18; // 18%
   private readonly FREE_SHIPPING_THRESHOLD = 1000;
   private readonly ORDER_CANCELLATION_WINDOW_HOURS = 24;
@@ -236,13 +241,18 @@ export class OrderService {
   }): OrderBreakdown {
     const { subtotal, couponDiscount, shippingCost } = params;
     const taxableAmount = subtotal - couponDiscount + shippingCost;
-    const gstAmount = taxableAmount * this.GST_RATE;
+    const cgstAmount = taxableAmount * this.CGST_RATE;
+    const sgstAmount = taxableAmount * this.SGST_RATE;
+    const gstAmount = cgstAmount + sgstAmount;
+
     const total = taxableAmount + gstAmount;
 
     return {
       subtotal,
       discount: couponDiscount,
       shippingCost,
+      cgstAmount: Math.round(cgstAmount * 100) / 100,
+      sgstAmount: Math.round(sgstAmount * 100) / 100,
       gstAmount: Math.round(gstAmount * 100) / 100,
       total: Math.round(total * 100) / 100,
       couponDiscount,

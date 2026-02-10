@@ -19,6 +19,7 @@ export class SearchService {
    * - Exact match bonus
    * - Position in text (earlier = higher score)
    * - Name vs description match
+   * - Word boundary matching for better fuzzy search
    */
   async search(params: UnifiedSearchDTO) {
     const { query, page, limit, type = "all", includeInactive = false } = params;
@@ -169,7 +170,7 @@ export class SearchService {
   }
 
   /**
-   * Calculate relevance score for products
+   * Calculate relevance score for products with improved fuzzy matching
    * Score range: 0-100
    */
   private calculateProductRelevance(product: any, query: string): number {
@@ -178,6 +179,8 @@ export class SearchService {
     const name = product.name.toLowerCase();
     const description = (product.description || "").toLowerCase();
     const sku = (product.sku || "").toLowerCase();
+    const queryWords = query.split(/\s+/);
+    const nameWords = name.split(/\s+/);
 
     // Exact match in name = highest score
     if (name === query) {
@@ -193,6 +196,29 @@ export class SearchService {
       // Bonus for early position
       const position = name.indexOf(query);
       score += Math.max(0, 20 - position);
+    }
+    // Word boundary match (e.g., "pat" matches "Patola Silk")
+    else if (nameWords.some((word:string) => word.startsWith(query))) {
+      score += 70;
+    }
+
+    // Multi-word fuzzy matching - check if all query words appear
+    const allWordsMatch = queryWords.every(qWord => 
+      nameWords.some((nWord:string) => nWord.includes(qWord))
+    );
+    if (allWordsMatch && queryWords.length > 1) {
+      score += 40;
+    }
+
+    // Partial word matching bonus
+    let partialMatches = 0;
+    queryWords.forEach(qWord => {
+      if (nameWords.some((nWord: string) => nWord.includes(qWord) && nWord !== qWord)) {
+        partialMatches++;
+      }
+    });
+    if (partialMatches > 0) {
+      score += partialMatches * 15;
     }
 
     // SKU match
@@ -222,7 +248,7 @@ export class SearchService {
   }
 
   /**
-   * Calculate relevance score for categories
+   * Calculate relevance score for categories with improved fuzzy matching
    * Score range: 0-100
    */
   private calculateCategoryRelevance(category: any, query: string): number {
@@ -230,6 +256,8 @@ export class SearchService {
 
     const name = category.name.toLowerCase();
     const description = (category.description || "").toLowerCase();
+    const queryWords = query.split(/\s+/);
+    const nameWords = name.split(/\s+/);
 
     // Exact match in name
     if (name === query) {
@@ -245,6 +273,18 @@ export class SearchService {
       // Bonus for early position
       const position = name.indexOf(query);
       score += Math.max(0, 15 - position);
+    }
+    // Word boundary match
+    else if (nameWords.some((word:string) => word.startsWith(query))) {
+      score += 75;
+    }
+
+    // Multi-word fuzzy matching
+    const allWordsMatch = queryWords.every(qWord => 
+      nameWords.some((nWord:string) => nWord.includes(qWord))
+    );
+    if (allWordsMatch && queryWords.length > 1) {
+      score += 35;
     }
 
     // Description match
@@ -272,7 +312,7 @@ export class SearchService {
   }
 
   /**
-   * Get search suggestions based on query
+   * Get search suggestions based on query with improved matching
    * Returns top matching product names and category names
    */
   async getSuggestions(query: string, limit: number = 5) {
@@ -281,33 +321,92 @@ export class SearchService {
     const [products, categories] = await Promise.all([
       this.productRepository.findAll({
         skip: 0,
-        take: limit,
+        take: limit * 3, // Fetch more for better scoring
         where: {
           isActive: true,
-          name: { contains: normalizedQuery, mode: "insensitive" },
+          OR: [
+            { name: { contains: normalizedQuery, mode: "insensitive" } },
+            { sku: { contains: normalizedQuery, mode: "insensitive" } },
+          ],
         },
-        orderBy: { name: "asc" },
       }),
       this.categoryRepository.findAll({
         skip: 0,
-        take: limit,
+        take: limit * 2,
         where: {
           isActive: true,
           name: { contains: normalizedQuery, mode: "insensitive" },
         },
-        orderBy: { name: "asc" },
       }),
     ]);
 
+    // Score and sort products for suggestions
+    const scoredProducts = products
+      .map((p) => {
+        const name = p.name.toLowerCase();
+        const sku = (p.sku || "").toLowerCase();
+        let score = 0;
+        
+        // Exact match - highest priority
+        if (name === normalizedQuery) score = 100;
+        // Starts with - very high priority
+        else if (name.startsWith(normalizedQuery)) score = 90;
+        // Word starts with query (e.g., "pat" matches "Patola Silk")
+        else {
+          const words = name.split(/\s+/);
+          const matchingWordIndex = words.findIndex(word => word.startsWith(normalizedQuery));
+          if (matchingWordIndex !== -1) {
+            // Earlier words get higher scores
+            score = 80 - (matchingWordIndex * 5);
+          } else if (name.includes(normalizedQuery)) {
+            // Contains but doesn't start with
+            score = 60;
+          }
+        }
+        
+        // SKU match bonus
+        if (sku.startsWith(normalizedQuery)) score += 15;
+        else if (sku.includes(normalizedQuery)) score += 10;
+        
+        return { product: p, score };
+      })
+      .filter(item => item.score > 0) // Only include matches
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    // Score and sort categories
+    const scoredCategories = categories
+      .map((c) => {
+        const name = c.name.toLowerCase();
+        let score = 0;
+        
+        if (name === normalizedQuery) score = 100;
+        else if (name.startsWith(normalizedQuery)) score = 90;
+        else {
+          const words = name.split(/\s+/);
+          const matchingWordIndex = words.findIndex(word => word.startsWith(normalizedQuery));
+          if (matchingWordIndex !== -1) {
+            score = 80 - (matchingWordIndex * 5);
+          } else if (name.includes(normalizedQuery)) {
+            score = 60;
+          }
+        }
+        
+        return { category: c, score };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
     return {
-      products: products.map((p) => ({
-        name: p.name,
-        slug: p.slug,
+      products: scoredProducts.map((p) => ({
+        name: p.product.name,
+        slug: p.product.slug,
         type: "product" as const,
       })),
-      categories: categories.map((c) => ({
-        name: c.name,
-        slug: c.slug,
+      categories: scoredCategories.map((c) => ({
+        name: c.category.name,
+        slug: c.category.slug,
         type: "category" as const,
       })),
     };

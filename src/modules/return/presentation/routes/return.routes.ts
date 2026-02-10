@@ -99,4 +99,17 @@ router.post(
   (req, res) => getReturnController().processRefund(req, res)
 );
 
+// User route - Add more media
+router.post("/returns/:id/add-media", authenticate, (req, res) =>
+  getReturnController().addMediaToReturn(req, res)
+);
+
+// Admin route - Request more media
+router.post(
+  "/admin/returns/:id/request-media",
+  authenticate,
+  checkPermission("returns", "update"),
+  (req, res) => getReturnController().requestMoreMedia(req, res)
+);
+
 export default router;

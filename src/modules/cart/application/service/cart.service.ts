@@ -34,9 +34,10 @@ export class CartService {
 
     // Calculate subtotal
     const subtotal = cart.items.reduce((sum, item) => {
-      const price = item.variant
-        ? item.variant.price
-        : item.product.sellingPrice;
+      const price =
+            item.variant?.sellingPrice ??
+            item.variant?.price ??
+            item.product.sellingPrice;
       return sum + Number(price) * item.quantity;
     }, 0);
 

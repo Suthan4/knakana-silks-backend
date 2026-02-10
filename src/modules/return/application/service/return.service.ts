@@ -11,6 +11,7 @@ import {
   RefundMethod,
   OrderStatus,
   PaymentStatus,
+  MediaType,
 } from "@/generated/prisma/enums.js";
 import { Prisma } from "@/generated/prisma/client.js";
 import { StockManagementService } from "@/modules/stock/application/stock.management.service.js";
@@ -828,6 +829,178 @@ async markReturnAsReceived(returnId: string, adminNotes?: string) {
       .padStart(3, "0");
     return `RET-${timestamp}-${random}`;
   }
+
+  /**
+ * ✅ NEW: Admin requests more media from customer
+ */
+async requestMoreMedia(returnId: string, message: string, adminUserId: string) {
+  const returnRequest = await this.returnRepository.findById(BigInt(returnId));
+
+  if (!returnRequest) {
+    throw new Error("Return request not found");
+  }
+
+  if (returnRequest.status !== ReturnStatus.PENDING) {
+    throw new Error("Can only request more media for pending returns");
+  }
+
+  // Update admin notes with media request
+  await this.returnRepository.update(returnRequest.id, {
+    adminNotes: `${returnRequest.adminNotes || ""}\n\n[Media Request] ${message}`.trim(),
+  });
+
+  // Send email to customer
+  try {
+    await this.emailService.sendEmail({
+      to: returnRequest.user.email,
+      subject: `Additional Information Required - Return ${returnRequest.returnNumber}`,
+      html: this.getMediaRequestEmailTemplate(
+        returnRequest.user.firstName,
+        returnRequest.returnNumber,
+        message
+      ),
+    });
+  } catch (error) {
+    console.error("Failed to send media request email:", error);
+  }
+
+  console.log(`✅ Media request sent for return: ${returnRequest.returnNumber}`);
+
+  return this.returnRepository.findById(returnRequest.id);
+}
+
+/**
+ * ✅ NEW: Customer adds more media to existing return
+ */
+async addMediaToReturn(
+  returnId: string,
+  userId: string,
+  media: Array<{
+    type: MediaType;
+    url: string;
+    key?: string;
+    thumbnailUrl?: string;
+    mimeType?: string;
+    fileSize?: number;
+    duration?: number;
+    width?: number;
+    height?: number;
+    description?: string;
+  }>
+) {
+  const returnRequest = await this.returnRepository.findById(BigInt(returnId));
+
+  if (!returnRequest) {
+    throw new Error("Return request not found");
+  }
+
+  if (returnRequest.userId !== BigInt(userId)) {
+    throw new Error("Unauthorized");
+  }
+
+  if (returnRequest.status === ReturnStatus.REJECTED || 
+      returnRequest.status === ReturnStatus.CLOSED) {
+    throw new Error("Cannot add media to rejected or closed returns");
+  }
+
+  // Get current media count
+  const currentMediaCount = returnRequest.media?.length || 0;
+  if (currentMediaCount + media.length > 10) {
+    throw new Error(`Maximum 10 media files allowed. You already have ${currentMediaCount}.`);
+  }
+
+  // Add media to database
+  for (const [index, mediaItem] of media.entries()) {
+    await this.returnRepository.addReturnMedia({
+      returnId: returnRequest.id,
+      type: mediaItem.type,
+      url: mediaItem.url,
+      key: mediaItem.key,
+      thumbnailUrl: mediaItem.thumbnailUrl,
+      mimeType: mediaItem.mimeType,
+      fileSize: mediaItem.fileSize,
+      duration: mediaItem.duration,
+      width: mediaItem.width,
+      height: mediaItem.height,
+      order: currentMediaCount + index,
+      description: mediaItem.description,
+    });
+  }
+
+  // Notify admin
+  try {
+    await this.emailService.sendEmail({
+      to: process.env.ADMIN_EMAIL || "admin@kankanasilks.com",
+      subject: `New Media Added - Return ${returnRequest.returnNumber}`,
+      html: `
+        <p>Customer has uploaded ${media.length} new media file(s) for return ${returnRequest.returnNumber}</p>
+        <p><a href="${process.env.ADMIN_PANEL_URL}/returns/${returnId}">Review Now</a></p>
+      `,
+    });
+  } catch (error) {
+    console.error("Failed to notify admin:", error);
+  }
+
+  console.log(`✅ Added ${media.length} media files to return: ${returnRequest.returnNumber}`);
+
+  return this.returnRepository.findById(returnRequest.id);
+}
+
+/**
+ * Email template for media request
+ */
+private getMediaRequestEmailTemplate(
+  firstName: string,
+  returnNumber: string,
+  message: string
+): string {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #F59E0B; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background-color: #f9fafb; }
+        .info-box { background-color: white; padding: 20px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #F59E0B; }
+        .button { display: inline-block; background-color: #F59E0B; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>📸 Additional Photos/Videos Required</h1>
+        </div>
+        <div class="content">
+          <h2>Hi ${firstName},</h2>
+          <p>We're reviewing your return request <strong>${returnNumber}</strong> and need some additional photos or videos to process it.</p>
+          
+          <div class="info-box">
+            <h3>What we need:</h3>
+            <p>${message}</p>
+          </div>
+          
+          <p>Please upload clear photos or videos showing:</p>
+          <ul>
+            <li>The entire product</li>
+            <li>Any defects or issues mentioned</li>
+            <li>Product tags if available</li>
+          </ul>
+          
+          <p>
+            <a href="${process.env.FRONTEND_URL}/my-account/returns/${returnNumber}/add-media" class="button">
+              Upload Photos/Videos
+            </a>
+          </p>
+          
+          <p>If you have any questions, please reply to this email.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
 
   /**
    * Helper: Email templates

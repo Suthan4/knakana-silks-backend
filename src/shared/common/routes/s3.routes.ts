@@ -9,7 +9,7 @@ const commonController = new CommonController();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 40 * 1024 * 1024, // 10MB limit
+    fileSize:  100 * 1024 * 1024, // 100 MB limit
   },
   fileFilter: (req, file, cb) => {
     // Accept images and videos

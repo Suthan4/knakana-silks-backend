@@ -4,6 +4,7 @@ import {
   ReturnItem,
   Prisma,
   PrismaClient,
+  MediaType,
 } from "@/generated/prisma/client.js";
 import {
   ReturnWithRelations,
@@ -447,4 +448,36 @@ export class ReturnRepository implements IReturnRepository {
     });
     return count > 0;
   }
+
+async addReturnMedia(data: {
+  returnId: bigint;
+  type: MediaType;
+  url: string;
+  key?: string;
+  thumbnailUrl?: string;
+  mimeType?: string;
+  fileSize?: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  order: number;
+  description?: string;
+}) {
+  return this.prisma.returnMedia.create({
+    data: {
+      returnId: data.returnId,
+      type: data.type,
+      url: data.url,
+      key: data.key,
+      thumbnailUrl: data.thumbnailUrl,
+      mimeType: data.mimeType,
+      fileSize: data.fileSize,
+      duration: data.duration,
+      width: data.width,
+      height: data.height,
+      order: data.order,
+      description: data.description,
+    },
+  });
+}
 }

@@ -21,7 +21,7 @@ const ReturnMediaSchema = z.object({
   description: z.string().max(500).optional(),
 });
 
-// Create Return DTO
+// ✅ Create Return DTO - Media is now REQUIRED
 export const CreateReturnDTOSchema = z
   .object({
     orderId: z.string(),
@@ -39,14 +39,12 @@ export const CreateReturnDTOSchema = z
     media: z
       .array(ReturnMediaSchema)
       .min(1, "At least one media file is required")
-      .max(10, "Maximum 10 media files allowed")
-      .optional(),
+      .max(10, "Maximum 10 media files allowed"),
     // Legacy images for backward compatibility
     images: z
       .array(z.string().url())
       .min(1, "At least one image is required")
-      .max(5)
-      .optional(),
+      .max(5),
     refundMethod: z
       .nativeEnum(RefundMethod)
       .default(RefundMethod.ORIGINAL_PAYMENT),
@@ -59,21 +57,16 @@ export const CreateReturnDTOSchema = z
       })
       .optional(),
   })
-  .refine(
-    (data) => {
-      // Either media or images must be provided
-      return (
-        (data.media && data.media.length > 0) ||
-        (data.images && data.images.length > 0)
-      );
-    },
-    {
-      message: "Either media or images must be provided",
-      path: ["media"],
-    }
-  );
 
 export type CreateReturnDTO = z.infer<typeof CreateReturnDTOSchema>;
+
+// ✅ NEW: Admin can request more media
+export const RequestMoreMediaDTOSchema = z.object({
+  message: z.string().min(10, "Please provide clear instructions"),
+});
+
+export type RequestMoreMediaDTO = z.infer<typeof RequestMoreMediaDTOSchema>;
+
 
 // Add Return Media DTO (for adding media to existing return)
 export const AddReturnMediaDTOSchema = z.object({
@@ -94,9 +87,12 @@ export type AddReturnMediaDTO = z.infer<typeof AddReturnMediaDTOSchema>;
 
 // Update Return Status DTO (Admin)
 export const UpdateReturnStatusDTOSchema = z.object({
-  status: z.nativeEnum(ReturnStatus),
+status: z.nativeEnum(ReturnStatus),
   adminNotes: z.string().optional(),
   rejectionReason: z.string().optional(),
+  // ✅ NEW: Admin can request additional media
+  requestMoreMedia: z.boolean().optional(),
+  mediaRequestMessage: z.string().optional(),
 });
 
 export type UpdateReturnStatusDTO = z.infer<typeof UpdateReturnStatusDTOSchema>;

@@ -267,4 +267,76 @@ export class ReturnController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+
+/**
+ * ✅ NEW: Admin requests more media
+ * POST /api/admin/returns/:id/request-media
+ */
+async requestMoreMedia(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ success: false, message: "Return ID is required" });
+      return;
+    }
+
+    if (!message) {
+      res.status(400).json({ success: false, message: "Message is required" });
+      return;
+    }
+
+    const returnRequest = await this.returnService.requestMoreMedia(
+      id,
+      message,
+      req.user!.userId
+    );
+
+    res.json({
+      success: true,
+      message: "Media request sent to customer",
+      data: returnRequest,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * ✅ NEW: Customer adds more media to return
+ * POST /api/returns/:id/add-media
+ */
+async addMediaToReturn(req: Request, res: Response) {
+  try {
+    const userId = req.user!.userId;
+    const { id } = req.params;
+    const { media } = req.body;
+
+    if (!id || Array.isArray(id)) {
+      res.status(400).json({ success: false, message: "Return ID is required" });
+      return;
+    }
+
+    if (!media || !Array.isArray(media) || media.length === 0) {
+      res.status(400).json({ success: false, message: "Media files are required" });
+      return;
+    }
+
+    const returnRequest = await this.returnService.addMediaToReturn(
+      id,
+      userId,
+      media
+    );
+
+    res.json({
+      success: true,
+      message: "Media added successfully",
+      data: returnRequest,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+}
 }
