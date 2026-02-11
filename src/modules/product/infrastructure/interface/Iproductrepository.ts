@@ -1,7 +1,21 @@
 import { Prisma, Product, ProductVariant } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
 
-
+// ✅ ADD THIS TYPE DEFINITION
+export type ProductWithRelations = Prisma.ProductGetPayload<{
+  include: {
+    category: true;
+    specifications: true;
+    variants: {
+      include: {
+        media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        stock: true;
+      };
+    };
+    media: { where: { isActive: true }, orderBy: { order: "asc" } },
+    stock: true;
+  };
+}>;
 export interface IProductRepository {
   create(data: {
     name: string;
@@ -31,7 +45,7 @@ export interface IProductRepository {
   update(id: bigint, data: any): Promise<Product>;
   delete(id: bigint): Promise<void>;
 
-  findById(id: bigint): Promise<Product | null>;
+  findById(id: bigint): Promise<ProductWithRelations | null>;
   findBySlug(slug: string): Promise<Product | null>;
   findBySku(sku: string): Promise<Product | null>;
   findAll( params: {

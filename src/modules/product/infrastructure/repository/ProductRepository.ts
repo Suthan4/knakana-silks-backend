@@ -9,13 +9,13 @@ import {
   PrismaClient,
 } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
-import { IProductRepository } from "../interface/Iproductrepository.js";
+import { IProductRepository, ProductWithRelations } from "../interface/Iproductrepository.js";
 
 @injectable()
 export class ProductRepository implements IProductRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
-  async findById(id: bigint): Promise<Product | null> {
+  async findById(id: bigint): Promise<ProductWithRelations | null> {
     return this.prisma.product.findUnique({
       where: { id },
       include: {

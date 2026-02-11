@@ -382,90 +382,323 @@ export class ProductService {
     }
   }
 
-  // Continuation of ProductService class...
-
-  async updateProduct(
-    id: string,
-    data: {
-      name?: string;
+async updateProduct(
+  id: string,
+  data: {
+    name?: string;
+    description?: string;
+    categoryId?: string;
+    basePrice?: number;
+    sellingPrice?: number;
+    sku?: string;
+    isActive?: boolean;
+    hsnCode?: string;
+    artisanName?: string;
+    artisanAbout?: string;
+    artisanLocation?: string;
+    weight?: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    metaTitle?: string;
+    metaDesc?: string;
+    schemaMarkup?: string;
+    specifications?: Array<{ key: string; value: string }>;
+    media?: Array<{
+      type: MediaType;
+      url: string;
+      key?: string;
+      thumbnailUrl?: string;
+      altText?: string;
+      title?: string;
       description?: string;
-      categoryId?: string;
+      mimeType?: string;
+      fileSize?: number;
+      duration?: number;
+      width?: number;
+      height?: number;
+      order?: number;
+      isActive?: boolean;
+    }>;
+    variants?: Array<{
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
       basePrice?: number;
       sellingPrice?: number;
-      sku?: string;
-      isActive?: boolean;
-      hsnCode?: string;
-      artisanName?: string;
-      artisanAbout?: string;
-      artisanLocation?: string;
+      price: number;
       weight?: number;
       length?: number;
       breadth?: number;
       height?: number;
-      metaTitle?: string;
-      metaDesc?: string;
-      schemaMarkup?: string;
-    }
-  ): Promise<Product> {
-    const productId = BigInt(id);
-    const product = await this.productRepository.findById(productId);
-
-    if (!product) {
-      throw new NotFoundError("Product not found");
-    }
-
-    if (data.categoryId) {
-      const category = await this.categoryRepository.findById(
-        BigInt(data.categoryId)
-      );
-      if (!category) {
-        throw new NotFoundError("Category not found");
-      }
-    }
-
-    let slug = product.slug;
-    if (data.name && data.name !== product.name) {
-      slug = SlugUtil.generateSlug(data.name);
-      const existing = await this.productRepository.findBySlug(slug);
-      if (existing && existing.id !== productId) {
-        throw new ConflictError("Product with this name already exists");
-      }
-    }
-
-    // Validate SKU if provided
-    if (data.sku && data.sku !== product.sku) {
-      const existingSku = await this.productRepository.findBySku(data.sku);
-      if (existingSku && existingSku.id !== productId) {
-        throw new ConflictError(`SKU "${data.sku}" is already in use`);
-      }
-    }
-
-    const updateData: any = {
-      ...data,
-      slug,
-      categoryId: data.categoryId ? BigInt(data.categoryId) : undefined,
+      media?: Array<{
+        type: MediaType;
+        url: string;
+        key?: string;
+        thumbnailUrl?: string;
+        altText?: string;
+        title?: string;
+        description?: string;
+        mimeType?: string;
+        fileSize?: number;
+        duration?: number;
+        width?: number;
+        height?: number;
+        order?: number;
+        isActive?: boolean;
+      }>;
+      stock?: {
+        warehouseId: string;
+        quantity: number;
+        lowStockThreshold?: number;
+      };
+    }>;
+    stock?: {
+      warehouseId: string;
+      quantity: number;
+      lowStockThreshold?: number;
     };
-
-    if (data.basePrice !== undefined) {
-      updateData.basePrice = new Decimal(data.basePrice);
-    }
-
-    if (data.sellingPrice !== undefined) {
-      updateData.sellingPrice = new Decimal(data.sellingPrice);
-    }
-
-    // Calculate volumetric weight if dimensions are updated
-    if (data.weight || data.length || data.breadth || data.height) {
-      const weight = data.weight ?? Number(product.weight);
-      const length = data.length ?? Number(product.length);
-      const breadth = data.breadth ?? Number(product.breadth);
-      const height = data.height ?? Number(product.height);
-
-      updateData.volumetricWeight = (length * breadth * height) / 5000;
-    }
-
-    return await this.productRepository.update(productId, updateData);
   }
+): Promise<Product> {
+  const productId = BigInt(id);
+  const product = await this.productRepository.findById(productId);
+
+  if (!product) {
+    throw new NotFoundError("Product not found");
+  }
+
+  if (data.categoryId) {
+    const category = await this.categoryRepository.findById(
+      BigInt(data.categoryId)
+    );
+    if (!category) {
+      throw new NotFoundError("Category not found");
+    }
+  }
+
+  let slug = product.slug;
+  if (data.name && data.name !== product.name) {
+    slug = SlugUtil.generateSlug(data.name);
+    const existing = await this.productRepository.findBySlug(slug);
+    if (existing && existing.id !== productId) {
+      throw new ConflictError("Product with this name already exists");
+    }
+  }
+
+  // Validate SKU if provided
+  if (data.sku && data.sku !== product.sku) {
+    const existingSku = await this.productRepository.findBySku(data.sku);
+    if (existingSku && existingSku.id !== productId) {
+      throw new ConflictError(`SKU "${data.sku}" is already in use`);
+    }
+  }
+
+  const updateData: any = {
+    ...data,
+    slug,
+    categoryId: data.categoryId ? BigInt(data.categoryId) : undefined,
+    // Remove these fields - they'll be handled separately
+    specifications: undefined,
+    media: undefined,
+    variants: undefined,
+    stock: undefined,
+  };
+
+  if (data.basePrice !== undefined) {
+    updateData.basePrice = new Decimal(data.basePrice);
+  }
+
+  if (data.sellingPrice !== undefined) {
+    updateData.sellingPrice = new Decimal(data.sellingPrice);
+  }
+
+  // Calculate volumetric weight if dimensions are updated
+  if (data.weight || data.length || data.breadth || data.height) {
+    const weight = data.weight ?? Number(product.weight);
+    const length = data.length ?? Number(product.length);
+    const breadth = data.breadth ?? Number(product.breadth);
+    const height = data.height ?? Number(product.height);
+
+    updateData.volumetricWeight = (length * breadth * height) / 5000;
+  }
+
+  // Update the product basic info
+  await this.productRepository.update(productId, updateData);
+
+  // 🆕 Handle specifications
+  if (data.specifications !== undefined) {
+    // ✅ Fetch fresh product with includes to get specifications
+    const productWithSpecs = await this.productRepository.findById(productId);
+    
+    if (productWithSpecs?.specifications && productWithSpecs.specifications.length > 0) {
+      // Delete existing specifications
+      await Promise.all(
+        productWithSpecs.specifications.map((spec) =>
+          this.productRepository.deleteSpecification(spec.id)
+        )
+      );
+    }
+
+    // Add new specifications
+    if (data.specifications.length > 0) {
+      await Promise.all(
+        data.specifications.map((spec) =>
+          this.productRepository.addSpecification(
+            productId,
+            spec.key,
+            spec.value
+          )
+        )
+      );
+    }
+  }
+
+  // 🆕 Handle product-level media
+  if (data.media !== undefined) {
+    // ✅ Fetch fresh product with includes to get media
+    const productWithMedia = await this.productRepository.findById(productId);
+    
+    if (productWithMedia?.media && productWithMedia.media.length > 0) {
+      // Delete existing media (soft delete)
+      await Promise.all(
+        productWithMedia.media.map((m) =>
+          this.productRepository.deleteMedia(m.id)
+        )
+      );
+    }
+
+    // Add new media
+    if (data.media.length > 0) {
+      await Promise.all(
+        data.media.map((mediaItem) =>
+          this.productRepository.addMedia(productId, {
+            type: mediaItem.type || MediaType.IMAGE,
+            url: mediaItem.url,
+            key: mediaItem.key,
+            thumbnailUrl: mediaItem.thumbnailUrl,
+            altText: mediaItem.altText,
+            title: mediaItem.title,
+            description: mediaItem.description,
+            mimeType: mediaItem.mimeType,
+            fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
+            duration: mediaItem.duration,
+            width: mediaItem.width,
+            height: mediaItem.height,
+            order: mediaItem.order,
+            isActive: mediaItem.isActive,
+          })
+        )
+      );
+    }
+  }
+
+  // 🆕 Handle variants for variable products
+  if (product.hasVariants && data.variants !== undefined) {
+    // ✅ Fetch fresh product with includes to get variants
+    const productWithVariants = await this.productRepository.findById(productId);
+    const existingVariants = productWithVariants?.variants || [];
+
+    // Delete all existing variants (cascade will handle stock and media)
+    if (existingVariants.length > 0) {
+      await Promise.all(
+        existingVariants.map((v) => this.productRepository.deleteVariant(v.id))
+      );
+    }
+
+    // Create new variants
+    if (data.variants.length > 0) {
+      for (const variant of data.variants) {
+        const variantSku = this.generateSKU(
+          `${product.name}-${variant.size || ""}-${variant.color || ""}-${
+            variant.fabric || ""
+          }-${JSON.stringify(variant.attributes || {})}`
+        );
+
+        let variantVolumetricWeight: number | undefined;
+        if (
+          variant.weight &&
+          variant.length &&
+          variant.breadth &&
+          variant.height
+        ) {
+          variantVolumetricWeight =
+            (variant.length * variant.breadth * variant.height) / 5000;
+        }
+
+        const createdVariant = await this.productRepository.addVariant({
+          productId,
+          attributes: variant.attributes,
+          size: variant.size,
+          color: variant.color,
+          fabric: variant.fabric,
+          basePrice: variant.basePrice,
+          sellingPrice: variant.sellingPrice,
+          price: variant.price,
+          weight: variant.weight,
+          length: variant.length,
+          breadth: variant.breadth,
+          height: variant.height,
+          volumetricWeight: variantVolumetricWeight,
+          sku: variantSku,
+        });
+
+        // Add variant media
+        if (variant.media && variant.media.length > 0) {
+          await Promise.all(
+            variant.media.map((mediaItem) =>
+              this.productRepository.addVariantMedia(createdVariant.id, {
+                type: mediaItem.type || MediaType.IMAGE,
+                url: mediaItem.url,
+                key: mediaItem.key,
+                thumbnailUrl: mediaItem.thumbnailUrl,
+                altText: mediaItem.altText,
+                title: mediaItem.title,
+                description: mediaItem.description,
+                mimeType: mediaItem.mimeType,
+                fileSize: mediaItem.fileSize
+                  ? BigInt(mediaItem.fileSize)
+                  : undefined,
+                duration: mediaItem.duration,
+                width: mediaItem.width,
+                height: mediaItem.height,
+                order: mediaItem.order,
+                isActive: mediaItem.isActive,
+              })
+            )
+          );
+        }
+
+        // Add variant stock
+        if (variant.stock) {
+          await this.productRepository.updateStock(
+            productId,
+            createdVariant.id,
+            BigInt(variant.stock.warehouseId),
+            variant.stock.quantity,
+            variant.stock.lowStockThreshold || 10,
+            "Updated variant stock"
+          );
+        }
+      }
+    }
+  }
+
+  // 🆕 Handle stock for simple products
+  if (!product.hasVariants && data.stock !== undefined) {
+    await this.productRepository.updateStock(
+      productId,
+      null,
+      BigInt(data.stock.warehouseId),
+      data.stock.quantity,
+      data.stock.lowStockThreshold || 10,
+      "Updated product stock"
+    );
+  }
+
+  // Return the fully updated product with all relations
+  return await this.productRepository.findById(productId) as Product;
+}
 
   async deleteProduct(id: string) {
     await this.productRepository.delete(BigInt(id));

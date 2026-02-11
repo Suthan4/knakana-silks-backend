@@ -179,6 +179,12 @@ videoConsultationNote: z.string().optional(),
   breadth: z.number().positive().max(200).optional(),
   height: z.number().positive().max(200).optional(),
 
+   // ✅ ADD THESE
+  stock: StockSchema.optional(),
+  variants: z.array(VariantSchema).optional(),
+
+  specifications: z.array(SpecificationSchema).optional(),
+  media: z.array(MediaSchema).optional(),
   metaTitle: z.string().optional(),
   metaDesc: z.string().optional(),
   schemaMarkup: z.string().optional(),
