@@ -20,6 +20,7 @@ import { registerProductRequestModule } from "@/modules/product-request/containe
 import { registerSearchModule } from "@/modules/search/container.js";
 import { registerReturnModule } from "@/modules/return/container.js";
 import { registerStockModule } from "@/modules/stock/container.js";
+import { registerReviewModule } from "@/modules/review/container.js";
 // import { registerUploadModule } from "@/modules/upload/container.js";
 
 export function setupContainer() {
@@ -35,6 +36,7 @@ export function setupContainer() {
   registerCartModule();
   registerWishlistModule();
   registerBannerModule()
+  registerReviewModule()
   registerHomeSectionModule()
   registerCouponModule()
   registerStockModule()

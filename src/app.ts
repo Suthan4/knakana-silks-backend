@@ -33,6 +33,7 @@ import shippingCalculatorRoutes from "./modules/shipment/presentation/routes/shi
 import { setupShipmentCronJobs } from "./modules/shipment/shipment.corn.setup.js";
 import returnRoutes from "./modules/return/presentation/routes/return.routes.js";
 import stockRoutes from "./modules/stock/presentation/routes/stock.routes.js";
+import reviewRoutes from "./modules/review/presentation/routes/review.routes.js";
 
 export const createApp = (): Application => {
   const app = express();
@@ -119,6 +120,7 @@ app.options("*", cors(corsOptions));
   app.use("/api", productRequestRoutes);
   app.use("/api", searchRoutes);
   app.use("/api", shippingCalculatorRoutes);
+  app.use("/api", reviewRoutes);
 
   /* --------------------------------------------------
    * Health check
