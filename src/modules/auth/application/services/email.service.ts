@@ -5,11 +5,11 @@ function createTransporter() {
 
   return nodemailer.createTransport({
     secure:true,
-    host: "smtp.gmail.com",
+    host: process.env.EMAIL_HOST!,
     port: 465,
     auth: {
-      user: process.env.EMAIL_USER!, // ✅ from .env
-      pass: process.env.EMAIL_PASS!, // ✅ Gmail App Password
+      user: "admin@kankanasilks.com", // ✅ from .env
+      pass: "LPG9crSHaS5q" // ✅ zoho App Password
     },
   });
 }
@@ -68,7 +68,8 @@ export async function sendPasswordResetEmail(email: string, token: string) {
     `;
 
   await transporter.sendMail({
-    from: process.env.EMAIL_FROM!,
+    // from: process.env.EMAIL_FROM!,
+    from: "no-reply@kankanasilks.com",
     to: email,
     subject: "Reset Your Password - Kankanasilks",
     html,
