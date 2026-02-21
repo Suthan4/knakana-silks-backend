@@ -36,7 +36,8 @@ export class AuthService {
     password: string,
     firstName: string,
     lastName: string,
-    phone?: string
+    phone?: string,
+    termsAccepted?:boolean,
   ) {
     const existingUser = await this.userRepository.findByEmail(email);
     if (existingUser) throw new Error("User already exists");
@@ -50,6 +51,7 @@ export class AuthService {
       lastName,
       phone,
       role: UserRole.USER,
+      termsAccepted
     });
 
     const tokens = this.generateTokens({
@@ -69,6 +71,7 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         isActive: user.isActive,
+        termsAccepted: user.termsAccepted
       },
       ...tokens,
     };

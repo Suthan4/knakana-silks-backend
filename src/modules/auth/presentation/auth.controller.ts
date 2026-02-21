@@ -11,6 +11,9 @@ const registerSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   phone: z.string().optional(),
+  termsAccepted: z.boolean().refine((val) => val === true, {
+    message: "You must accept the terms and conditions",
+  }),
 });
 
 const loginSchema = z.object({
@@ -52,7 +55,8 @@ export class AuthController {
         data.password,
         data.firstName,
         data.lastName,
-        data.phone
+        data.phone,
+        data.termsAccepted
       );
 
       res.status(201).json({
