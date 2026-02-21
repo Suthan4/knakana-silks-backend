@@ -11,3 +11,4 @@ sec/
 /generated/prisma
 generated/ 
 .env
+**/prisma_guid.md
