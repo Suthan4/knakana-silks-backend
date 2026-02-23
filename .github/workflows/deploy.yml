@@ -1,0 +1,29 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              echo "🚀 Deploying PROD..."
+              cd /var/www/api-prod
+              ./deploy.sh
+            else
+              echo "🚀 Deploying QA..."
+              cd /var/www/api-qa
+              ./deploy.sh
+            fi
