@@ -54,9 +54,10 @@ const corsOptions = {
   origin: [
     "http://localhost:3001",
     "http://localhost:5173",
-    "https://qa.admin.kankanasilks.com",
     "https://admin.kankanasilks.com",
+    "https://www.kankanasilks.com",
     "https://kankanasilks.com",
+    "https://qa.admin.kankanasilks.com",
     "https://qa.kankanasilks.com",
   ],
   credentials: true,
@@ -94,8 +95,8 @@ app.options("*", cors(corsOptions));
   /* --------------------------------------------------
    * Body parsers (AFTER uploads)
    * -------------------------------------------------- */
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "100mb" }));
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
   /* --------------------------------------------------
