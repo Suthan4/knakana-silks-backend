@@ -276,7 +276,7 @@ model Product {
   id                  BigInt                @id @default(autoincrement())
   name                String
   slug                String                @unique
-  description         String
+  description         String                @db.Text
   categoryId          BigInt
   basePrice           Decimal               @db.Decimal(10, 2)
   sellingPrice        Decimal               @db.Decimal(10, 2)
