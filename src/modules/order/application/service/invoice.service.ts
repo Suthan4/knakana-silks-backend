@@ -1,12 +1,25 @@
 import { injectable, inject } from "tsyringe";
 import { IOrderRepository } from "../../infrastructure/interface/Iorderrepository.js";
+import fs from "fs";
+import path from "path";
 import PDFDocument from "pdfkit";
 
 @injectable()
 export class InvoiceService {
+  private logoBuffer: Buffer;
   constructor(
     @inject("IOrderRepository") private orderRepository: IOrderRepository
-  ) {}
+    
+  ) {
+    const logoPath = path.join(
+      process.cwd(),
+      "public",
+      "images",
+      "kankana-silks-logo.png"
+    );
+
+    this.logoBuffer = fs.readFileSync(logoPath);
+  }
 
   /**
    * Generate invoice PDF for an order
@@ -23,283 +36,323 @@ export class InvoiceService {
     }
 
     // Only allow invoice download for completed/delivered orders
-    if (!["DELIVERED", "COMPLETED", "SHIPPED"].includes(order.status)) {
+    if (!["PROCESSING","DELIVERED", "COMPLETED", "SHIPPED"].includes(order.status)) {
       throw new Error("Invoice is only available for shipped/delivered orders");
     }
 
     return this.createInvoicePDF(order);
   }
 
-  /**
-   * Create PDF invoice document
+/**
+   * Create PDF invoice document — all fixes applied
+   * Fix 1: Order No & Date no longer overlap
+   * Fix 2: Variant attributes shown under each item  
+   * Fix 3: CGST 2.5% + SGST 2.5% matching checkout exactly
+   * Fix 4: Courier charges as separate line
+   * Fix 5: Footer always on same page — no extra blank page
+   * Fix 6: "Rs." used instead of ₹ (Helvetica cannot render ₹ glyph)
    */
   private async createInvoicePDF(order: any): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      // bufferPages:true allows us to write footer on every page at the end
+      const doc = new PDFDocument({ size: "A4", margin: 50, bufferPages: true });
       const chunks: Buffer[] = [];
 
       doc.on("data", (chunk) => chunks.push(chunk));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      // Header
-      doc
-        .fontSize(24)
-        .font("Helvetica-Bold")
-        .text("KANKANA SILKS", 50, 50);
+      // FIX #6: "Rs." — Helvetica cannot render the ₹ Unicode glyph (U+20B9)
+      // It renders as a box/quote/number. Use "Rs." which is universally readable.
+      const rs = (amount: number | string): string =>
+        `Rs. ${Number(amount).toFixed(2)}`;
+
+      // ─── HEADER ────────────────────────────────────────────────────
+      // Logo
+      const logoX = 50;
+      const logoY = 45;
+      const logoWidth = 55;
+
+      doc.image(this.logoBuffer, logoX, logoY, {
+        width: logoWidth,
+      });
+
+      // Text start position (right of logo)
+      const textX = logoX + logoWidth + 10;
 
       doc
-        .fontSize(10)
+        .fontSize(9)
         .font("Helvetica")
-        .text("Premium Silk Sarees & Fabrics", 50, 80)
-        .text("www.kankanasilks.com", 50, 95)
-        .text("contact@kankanasilks.com", 50, 110);
+        .fillColor("#555555")
+        .text("Premium Silk Sarees & Fabrics", textX, 55)
+        .text("www.kankanasilks.com", textX, 68)
+        .text("support@kankanasilks.com", textX, 81);
 
-      // Invoice Title
+      // Right side: TAX INVOICE
       doc
         .fontSize(20)
         .font("Helvetica-Bold")
-        .text("TAX INVOICE", 400, 50, { align: "right" });
+        .fillColor("#1a1a1a")
+        .text("TAX INVOICE", 350, 50, { width: 195, align: "right" });
 
+      // Invoice No — label on one line, value on next (no overlap)
       doc
-        .fontSize(10)
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .fillColor("#333333")
+        .text("Invoice No:", 350, 80, { width: 195, align: "right" });
+      doc
+        .fontSize(9)
         .font("Helvetica")
-        .text(`Invoice No: ${order.orderNumber}`, 400, 80, { align: "right" })
+        .fillColor("#1a1a1a")
+        .text(order.orderNumber, 350, 92, { width: 195, align: "right" });
+
+      // Date — label and value each on own line
+      doc
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .fillColor("#333333")
+        .text("Date:", 350, 108, { width: 195, align: "right" });
+      doc
+        .fontSize(9)
+        .font("Helvetica")
+        .fillColor("#1a1a1a")
         .text(
-          `Date: ${new Date(order.createdAt).toLocaleDateString("en-IN")}`,
-          400,
-          95,
-          { align: "right" }
+          new Date(order.createdAt).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }),
+          350, 120,
+          { width: 195, align: "right" }
         );
 
-      // Line separator
-      doc
-        .moveTo(50, 140)
-        .lineTo(545, 140)
-        .stroke();
+      // Divider
+      doc.moveTo(50, 145).lineTo(545, 145).strokeColor("#cccccc").lineWidth(1).stroke();
 
-      // Billing & Shipping Addresses
-      let y = 160;
-
-      // Billing Address
-      doc
-        .fontSize(12)
-        .font("Helvetica-Bold")
-        .text("Bill To:", 50, y);
+      // ─── ADDRESSES ─────────────────────────────────────────────────
+      let y = 162;
 
       doc
-        .fontSize(10)
-        .font("Helvetica")
-        .text(order.billingAddress.fullName, 50, y + 20)
-        .text(order.billingAddress.addressLine1, 50, y + 35);
+        .fontSize(10).font("Helvetica-Bold").fillColor("#1a1a1a")
+        .text("Bill To:", 50, y)
+        .text("Ship To:", 310, y);
 
-      if (order.billingAddress.addressLine2) {
-        doc.text(order.billingAddress.addressLine2, 50, y + 50);
-        y += 15;
-      }
+      const writeAddress = (addr: any, x: number, startY: number): number => {
+        let ay = startY + 16;
+        doc.fontSize(9).font("Helvetica-Bold").fillColor("#1a1a1a")
+          .text(addr.fullName, x, ay, { width: 220 });
+        ay += 13;
+        doc.font("Helvetica").fillColor("#444444")
+          .text(addr.addressLine1, x, ay, { width: 220 });
+        ay += 12;
+        if (addr.addressLine2) {
+          doc.text(addr.addressLine2, x, ay, { width: 220 });
+          ay += 12;
+        }
+        doc.text(`${addr.city}, ${addr.state} - ${addr.pincode}`, x, ay, { width: 220 });
+        ay += 12;
+        doc.fillColor("#555555").text(`Phone: ${addr.phone}`, x, ay, { width: 220 });
+        return ay;
+      };
 
+      const billEnd = writeAddress(order.billingAddress, 50, y);
+      const shipEnd = writeAddress(order.shippingAddress, 310, y);
+      y = Math.max(billEnd, shipEnd) + 20;
+
+      doc.moveTo(50, y).lineTo(545, y).strokeColor("#cccccc").stroke();
+
+      // ─── ITEMS TABLE ───────────────────────────────────────────────
+      y += 12;
+
+      // Table header
+      doc.rect(50, y - 4, 495, 20).fillColor("#f5f5f5").fill();
       doc
-        .text(
-          `${order.billingAddress.city}, ${order.billingAddress.state} - ${order.billingAddress.pincode}`,
-          50,
-          y + 50
-        )
-        .text(`Phone: ${order.billingAddress.phone}`, 50, y + 65);
-
-      // Shipping Address
-      y = 160;
-      doc
-        .fontSize(12)
-        .font("Helvetica-Bold")
-        .text("Ship To:", 320, y);
-
-      doc
-        .fontSize(10)
-        .font("Helvetica")
-        .text(order.shippingAddress.fullName, 320, y + 20)
-        .text(order.shippingAddress.addressLine1, 320, y + 35);
-
-      if (order.shippingAddress.addressLine2) {
-        doc.text(order.shippingAddress.addressLine2, 320, y + 50);
-        y += 15;
-      }
-
-      doc
-        .text(
-          `${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pincode}`,
-          320,
-          y + 50
-        )
-        .text(`Phone: ${order.shippingAddress.phone}`, 320, y + 65);
-
-      // Items Table
-      y = 280;
-      doc
-        .moveTo(50, y)
-        .lineTo(545, y)
-        .stroke();
-
-      y += 10;
-
-      // Table Headers
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text("Item", 50, y)
-        .text("Qty", 350, y)
-        .text("Price", 410, y)
-        .text("Amount", 480, y);
+        .fontSize(9).font("Helvetica-Bold").fillColor("#333333")
+        .text("#", 55, y, { width: 20 })
+        .text("Item Description", 80, y, { width: 270 })
+        .text("Qty", 355, y, { width: 40, align: "center" })
+        .text("Unit Price", 400, y, { width: 70, align: "right" })
+        .text("Amount", 475, y, { width: 65, align: "right" });
 
       y += 20;
-      doc
-        .moveTo(50, y)
-        .lineTo(545, y)
-        .stroke();
+      doc.moveTo(50, y).lineTo(545, y).strokeColor("#cccccc").stroke();
+      y += 8;
 
-      // Table Items
-      doc.font("Helvetica");
-      y += 10;
+      doc.font("Helvetica").fillColor("#1a1a1a");
 
-      for (const item of order.items) {
-        const itemName = item.product.name;
+      // CONTENT_BOTTOM: leave 160px for totals + footer on same page
+      const CONTENT_BOTTOM = doc.page.height - 160;
+
+      for (let i = 0; i < order.items.length; i++) {
+        const item = order.items[i];
+        const itemName = item.product?.name || item.productName || "Product";
         const quantity = item.quantity;
         const price = Number(item.price);
         const amount = price * quantity;
 
-        // Item name (with wrapping)
-        const nameHeight = doc.heightOfString(itemName, { width: 280 });
-
-        doc
-          .fontSize(10)
-          .text(itemName, 50, y, { width: 280 })
-          .text(quantity.toString(), 350, y)
-          .text(`₹${price.toFixed(2)}`, 410, y)
-          .text(`₹${amount.toFixed(2)}`, 480, y);
-
-        // Add variant attributes if present
+        // Variant string
+        let variantLine = "";
         if (item.variant?.attributes) {
-          y += nameHeight + 5;
-          const attrs = Object.entries(item.variant.attributes)
+          variantLine = Object.entries(item.variant.attributes)
             .map(([k, v]) => `${k}: ${v}`)
-            .join(", ");
-          doc.fontSize(8).fillColor("#666").text(attrs, 50, y, { width: 280 });
-          doc.fillColor("#000");
+            .join("  |  ");
         }
 
-        y += Math.max(nameHeight, 15) + 15;
+        const nameH = doc.fontSize(9).heightOfString(itemName, { width: 270 });
+        const varH = variantLine
+          ? doc.fontSize(8).heightOfString(variantLine, { width: 270 }) + 4
+          : 0;
+        const rowH = nameH + varH + 14;
 
-        // Add new page if needed
-        if (y > 700) {
+        if (y + rowH > CONTENT_BOTTOM) {
           doc.addPage();
           y = 50;
         }
+
+        if (i % 2 === 1) {
+          doc.rect(50, y - 3, 495, rowH).fillColor("#fafafa").fill();
+        }
+
+        doc.fontSize(9).font("Helvetica").fillColor("#888888")
+          .text(`${i + 1}`, 55, y, { width: 20 });
+
+        doc.font("Helvetica-Bold").fillColor("#1a1a1a")
+          .text(itemName, 80, y, { width: 270 });
+
+        if (variantLine) {
+          doc.font("Helvetica").fontSize(8).fillColor("#777777")
+            .text(variantLine, 80, y + nameH + 2, { width: 270 });
+        }
+
+        doc.fontSize(9).font("Helvetica").fillColor("#1a1a1a")
+          .text(String(quantity), 355, y, { width: 40, align: "center" })
+          .text(rs(price), 400, y, { width: 70, align: "right" })
+          .text(rs(amount), 475, y, { width: 65, align: "right" });
+
+        y += rowH;
       }
 
-      // Summary
-      doc
-        .moveTo(50, y)
-        .lineTo(545, y)
-        .stroke();
+      // Table bottom border
+      doc.moveTo(50, y).lineTo(545, y).strokeColor("#cccccc").stroke();
 
-      y += 15;
+      // ─── TOTALS ────────────────────────────────────────────────────
+      y += 14;
 
-      const subtotal = Number(order.subtotal);
-      const discount = Number(order.discount);
-      const shipping = Number(order.shippingCost);
-      const gst = Number(order.gstAmount || 0);
-      const total = Number(order.total);
+      const subtotal    = Number(order.subtotal);
+      const discount    = Number(order.discount || 0);
+      const shipping    = Number(order.shippingCost || 0);
+      const taxableBase = subtotal - discount + shipping;
+      const cgst        = Math.round(taxableBase * 0.025 * 100) / 100;
+      const sgst        = Math.round(taxableBase * 0.025 * 100) / 100;
+      const total       = Number(order.total); // use DB total as source of truth
 
-      doc
-        .fontSize(10)
-        .font("Helvetica")
-        .text("Subtotal:", 380, y)
-        .text(`₹${subtotal.toFixed(2)}`, 480, y);
+      const SX = 330;   // summary label x
+      const VX = 470;   // value x
+      const SW = 135;   // label width
+      const VW = 70;    // value width
+
+      const summaryRow = (
+        label: string,
+        value: string,
+        bold = false,
+        color = "#444444"
+      ) => {
+        doc
+          .fontSize(9)
+          .font(bold ? "Helvetica-Bold" : "Helvetica")
+          .fillColor(color)
+          .text(label, SX, y, { width: SW, align: "left" })
+          .text(value, VX, y, { width: VW, align: "right" });
+        y += 17;
+      };
+
+      summaryRow("Subtotal:", rs(subtotal));
 
       if (discount > 0) {
-        y += 20;
-        doc
-          .text("Discount:", 380, y)
-          .text(`-₹${discount.toFixed(2)}`, 480, y);
+        summaryRow(
+          order.coupon?.code ? `Discount (${order.coupon.code}):` : "Discount:",
+          `-${rs(discount)}`,
+          false,
+          "#16a34a"
+        );
       }
 
-      y += 20;
+      summaryRow("Courier Charges:", shipping === 0 ? "FREE" : rs(shipping));
+      summaryRow("CGST (2.5%):", rs(cgst));
+      summaryRow("SGST (2.5%):", rs(sgst));
+
+      // Total bar
+      doc.moveTo(SX, y - 4).lineTo(545, y - 4).strokeColor("#999999").lineWidth(0.5).stroke();
+      doc.rect(SX - 5, y - 2, 220, 22).fillColor("#1a1a1a").fill();
       doc
-        .text("Shipping:", 380, y)
-        .text(shipping === 0 ? "FREE" : `₹${shipping.toFixed(2)}`, 480, y);
+        .fontSize(11).font("Helvetica-Bold").fillColor("#ffffff")
+        .text("Total:", SX, y + 4, { width: SW, align: "left" })
+        .text(rs(total), VX, y + 4, { width: VW, align: "right" });
 
-      if (gst > 0) {
-        y += 20;
-        doc
-          .text("GST (18%):", 380, y)
-          .text(`₹${gst.toFixed(2)}`, 480, y);
-      }
-
-      y += 25;
-      doc
-        .moveTo(380, y - 5)
-        .lineTo(545, y - 5)
-        .stroke();
-
-      doc
-        .fontSize(12)
-        .font("Helvetica-Bold")
-        .text("Total:", 380, y)
-        .text(`₹${total.toFixed(2)}`, 480, y);
-
-      // Payment Info
       y += 40;
-      doc
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text("Payment Information", 50, y);
 
-      y += 20;
-      doc.font("Helvetica");
+      // ─── PAYMENT INFO ──────────────────────────────────────────────
+      doc.moveTo(50, y).lineTo(545, y).strokeColor("#cccccc").lineWidth(1).stroke();
+      y += 14;
+
+      doc.fontSize(10).font("Helvetica-Bold").fillColor("#1a1a1a")
+        .text("Payment Information", 50, y);
+      y += 16;
 
       if (order.payment) {
-        const paymentMethod = this.getPaymentMethodLabel(order.payment.method);
-        doc.text(`Payment Method: ${paymentMethod}`, 50, y);
+        const method = this.getPaymentMethodLabel(order.payment.method);
+
+        doc.fontSize(9).font("Helvetica").fillColor("#444444").text("Payment Method:", 50, y);
+        doc.font("Helvetica-Bold").fillColor("#1a1a1a").text(method, 160, y);
+        y += 14;
 
         if (order.payment.cardNetwork && order.payment.cardLast4) {
-          y += 15;
-          doc.text(
-            `Card: ${order.payment.cardNetwork} •••• ${order.payment.cardLast4}`,
-            50,
-            y
-          );
+          doc.font("Helvetica").fillColor("#444444").text("Card:", 50, y);
+          doc.font("Helvetica-Bold").fillColor("#1a1a1a")
+            .text(`${order.payment.cardNetwork} **** ${order.payment.cardLast4}`, 160, y);
+          y += 14;
         } else if (order.payment.upiId) {
-          y += 15;
-          doc.text(`UPI ID: ${order.payment.upiId}`, 50, y);
+          doc.font("Helvetica").fillColor("#444444").text("UPI ID:", 50, y);
+          doc.font("Helvetica-Bold").fillColor("#1a1a1a").text(order.payment.upiId, 160, y);
+          y += 14;
         }
 
-        y += 15;
-        doc.text(`Payment Status: ${order.payment.status}`, 50, y);
+        const statusColor = order.payment.status === "SUCCESS" ? "#16a34a" : "#dc2626";
+        doc.font("Helvetica").fillColor("#444444").text("Payment Status:", 50, y);
+        doc.font("Helvetica-Bold").fillColor(statusColor).text(order.payment.status, 160, y);
+        y += 14;
 
         if (order.payment.razorpayPaymentId) {
-          y += 15;
-          doc
-            .fontSize(8)
+          doc.fontSize(8).font("Helvetica").fillColor("#888888")
             .text(`Transaction ID: ${order.payment.razorpayPaymentId}`, 50, y);
+          y += 12;
         }
       }
 
-      // Footer
-      doc
-        .fontSize(8)
-        .font("Helvetica")
-        .fillColor("#666")
-        .text(
-          "Thank you for shopping with Kankana Silks!",
-          50,
-          750,
-          { align: "center" }
-        )
-        .text(
-          "For any queries, contact us at contact@kankanasilks.com",
-          50,
-          765,
-          { align: "center" }
-        );
+      // ─── FOOTER — written on EVERY page using bufferPages ──────────
+      // FIX #5: bufferPages lets us iterate all pages and stamp footer
+      // on each one, so it always appears at bottom of the last page
+      // and never creates an extra blank page.
+      const totalPages = doc.bufferedPageRange().count;
+      for (let p = 0; p < totalPages; p++) {
+        doc.switchToPage(p);
+        const pH = doc.page.height;
+
+        doc.moveTo(50, pH - 62).lineTo(545, pH - 62)
+          .strokeColor("#dddddd").lineWidth(0.8).stroke();
+
+        doc
+          .fontSize(8).font("Helvetica-Bold").fillColor("#555555")
+          .text("Thank you for shopping with Kankana Silks!", 50, pH - 50,
+            { align: "center", width: 495 });
+        doc
+          .fontSize(7.5).font("Helvetica").fillColor("#888888")
+          .text("For queries: contact@kankanasilks.com  |  www.kankanasilks.com",
+            50, pH - 37, { align: "center", width: 495 })
+          .text("This is a computer-generated invoice and does not require a physical signature.",
+            50, pH - 24, { align: "center", width: 495 });
+      }
 
       doc.end();
     });
