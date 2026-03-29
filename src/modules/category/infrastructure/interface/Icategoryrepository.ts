@@ -33,6 +33,12 @@ export interface ICategoryRepository {
     category: Category;
     descendantIds: bigint[];
   } | null>;
+  
+  getCategoryWithDescendantsAdmin(slug: string): Promise<{
+    category: Category;
+    descendantIds: bigint[];
+  } | null>;
+  
   getMultipleCategoriesWithDescendants(slugs: string[]): Promise<{
     categories: Category[];
     allDescendantIds: bigint[];

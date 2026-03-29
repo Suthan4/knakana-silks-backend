@@ -150,6 +150,17 @@ export class CategoryService {
 
     return result;
   }
+  async getCategoryWithDescendantsAdmin(slug: string) {
+    const result = await this.categoryRepository.getCategoryWithDescendantsAdmin(
+      slug
+    );
+
+    if (!result) {
+      throw new Error("Category not found");
+    }
+
+    return result;
+  }
 
   async getCategories(params: {
     page: number;

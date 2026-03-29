@@ -7,13 +7,22 @@ import {
   ProductVariantMedia,
   Stock,
   PrismaClient,
+  Prisma,
+  Category,
 } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
-import { IProductRepository, ProductWithRelations } from "../interface/Iproductrepository.js";
+import { AdminProductWithRelations, IProductRepository, PaginatedProductParams, ProductWithRelations } from "../interface/Iproductrepository.js";
+import { QueryProductDTO } from "../../application/product.dto.js";
 
 @injectable()
 export class ProductRepository implements IProductRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
+  findAllAdmin(params: PaginatedProductParams): Promise<AdminProductWithRelations[]> {
+    throw new Error("Method not implemented.");
+  }
+  countAdmin(where?: Prisma.ProductWhereInput): Promise<number> {
+    throw new Error("Method not implemented.");
+  }
 
   async findById(id: bigint): Promise<ProductWithRelations | null> {
     return this.prisma.product.findUnique({
@@ -492,4 +501,26 @@ export class ProductRepository implements IProductRepository {
 
     return stock;
   }
+
+
+
+/**
+ * ADMIN: Recursively get all descendant IDs — includes inactive categories
+ */
+async getAllDescendantIdsAdmin(categoryId: bigint): Promise<bigint[]> {
+  const ids: bigint[] = [categoryId];
+
+  const children = await this.prisma.category.findMany({
+    where: { parentId: categoryId },
+    select: { id: true },
+  });
+
+  for (const child of children) {
+    const descendantIds = await this.getAllDescendantIdsAdmin(child.id);
+    ids.push(...descendantIds);
+  }
+
+  return ids;
+}
+
 }

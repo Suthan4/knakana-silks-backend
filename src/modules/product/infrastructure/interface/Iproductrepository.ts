@@ -1,7 +1,6 @@
 import { Prisma, Product, ProductVariant } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
 
-// ✅ ADD THIS TYPE DEFINITION
 export type ProductWithRelations = Prisma.ProductGetPayload<{
   include: {
     category: true;
@@ -16,6 +15,32 @@ export type ProductWithRelations = Prisma.ProductGetPayload<{
     stock: true;
   };
 }>;
+
+// 🆕 Admin variant — no isActive constraint on media
+export type AdminProductWithRelations = Prisma.ProductGetPayload<{
+  include: {
+    category: true;
+    specifications: true;
+    variants: {
+      include: {
+        media: { orderBy: { order: "asc" } }; // No isActive filter
+        stock: true;
+      };
+    };
+    media: { orderBy: { order: "asc" } }; // No isActive filter
+    stock: true;
+  };
+}>;
+
+// 🆕 Shared pagination params shape
+export interface PaginatedProductParams {
+  skip: number;
+  take: number;
+  where?: Prisma.ProductWhereInput;
+  orderBy?: Prisma.ProductOrderByWithRelationInput;
+  include?: Prisma.ProductInclude;
+}
+
 export interface IProductRepository {
   create(data: {
     name: string;
@@ -31,7 +56,6 @@ export interface IProductRepository {
     artisanName?: string;
     artisanAbout?: string;
     artisanLocation?: string;
-    // 🆕 Shipping Dimensions
     weight?: number;
     length?: number;
     breadth?: number;
@@ -48,21 +72,21 @@ export interface IProductRepository {
   findById(id: bigint): Promise<ProductWithRelations | null>;
   findBySlug(slug: string): Promise<Product | null>;
   findBySku(sku: string): Promise<Product | null>;
-  findAll( params: {
-    skip: number;
-    take: number;
-    where?: Prisma.ProductWhereInput;
-    orderBy?: Prisma.ProductOrderByWithRelationInput;
-    include?: Prisma.ProductInclude;
-  }): Promise<Product[]>;
+
+  // User-facing: respects isActive on products + media
+  findAll(params: PaginatedProductParams): Promise<Product[]>;
   count(where: any): Promise<number>;
+
+  // 🆕 Admin: fetches all products regardless of isActive
+  findAllAdmin(params: PaginatedProductParams): Promise<AdminProductWithRelations[]>;
+  countAdmin(where?: Prisma.ProductWhereInput): Promise<number>;
 
   // Specifications
   addSpecification(productId: bigint, key: string, value: string): Promise<any>;
   updateSpecification(id: bigint, value: string): Promise<any>;
   deleteSpecification(id: bigint): Promise<void>;
 
-  // UPDATED: Media methods (replaces image methods)
+  // Media
   addMedia(
     productId: bigint,
     data: {
@@ -85,7 +109,7 @@ export interface IProductRepository {
   updateMedia(id: bigint, data: any): Promise<any>;
   deleteMedia(id: bigint): Promise<void>;
 
-  // 🆕 Variants with enhanced features
+  // Variants
   addVariant(data: {
     productId: bigint;
     attributes?: Record<string, any>;
@@ -124,7 +148,7 @@ export interface IProductRepository {
   deleteVariant(id: bigint): Promise<void>;
   findVariantById(id: bigint): Promise<ProductVariant | null>;
 
-  // 🆕 Variant Media methods
+  // Variant Media
   addVariantMedia(
     variantId: bigint,
     data: {

@@ -43,6 +43,14 @@ router.post(
   (req, res) => getProductController().createProduct(req, res)
 );
 
+router.get(
+  "/admin/products", 
+  authenticate,
+  checkPermission("products", "read"),
+   (req, res) =>
+  getProductController().getAdminProducts(req, res)
+);
+
 router.put(
   "/products/:id",
   authenticate,
