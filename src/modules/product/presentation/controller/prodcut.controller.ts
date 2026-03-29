@@ -90,6 +90,71 @@ export class ProductController {
     }
   }
 
+  /**
+ * ADMIN: Get all products regardless of isActive status
+ */
+async getAdminProducts(req: Request, res: Response) {
+  try {
+    const params = QueryProductDTOSchema.parse(req.query);
+
+    let categoryIds: string[] | undefined;
+
+    if (params.categorySlug) {
+      try {
+        const { category, descendantIds } =
+          await this.categoryService.getCategoryWithDescendantsAdmin(
+            params.categorySlug
+          );
+
+        categoryIds = descendantIds.map((id) => id.toString());
+
+        console.log(`📂 Admin Category: ${category.name} (slug: ${params.categorySlug})`);
+        console.log(`📊 Fetching ALL products from ${categoryIds.length} categories`);
+      } catch (error: any) {
+        return res.status(404).json({
+          success: false,
+          message: `Category with slug "${params.categorySlug}" not found`,
+        });
+      }
+    } else if (params.categoryIds && params.categoryIds.length > 0) {
+      categoryIds = params.categoryIds;
+    } else if (params.categoryId) {
+      categoryIds = [params.categoryId];
+    }
+
+    const result = await this.productService.getAdminProducts({
+      ...params,
+      categoryIds,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      meta: {
+        query: {
+          categorySlug: params.categorySlug,
+          categoriesSearched: categoryIds?.length || 0,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("❌ Error fetching admin products:", error);
+
+    if (error.name === "ZodError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid query parameters",
+        errors: error.errors,
+      });
+    }
+
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to fetch products",
+    });
+  }
+}
+
   async getProduct(req: Request, res: Response) {
     try {
       const { id } = req.params;

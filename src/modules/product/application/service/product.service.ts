@@ -2,7 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { SlugUtil } from "@/shared/utils/index.js";
 import { IProductRepository } from "../../infrastructure/interface/Iproductrepository.js";
 import { ICategoryRepository } from "@/modules/category/infrastructure/interface/Icategoryrepository.js";
-import { Product, ProductVariant } from "@/generated/prisma/client.js";
+import { Prisma, Product, ProductVariant } from "@/generated/prisma/client.js";
 import { Decimal } from "@prisma/client/runtime/client";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 import { MediaType } from "@/generated/prisma/enums.js";
@@ -11,6 +11,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@/shared/utils/errors.js";
+import { QueryProductDTO } from "../product.dto.js";
 
 @injectable()
 export class ProductService {
@@ -704,6 +705,7 @@ async updateProduct(
     await this.productRepository.delete(BigInt(id));
   }
 
+
   async getProduct(id: string) {
     const product = await this.productRepository.findById(BigInt(id));
     if (!product) {
@@ -852,6 +854,57 @@ async updateProduct(
       },
     };
   }
+ 
+  /**
+ * ADMIN: Get products without isActive filter
+ */
+async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
+  const skip = (params.page - 1) * params.limit;
+  const where: Prisma.ProductWhereInput = {
+    // isActive intentionally omitted — show all products
+    ...(params.categoryIds?.length && {
+      categoryId: { in: params.categoryIds.map(BigInt) },
+    }),
+    ...(params.search && {
+      OR: [
+        { name: { contains: params.search, mode: "insensitive" } },
+        { description: { contains: params.search, mode: "insensitive" } },
+      ],
+    }),
+  };
+
+  const orderBy: any = {};
+
+  if (params.sortBy === "price") {
+    orderBy.sellingPrice = params.sortOrder || "asc";
+  } else if (params.sortBy === "name") {
+    orderBy.name = params.sortOrder || "asc";
+  } else if (params.sortBy === "popularity") {
+    orderBy._count = {
+      reviews: params.sortOrder || "desc",
+    };
+  } else {
+    orderBy.createdAt = params.sortOrder || "desc";
+  }
+
+  const [products, total] = await Promise.all([
+    this.productRepository.findAll({
+      skip,
+      take: params.limit,
+      where,
+      orderBy,
+    }),
+    this.productRepository.count(where),
+  ]);
+
+  return {
+    products,
+    total,
+    page: params.page,
+    limit: params.limit,
+    totalPages: Math.ceil(total / params.limit),
+  };
+}
 
   // Stock methods
   async getStock(productId: string, warehouseId: string, variantId?: string) {

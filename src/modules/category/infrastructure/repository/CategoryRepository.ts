@@ -146,6 +146,30 @@ export class CategoryRepository implements ICategoryRepository {
 
     return ids;
   }
+  /**
+   * ✅ NEW: Recursively get all descendant category IDs
+   * This includes children, grandchildren, great-grandchildren, etc.
+   */
+  async getAllDescendantIdsAdmin(categoryId: bigint): Promise<bigint[]> {
+    const ids: bigint[] = [categoryId];
+
+    // Get immediate children
+    const children = await this.prisma.category.findMany({
+      where: {
+        parentId: categoryId,
+        // No isActive filter for admin,
+      },
+      select: { id: true },
+    });
+
+    // Recursively get descendants of each child
+    for (const child of children) {
+      const descendantIds = await this.getAllDescendantIds(child.id);
+      ids.push(...descendantIds);
+    }
+
+    return ids;
+  }
 
   /**
    * ✅ NEW: Get category with all descendant IDs by slug
@@ -169,6 +193,28 @@ export class CategoryRepository implements ICategoryRepository {
       descendantIds,
     };
   }
+
+    /**
+ * ADMIN: Get category with all descendant IDs — includes inactive categories
+ */
+async getCategoryWithDescendantsAdmin(slug: string): Promise<{
+  category: Category;
+  descendantIds: bigint[];
+} | null> {
+  const category = await this.prisma.category.findUnique({
+    where: { slug },
+    include: {
+      parent: true,
+      children: { orderBy: { order: "asc" } }, // No isActive filter
+    },
+  });
+
+  if (!category) return null;
+
+  const descendantIds = await this.getAllDescendantIdsAdmin(category.id);
+
+  return { category, descendantIds };
+}
 
   /**
    * ✅ NEW: Get multiple categories with their descendants
