@@ -24,71 +24,88 @@ export class ProductController {
   /**
    * ✅ ENHANCED: Get products with full URL params support + descendant fetching
    */
-  async getProducts(req: Request, res: Response) {
-    try {
-      const params = QueryProductDTOSchema.parse(req.query);
+async getProducts(req: Request, res: Response) {
+  try {
+    const params = QueryProductDTOSchema.parse(req.query);
 
-      let categoryIds: string[] | undefined;
+    // ✅ helper (ONLY for fabric)
+    const parseArrayParam = (value: any): string[] | undefined => {
+      if (!value) return undefined;
+      if (Array.isArray(value)) return value;
 
-      if (params.categorySlug) {
-        try {
-          const { category, descendantIds } =
-            await this.categoryService.getCategoryWithDescendants(
-              params.categorySlug
-            );
+      return String(value)
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+    };
 
-          categoryIds = descendantIds.map((id) => id.toString());
+    // ✅ only fabric converted to array
+    const parsedParams = {
+      ...params,
+      fabric: parseArrayParam(req.query.fabric),
+    };
 
-          console.log(
-            `📂 Category: ${category.name} (slug: ${params.categorySlug})`
+    let categoryIds: string[] | undefined;
+
+    if (params.categorySlug) {
+      try {
+        const { category, descendantIds } =
+          await this.categoryService.getCategoryWithDescendants(
+            params.categorySlug
           );
-          console.log(
-            `📊 Fetching products from ${categoryIds.length} categories (including descendants)`
-          );
-        } catch (error: any) {
-          return res.status(404).json({
-            success: false,
-            message: `Category with slug "${params.categorySlug}" not found`,
-          });
-        }
-      } else if (params.categoryIds && params.categoryIds.length > 0) {
-        categoryIds = params.categoryIds;
-      } else if (params.categoryId) {
-        categoryIds = [params.categoryId];
-      }
 
-      const result = await this.productService.getProducts({
-        ...params,
-        categoryIds,
-      });
+        categoryIds = descendantIds.map((id) => id.toString());
 
-      res.json({
-        success: true,
-        data: result,
-        meta: {
-          query: {
-            categorySlug: params.categorySlug,
-            categoriesSearched: categoryIds?.length || 0,
-          },
-        },
-      });
-    } catch (error: any) {
-      console.error("❌ Error fetching products:", error);
-
-      if (error.name === "ZodError") {
-        return res.status(400).json({
+        console.log(
+          `Category: ${category.name} (slug: ${params.categorySlug})`
+        );
+        console.log(
+          `Fetching products from ${categoryIds.length} categories`
+        );
+      } catch (error: any) {
+        return res.status(404).json({
           success: false,
-          message: "Invalid query parameters",
-          errors: error.errors,
+          message: `Category with slug "${params.categorySlug}" not found`,
         });
       }
+    } else if (params.categoryIds && params.categoryIds.length > 0) {
+      categoryIds = params.categoryIds;
+    } else if (params.categoryId) {
+      categoryIds = [params.categoryId];
+    }
 
-      res.status(400).json({
+    const result = await this.productService.getProducts({
+      ...parsedParams,
+      categoryIds,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      meta: {
+        query: {
+          categorySlug: params.categorySlug,
+          categoriesSearched: categoryIds?.length || 0,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("Error fetching products:", error);
+
+    if (error.name === "ZodError") {
+      return res.status(400).json({
         success: false,
-        message: error.message || "Failed to fetch products",
+        message: "Invalid query parameters",
+        errors: error.errors,
       });
     }
+
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to fetch products",
+    });
   }
+}
 
   /**
  * ADMIN: Get all products regardless of isActive status
