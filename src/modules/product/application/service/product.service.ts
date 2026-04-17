@@ -736,7 +736,7 @@ async updateProduct(
     sortBy?: "createdAt" | "price" | "name" | "popularity";
     sortOrder?: "asc" | "desc";
     color?: string;
-    fabric?: string;
+    fabric?: string[];
     size?: string;
     artisan?: string;
     inStock?: boolean;
@@ -787,10 +787,9 @@ async updateProduct(
               mode: "insensitive",
             },
           }),
-          ...(params.fabric && {
+          ...(params.fabric && params.fabric.length > 0 &&  {
             fabric: {
-              contains: params.fabric,
-              mode: "insensitive",
+              in: params.fabric,
             },
           }),
           ...(params.size && {
