@@ -18,9 +18,9 @@ const transporter = createTransporter();
 const FRONTEND_URL =
   process.env.FRONTEND_URL ||
   (process.env.NODE_ENV === "production"
-    ? "https://kankansilks.com"
+    ? "https://kankanasilks.com"
     : process.env.NODE_ENV === "qa"
-    ? "https://qa.kankansilks.com"
+    ? "https://qa.kankanasilks.com"
     : "http://localhost:3001");
 
 export async function sendPasswordResetEmail(email: string, token: string) {
