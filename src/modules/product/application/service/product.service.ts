@@ -826,8 +826,8 @@ async updateProduct(
     } else if (params.sortBy === "name") {
       orderBy.name = params.sortOrder || "asc";
     } else if (params.sortBy === "popularity") {
-      orderBy._count = {
-        reviews: params.sortOrder || "desc",
+      orderBy.reviews = {
+        _count: params.sortOrder || "desc",
       };
     } else {
       orderBy.createdAt = params.sortOrder || "desc";
