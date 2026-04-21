@@ -8,8 +8,13 @@ import {
   checkPermission,
 } from "@/shared/middleware/auth.middleware.js";
 import { UserRole } from "@/generated/prisma/enums.js";
+import z from "zod";
+import { sendNewsletterSubscriptionEmail } from "../application/services/email.service.js";
 
 const router = Router();
+const subscribeSchema = z.object({
+  email: z.string().email("Invalid email"),
+});
 
 // Helper function to resolve controller lazily
 const getAuthController = () => container.resolve(AuthController);
@@ -46,6 +51,18 @@ router.put("/auth/profile", authenticate, (req, res) =>
 router.put("/auth/change-password", authenticate, (req, res) =>
   getAuthController().changePassword(req, res)
 );
+router.post("/auth/newsletter/subscribe", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Valid email is required" });
+    }
+    await sendNewsletterSubscriptionEmail(email);
+    res.json({ success: true, message: "Subscribed successfully!" });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 // ============ Admin Routes ============
 router.post(

@@ -108,3 +108,37 @@ export async function sendEmailViaAPI(
 
   return response.data;
 }
+
+export async function sendNewsletterSubscriptionEmail(subscriberEmail: string) {
+  await transporter.sendMail({
+    from: "no-reply@kankanasilks.com",
+    to: "admin@kankanasilks.com",
+    subject: "New Newsletter Subscriber - Kankana Silks",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>New Newsletter Subscriber</h2>
+        <p>A new user has subscribed to the newsletter:</p>
+        <p><strong>Email:</strong> ${subscriberEmail}</p>
+        <p><strong>Time:</strong> ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
+      </div>
+    `,
+  });
+
+  await transporter.sendMail({
+    from: "no-reply@kankanasilks.com",
+    to: subscriberEmail,
+    subject: "Welcome to Kankana Silks Newsletter!",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #1a1a1a; padding: 20px; text-align: center;">
+          <h1 style="color: white; margin: 0;">Kankana Silks</h1>
+        </div>
+        <div style="padding: 20px; background-color: #f9fafb;">
+          <h2>Thank you for subscribing!</h2>
+          <p>You'll be the first to know about our new collections, exclusive offers, and heritage silk stories.</p>
+          <p>— The Kankana Silks Team</p>
+        </div>
+      </div>
+    `,
+  });
+}
