@@ -98,6 +98,16 @@ export class ProductRepository implements IProductRepository {
           take: 1,
         },
         stock: true,
+      variants: {                          // 👈 ADD THIS
+        include: {
+          media: {
+            where: { isActive: true },
+            orderBy: { order: "asc" },
+            take: 1,
+          },
+          stock: true,
+        },
+      },
         _count: {
           select: { reviews: true, variants: true },
         },
