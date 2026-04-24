@@ -56,6 +56,34 @@ export class CategoryRepository implements ICategoryRepository {
     });
   }
 
+  async findAllWithActiveProductCount(params: {
+  skip: number;
+  take: number;
+  where?: any;
+  orderBy?: any;
+}): Promise<Category[]> {
+  return this.prisma.category.findMany({
+    skip: params.skip,
+    take: params.take,
+    where: params.where,
+    orderBy: params.orderBy,
+    include: {
+      parent: true,
+      children: {
+        where: { isActive: true },
+        orderBy: { order: "asc" },
+      },
+      _count: {
+        select: {
+          products: {
+            where: { isActive: true }, // ✅ only active products
+          },
+        },
+      },
+    },
+  });
+}
+
   async count(where?: any): Promise<number> {
     return this.prisma.category.count({ where });
   }

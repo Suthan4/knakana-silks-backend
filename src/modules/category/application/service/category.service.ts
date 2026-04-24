@@ -219,7 +219,7 @@ export class CategoryService {
       return this.categoryRepository.findWithChildren(BigInt(id));
     }
 
-    const rootCategories = await this.categoryRepository.findAll({
+    const rootCategories = await this.categoryRepository.findAllWithActiveProductCount({
       skip: 0,
       take: 100,
       where: { parentId: null, isActive: true },
