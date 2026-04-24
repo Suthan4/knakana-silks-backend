@@ -10,6 +10,12 @@ export interface ICategoryRepository {
     orderBy?: Prisma.CategoryOrderByWithRelationInput;
     include?: Prisma.CategoryInclude;
   }): Promise<Category[]>;
+  findAllWithActiveProductCount(params: {
+    skip: number;
+    take: number;
+    where?: any;
+    orderBy?: any;
+  }): Promise<Category[]>;
   count(where?: any): Promise<number>;
   create(data: {
     name: string;
