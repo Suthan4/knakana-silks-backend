@@ -25,6 +25,7 @@ interface ShippingCalculation {
   availableCouriers: any[];
   cheapestCourier?: any;
   fastestCourier?: any;
+  selectedCourier?: any;
   message?: string;
 }
 
@@ -98,7 +99,8 @@ export class ShippingCalculatorService {
   async calculateCartShipping(
     userId: string,
     deliveryPincode: string,
-    cartItems?: CartItem[]
+    cartItems?: CartItem[],
+    selectedCourierCompanyId?: number
   ): Promise<ShippingCalculation> {
     try {
       // Get pickup warehouse
@@ -247,9 +249,20 @@ export class ShippingCalculatorService {
           const fastestCourier = sortedBySpeed[0];
 
           // Use cheapest courier for shipping cost
-          shippingCost = isFreeShipping ? 0 : cheapestCourier.freight_charge;
-          estimatedDelivery = cheapestCourier.estimated_delivery_days
-            ? `${cheapestCourier.estimated_delivery_days} days`
+          const selectedCourier = selectedCourierCompanyId
+              ? couriers.find(
+                  (c) =>
+                    Number(c.courier_company_id) ===
+                    Number(selectedCourierCompanyId)
+                )
+              : cheapestCourier;
+
+          shippingCost = isFreeShipping
+            ? 0
+            : Number(selectedCourier?.freight_charge ?? 0);
+
+          estimatedDelivery = selectedCourier?.estimated_delivery_days
+            ? `${selectedCourier.estimated_delivery_days} days`
             : "3-5 days";
 
           return {
@@ -266,6 +279,7 @@ export class ShippingCalculatorService {
             availableCouriers: couriers,
             cheapestCourier,
             fastestCourier,
+            selectedCourier: selectedCourier || null,
           };
         } else {
           serviceable = false;
@@ -281,6 +295,7 @@ export class ShippingCalculatorService {
             estimatedDelivery: "Not available",
             availableCouriers: [],
             message: `Delivery not available to pincode ${deliveryPincode}`,
+            selectedCourier: null,
           };
         }
       } catch (error) {
