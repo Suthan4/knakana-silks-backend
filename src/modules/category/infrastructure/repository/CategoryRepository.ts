@@ -72,6 +72,23 @@ export class CategoryRepository implements ICategoryRepository {
       children: {
         where: { isActive: true },
         orderBy: { order: "asc" },
+        include: {                          // ← ADD THIS
+          children: {                       // ← grandchildren
+            where: { isActive: true },
+            orderBy: { order: "asc" },
+            include: {                      // ← great-grandchildren (optional, for future)
+              children: {
+                where: { isActive: true },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          _count: {
+            select: {
+              products: { where: { isActive: true } },
+            },
+          },
+        },
       },
       _count: {
         select: {
