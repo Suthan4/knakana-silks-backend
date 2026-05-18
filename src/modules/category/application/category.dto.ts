@@ -5,8 +5,15 @@ export const CreateCategoryDTOSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().optional(),
   parentId: z.string().optional(),
-  metaTitle: z.string().max(60).optional(),
-  metaDesc: z.string().max(160).optional(),
+metaTitle: z
+  .string()
+  .max(70, "Meta title must be less than 70 characters")
+  .optional(),
+
+metaDesc: z
+  .string()
+  .max(160, "Meta description must be less than 160 characters")
+  .optional(),
   image: z
   .string()
   .refine(
@@ -34,8 +41,15 @@ export const UpdateCategoryDTOSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().optional(),
   parentId: z.string().nullable().optional(),
-  metaTitle: z.string().max(60).optional(),
-  metaDesc: z.string().max(160).optional(),
+metaTitle: z
+  .string()
+  .max(70, "Meta title must be less than 70 characters")
+  .optional(),
+
+metaDesc: z
+  .string()
+  .max(160, "Meta description must be less than 160 characters")
+  .optional(),
   image: z
   .string()
   .refine(
