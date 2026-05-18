@@ -7,7 +7,18 @@ export const CreateCategoryDTOSchema = z.object({
   parentId: z.string().optional(),
   metaTitle: z.string().max(60).optional(),
   metaDesc: z.string().max(160).optional(),
-  image: z.string().url().optional(),
+  image: z
+  .string()
+  .refine(
+    (value) =>
+      value === "" ||
+      value.startsWith("data:image/") ||
+      value.startsWith("http"),
+    {
+      message: "Only JPG, PNG, WEBP images are allowed",
+    }
+  )
+  .optional(),
   isActive: z.boolean().default(true),
   order: z.number().int().default(0),
   // Add after order field:
@@ -25,7 +36,18 @@ export const UpdateCategoryDTOSchema = z.object({
   parentId: z.string().nullable().optional(),
   metaTitle: z.string().max(60).optional(),
   metaDesc: z.string().max(160).optional(),
-  image: z.string().url().optional(),
+  image: z
+  .string()
+  .refine(
+    (value) =>
+      value === "" ||
+      value.startsWith("data:image/") ||
+      value.startsWith("http"),
+    {
+      message: "Only JPG, PNG, WEBP images are allowed",
+    }
+  )
+  .optional(),
   isActive: z.boolean().optional(),
   order: z.number().int().optional(),
   // Add after order field:
