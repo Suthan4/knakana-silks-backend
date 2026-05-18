@@ -6,13 +6,17 @@ import { ICategoryRepository } from "../interface/Icategoryrepository.js";
 export class CategoryRepository implements ICategoryRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // READS
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async findById(id: bigint): Promise<Category | null> {
     return this.prisma.category.findUnique({
       where: { id },
       include: {
         parent: true,
         children: {
-          where: { isActive: true },
+          where:   { isActive: true },
           orderBy: { order: "asc" },
         },
       },
@@ -25,7 +29,7 @@ export class CategoryRepository implements ICategoryRepository {
       include: {
         parent: true,
         children: {
-          where: { isActive: true },
+          where:   { isActive: true },
           orderBy: { order: "asc" },
         },
       },
@@ -33,93 +37,120 @@ export class CategoryRepository implements ICategoryRepository {
   }
 
   async findAll(params: {
-    skip: number;
-    take: number;
-    where?: any;
+    skip:     number;
+    take:     number;
+    where?:   any;
     orderBy?: any;
   }): Promise<Category[]> {
     return this.prisma.category.findMany({
-      skip: params.skip,
-      take: params.take,
-      where: params.where,
+      skip:    params.skip,
+      take:    params.take,
+      where:   params.where,
       orderBy: params.orderBy,
       include: {
         parent: true,
         children: {
-          where: { isActive: true },
+          where:   { isActive: true },
           orderBy: { order: "asc" },
         },
-        _count: {
-          select: { products: true },
-        },
+        _count: { select: { products: true } },
       },
     });
   }
 
   async findAllWithActiveProductCount(params: {
-  skip: number;
-  take: number;
-  where?: any;
-  orderBy?: any;
-}): Promise<Category[]> {
-  return this.prisma.category.findMany({
-    skip: params.skip,
-    take: params.take,
-    where: params.where,
-    orderBy: params.orderBy,
-    include: {
-      parent: true,
-      children: {
-        where: { isActive: true },
-        orderBy: { order: "asc" },
-        include: {                          // ← ADD THIS
-          children: {                       // ← grandchildren
-            where: { isActive: true },
-            orderBy: { order: "asc" },
-            include: {                      // ← great-grandchildren (optional, for future)
-              children: {
-                where: { isActive: true },
-                orderBy: { order: "asc" },
+    skip:     number;
+    take:     number;
+    where?:   any;
+    orderBy?: any;
+  }): Promise<Category[]> {
+    return this.prisma.category.findMany({
+      skip:    params.skip,
+      take:    params.take,
+      where:   params.where,
+      orderBy: params.orderBy,
+      include: {
+        parent: true,
+        children: {
+          where:   { isActive: true },
+          orderBy: { order: "asc" },
+          include: {
+            children: {
+              where:   { isActive: true },
+              orderBy: { order: "asc" },
+              include: {
+                children: {
+                  where:   { isActive: true },
+                  orderBy: { order: "asc" },
+                },
+              },
+            },
+            _count: {
+              select: {
+                products: { where: { isActive: true } },
               },
             },
           },
-          _count: {
-            select: {
-              products: { where: { isActive: true } },
-            },
+        },
+        _count: {
+          select: {
+            products: { where: { isActive: true } },
           },
         },
       },
-      _count: {
-        select: {
-          products: {
-            where: { isActive: true }, // ✅ only active products
-          },
-        },
-      },
-    },
-  });
-}
+    });
+  }
 
   async count(where?: any): Promise<number> {
     return this.prisma.category.count({ where });
   }
 
+  async findChildren(parentId: bigint): Promise<Category[]> {
+    return this.prisma.category.findMany({
+      where:   { parentId, isActive: true },
+      orderBy: { order: "asc" },
+    });
+  }
+
+  async findWithChildren(id: bigint): Promise<Category | null> {
+    return this.prisma.category.findUnique({
+      where: { id },
+      include: {
+        children: {
+          where:   { isActive: true },
+          include: {
+            children: {
+              where: { isActive: true },
+            },
+          },
+          orderBy: { order: "asc" },
+        },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // WRITES
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async create(data: {
-    name: string;
-    slug: string;
-    description?: string;
-    parentId?: bigint;
-    metaTitle?: string;
-    metaDesc?: string;
-    image?: string;
-    isActive: boolean;
-    order: number;
+    name:                    string;
+    slug:                    string;
+    description?:            string;
+    parentId?:               bigint;
+    metaTitle?:              string;
+    metaDesc?:               string;
+    image?:                  string;
+    isActive:                boolean;
+    order:                   number;
+    hasVideoConsultation?:   boolean;
+    videoPurchasingEnabled?: boolean;
+    videoConsultationNote?:  string;
   }): Promise<Category> {
     return this.prisma.category.create({
       data,
       include: {
-        parent: true,
+        parent:   true,
         children: true,
       },
     });
@@ -132,7 +163,7 @@ export class CategoryRepository implements ICategoryRepository {
       include: {
         parent: true,
         children: {
-          where: { isActive: true },
+          where:   { isActive: true },
           orderBy: { order: "asc" },
         },
       },
@@ -143,130 +174,84 @@ export class CategoryRepository implements ICategoryRepository {
     await this.prisma.category.delete({ where: { id } });
   }
 
-  async findChildren(parentId: bigint): Promise<Category[]> {
-    return this.prisma.category.findMany({
-      where: { parentId, isActive: true },
-      orderBy: { order: "asc" },
-    });
-  }
-
-  async findWithChildren(id: bigint): Promise<Category | null> {
-    return this.prisma.category.findUnique({
-      where: { id },
-      include: {
-        children: {
-          where: { isActive: true },
-          include: {
-            children: {
-              where: { isActive: true },
-            },
-          },
-          orderBy: { order: "asc" },
-        },
-      },
-    });
-  }
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DESCENDANT HELPERS
+  // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * ✅ NEW: Recursively get all descendant category IDs
-   * This includes children, grandchildren, great-grandchildren, etc.
+   * Recursively collect this category + all ACTIVE descendant IDs.
+   * Used for public product listing (customers only see active categories).
    */
   async getAllDescendantIds(categoryId: bigint): Promise<bigint[]> {
     const ids: bigint[] = [categoryId];
 
-    // Get immediate children
     const children = await this.prisma.category.findMany({
-      where: {
-        parentId: categoryId,
-        isActive: true, // Only active categories
-      },
+      where:  { parentId: categoryId, isActive: true },
       select: { id: true },
     });
 
-    // Recursively get descendants of each child
     for (const child of children) {
-      const descendantIds = await this.getAllDescendantIds(child.id);
-      ids.push(...descendantIds);
+      const childIds = await this.getAllDescendantIds(child.id);
+      ids.push(...childIds);
     }
 
     return ids;
   }
+
   /**
-   * ✅ NEW: Recursively get all descendant category IDs
-   * This includes children, grandchildren, great-grandchildren, etc.
+   * Same as above but WITHOUT the isActive filter.
+   * Used for admin views so inactive categories are still reachable.
    */
   async getAllDescendantIdsAdmin(categoryId: bigint): Promise<bigint[]> {
     const ids: bigint[] = [categoryId];
 
-    // Get immediate children
     const children = await this.prisma.category.findMany({
-      where: {
-        parentId: categoryId,
-        // No isActive filter for admin,
-      },
+      where:  { parentId: categoryId }, // no isActive filter
       select: { id: true },
     });
 
-    // Recursively get descendants of each child
     for (const child of children) {
-      const descendantIds = await this.getAllDescendantIds(child.id);
-      ids.push(...descendantIds);
+      const childIds = await this.getAllDescendantIdsAdmin(child.id);
+      ids.push(...childIds);
     }
 
     return ids;
   }
 
-  /**
-   * ✅ NEW: Get category with all descendant IDs by slug
-   * Returns the category and array of all descendant IDs (including itself)
-   */
+  /** Public-facing: active categories only. */
   async getCategoryWithDescendants(slug: string): Promise<{
-    category: Category;
+    category:      Category;
     descendantIds: bigint[];
   } | null> {
     const category = await this.findBySlug(slug);
+    if (!category) return null;
 
-    if (!category) {
-      return null;
-    }
-
-    // Get all descendant IDs (including the category itself)
     const descendantIds = await this.getAllDescendantIds(category.id);
-
-    return {
-      category,
-      descendantIds,
-    };
+    return { category, descendantIds };
   }
 
-    /**
- * ADMIN: Get category with all descendant IDs — includes inactive categories
- */
-async getCategoryWithDescendantsAdmin(slug: string): Promise<{
-  category: Category;
-  descendantIds: bigint[];
-} | null> {
-  const category = await this.prisma.category.findUnique({
-    where: { slug },
-    include: {
-      parent: true,
-      children: { orderBy: { order: "asc" } }, // No isActive filter
-    },
-  });
+  /** Admin-facing: includes inactive categories. */
+  async getCategoryWithDescendantsAdmin(slug: string): Promise<{
+    category:      Category;
+    descendantIds: bigint[];
+  } | null> {
+    const category = await this.prisma.category.findUnique({
+      where:   { slug },
+      include: {
+        parent:   true,
+        children: { orderBy: { order: "asc" } }, // no isActive filter
+      },
+    });
 
-  if (!category) return null;
+    if (!category) return null;
 
-  const descendantIds = await this.getAllDescendantIdsAdmin(category.id);
+    const descendantIds = await this.getAllDescendantIdsAdmin(category.id);
+    return { category, descendantIds };
+  }
 
-  return { category, descendantIds };
-}
-
-  /**
-   * ✅ NEW: Get multiple categories with their descendants
-   * Useful for fetching multiple category trees at once
-   */
+  /** Batch version: get multiple category trees at once. */
   async getMultipleCategoriesWithDescendants(slugs: string[]): Promise<{
-    categories: Category[];
+    categories:      Category[];
     allDescendantIds: bigint[];
   }> {
     const categories: Category[] = [];
@@ -280,9 +265,6 @@ async getCategoryWithDescendantsAdmin(slug: string): Promise<{
       }
     }
 
-    return {
-      categories,
-      allDescendantIds: Array.from(allIds),
-    };
+    return { categories, allDescendantIds: Array.from(allIds) };
   }
 }
