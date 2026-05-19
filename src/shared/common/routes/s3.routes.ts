@@ -4,6 +4,8 @@ import { CommonController } from "../controller/s3.controller.js";
 
 const router = express.Router();
 const commonController = new CommonController();
+const jsonParser = express.json(); // ✅ Add this
+
 
 // Configure multer for memory storage
 const upload = multer({
@@ -45,12 +47,12 @@ router.post(
  * Delete single file
  * DELETE /api/upload
  */
-router.delete("/upload", commonController.deleteFile);
+router.delete("/upload",jsonParser, commonController.deleteFile);
 
 /**
  * Delete multiple files
  * DELETE /api/upload/multiple
  */
-router.delete("/upload/multiple", commonController.deleteFiles);
+router.delete("/upload/multiple",jsonParser, commonController.deleteFiles);
 
 export default router;
