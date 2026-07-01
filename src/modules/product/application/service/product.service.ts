@@ -12,6 +12,7 @@ import {
   ValidationError,
 } from "@/shared/utils/errors.js";
 import { QueryProductDTO } from "../product.dto.js";
+import { S3UploadService } from "@/config/s3-upload.js";
 
 @injectable()
 export class ProductService {
@@ -20,7 +21,8 @@ export class ProductService {
     @inject("ICategoryRepository")
     private categoryRepository: ICategoryRepository,
     @inject("IWarehouseRepository")
-    private warehouseRepository: IWarehouseRepository
+    private warehouseRepository: IWarehouseRepository,
+    @inject("S3UploadService") private s3Service: S3UploadService
   ) {}
 
   async createProduct(data: {
@@ -702,9 +704,30 @@ async updateProduct(
 }
 
   async deleteProduct(id: string) {
+    const product = await this.productRepository.findById(BigInt(id));
+    if (!product) throw new NotFoundError("Product not found");
+
+    // ✅ Collect all S3 URLs before deleting
+    const allUrls: string[] = [
+      ...(product.media?.map((m) => m.url) ?? []),
+      ...(product.variants?.flatMap((v) => 
+        (v as any).media?.map((m: any) => m.url) ?? []
+      ) ?? []),
+    ].filter(Boolean);
+
+    // ✅ Delete from S3 (non-fatal — still delete DB record if S3 fails)
+    if (allUrls.length > 0) {
+      try {
+        const keys = allUrls.map((url) => this.s3Service.extractKeyFromUrl(url));
+        await this.s3Service.deleteFiles(keys);
+        console.log(`🗑️ Deleted ${keys.length} S3 files for product ${id}`);
+      } catch (s3Error) {
+        console.error("⚠️ S3 cleanup failed (non-fatal):", s3Error);
+      }
+    }
+
     await this.productRepository.delete(BigInt(id));
   }
-
 
   async getProduct(id: string) {
     const product = await this.productRepository.findById(BigInt(id));

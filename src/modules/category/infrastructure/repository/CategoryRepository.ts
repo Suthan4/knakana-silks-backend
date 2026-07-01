@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { Category, PrismaClient } from "@/generated/prisma/client.js";
+import { Category, CategoryPlacement, Prisma, PrismaClient } from "@/generated/prisma/client.js";
 import { ICategoryRepository } from "../interface/Icategoryrepository.js";
 
 @injectable()
@@ -14,9 +14,9 @@ export class CategoryRepository implements ICategoryRepository {
     return this.prisma.category.findUnique({
       where: { id },
       include: {
-        parent: true,
-        children: {
-          where:   { isActive: true },
+        parentPlacements: {include: { parent: true }},
+        childPlacements: {
+          include:   { child: true },
           orderBy: { order: "asc" },
         },
       },
@@ -27,9 +27,9 @@ export class CategoryRepository implements ICategoryRepository {
     return this.prisma.category.findUnique({
       where: { slug },
       include: {
-        parent: true,
-        children: {
-          where:   { isActive: true },
+        parentPlacements: {include: { parent: true }},
+        childPlacements: {
+          include:   { child: true },
           orderBy: { order: "asc" },
         },
       },
@@ -48,9 +48,9 @@ export class CategoryRepository implements ICategoryRepository {
       where:   params.where,
       orderBy: params.orderBy,
       include: {
-        parent: true,
-        children: {
-          where:   { isActive: true },
+        parentPlacements: {include: { parent: true }},
+        childPlacements: {
+          include:   { child: true },
           orderBy: { order: "asc" },
         },
         _count: { select: { products: true } },
@@ -58,11 +58,11 @@ export class CategoryRepository implements ICategoryRepository {
     });
   }
 
-  async findAllWithActiveProductCount(params: {
-    skip:     number;
-    take:     number;
-    where?:   any;
-    orderBy?: any;
+async findAllWithActiveProductCount(params: {
+    skip:    number;
+    take:    number;
+    where?:  Prisma.CategoryWhereInput;
+    orderBy?: Prisma.CategoryOrderByWithRelationInput;
   }): Promise<Category[]> {
     return this.prisma.category.findMany({
       skip:    params.skip,
@@ -70,32 +70,54 @@ export class CategoryRepository implements ICategoryRepository {
       where:   params.where,
       orderBy: params.orderBy,
       include: {
-        parent: true,
-        children: {
-          where:   { isActive: true },
+        // Parents this category is placed under
+        parentPlacements: {
+          include: { parent: true },
+        },
+        // Children placed under this category (depth 1)
+        childPlacements: {
+          where:   { child: { isActive: true } },
           orderBy: { order: "asc" },
           include: {
-            children: {
-              where:   { isActive: true },
-              orderBy: { order: "asc" },
+            child: {
               include: {
-                children: {
-                  where:   { isActive: true },
+                // depth 2
+                childPlacements: {
+                  where:   { child: { isActive: true } },
                   orderBy: { order: "asc" },
+                  include: {
+                    child: {
+                      include: {
+                        // depth 3
+                        childPlacements: {
+                          where:   { child: { isActive: true } },
+                          orderBy: { order: "asc" },
+                          include: {
+                            child: {
+                              include: {
+                                _count: {
+                                  select: { products: { where: { isActive: true } } },
+                                },
+                              },
+                            },
+                          },
+                        },
+                        _count: {
+                          select: { products: { where: { isActive: true } } },
+                        },
+                      },
+                    },
+                  },
                 },
-              },
-            },
-            _count: {
-              select: {
-                products: { where: { isActive: true } },
+                _count: {
+                  select: { products: { where: { isActive: true } } },
+                },
               },
             },
           },
         },
         _count: {
-          select: {
-            products: { where: { isActive: true } },
-          },
+          select: { products: { where: { isActive: true } } },
         },
       },
     });
@@ -116,14 +138,19 @@ export class CategoryRepository implements ICategoryRepository {
     return this.prisma.category.findUnique({
       where: { id },
       include: {
-        children: {
-          where:   { isActive: true },
+        childPlacements: {
+          where:   { child: { isActive: true } },
+          orderBy: { order: "asc" },
           include: {
-            children: {
-              where: { isActive: true },
+            child: {
+              include: {
+                childPlacements: {
+                  where:   { child: { isActive: true } },
+                  orderBy: { order: "asc" },
+                },
+              },
             },
           },
-          orderBy: { order: "asc" },
         },
       },
     });
@@ -147,31 +174,61 @@ export class CategoryRepository implements ICategoryRepository {
     videoPurchasingEnabled?: boolean;
     videoConsultationNote?:  string;
   }): Promise<Category> {
-    return this.prisma.category.create({
-      data,
-      include: {
-        parent:   true,
-        children: true,
-      },
-    });
+    return this.prisma.category.create({data});
   }
 
   async update(id: bigint, data: Partial<Category>): Promise<Category> {
     return this.prisma.category.update({
       where: { id },
-      data,
-      include: {
-        parent: true,
-        children: {
-          where:   { isActive: true },
-          orderBy: { order: "asc" },
-        },
-      },
+      data
     });
   }
 
   async delete(id: bigint): Promise<void> {
     await this.prisma.category.delete({ where: { id } });
+  }
+
+    // ── Writes: Placement ───────────────────────────────────────────────
+
+  async createPlacement(parentId: bigint, childId: bigint, order: number): Promise<CategoryPlacement> {
+    return this.prisma.categoryPlacement.create({ data: { parentId, childId, order } });
+  }
+
+  async findPlacement(parentId: bigint, childId: bigint): Promise<CategoryPlacement | null> {
+    return this.prisma.categoryPlacement.findUnique({
+      where: { parentId_childId: { parentId, childId } },
+    });
+  }
+
+  async findPlacementById(id: bigint): Promise<CategoryPlacement | null> {
+    return this.prisma.categoryPlacement.findUnique({ where: { id } });
+  }
+
+  async updatePlacementOrder(id: bigint, order: number): Promise<CategoryPlacement> {
+    return this.prisma.categoryPlacement.update({ where: { id }, data: { order } });
+  }
+
+  async deletePlacement(id: bigint): Promise<void> {
+    await this.prisma.categoryPlacement.delete({ where: { id } });
+  }
+
+  async countPlacementsForChild(childId: bigint): Promise<number> {
+    return this.prisma.categoryPlacement.count({ where: { childId } });
+  }
+
+  async findChildPlacements(parentId: bigint) {
+    return this.prisma.categoryPlacement.findMany({
+      where: { parentId },
+      include: { child: true },
+      orderBy: { order: "asc" },
+    });
+  }
+
+  async findParentPlacements(childId: bigint) {
+    return this.prisma.categoryPlacement.findMany({
+      where: { childId },
+      include: { parent: true },
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +296,7 @@ export class CategoryRepository implements ICategoryRepository {
       where:   { slug },
       include: {
         parent:   true,
-        children: { orderBy: { order: "asc" } }, // no isActive filter
+        childPlacements: { orderBy: { order: "asc" } }, // no isActive filter
       },
     });
 
@@ -266,5 +323,20 @@ export class CategoryRepository implements ICategoryRepository {
     }
 
     return { categories, allDescendantIds: Array.from(allIds) };
+  }
+
+  async isAncestor(categoryId: bigint, candidateAncestorId: bigint): Promise<boolean> {
+    if (categoryId === candidateAncestorId) return true;
+
+    const parents = await this.prisma.categoryPlacement.findMany({
+      where: { childId: categoryId },
+      select: { parentId: true },
+    });
+
+    for (const p of parents) {
+      if (await this.isAncestor(p.parentId, candidateAncestorId)) return true;
+    }
+
+    return false;
   }
 }

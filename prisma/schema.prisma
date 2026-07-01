@@ -251,6 +251,7 @@ model Category {
   metaDesc            String?
   image               String?
   isActive            Boolean               @default(true)
+  isRoot              Boolean               @default(false)
   order               Int                   @default(0)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
@@ -259,17 +260,36 @@ model Category {
   videoPurchasingEnabled Boolean @default(false)
   videoConsultationNote  String? @db.Text
 
+  // Placements where THIS category is the child (i.e. where it's placed under a parent)
+  parentPlacements CategoryPlacement[] @relation("ChildCategory")
+    // Placements where THIS category is the parent (i.e. its children)
+  childPlacements  CategoryPlacement[] @relation("ParentCategory")
 
-  parent              Category?            @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children            Category[]           @relation("CategoryHierarchy")
   homeSections        HomeSection[]        @relation("SectionCategories")
   coupons             Coupon[]             @relation("CouponCategories")
   products            Product[]
   consultationConfigs ConsultationConfig[]
 
   @@index([slug])
-  @@index([parentId])
+  @@index([isRoot])
   @@map("categories")
+}
+
+model CategoryPlacement{
+  id BigInt @id @default(autoincrement())
+  parentId BigInt
+  childId  BigInt
+  order    Int    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Category @relation("ParentCategory", fields: [parentId], references: [id], onDelete: Cascade)
+  child    Category @relation("ChildCategory", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId])
+  @@index([parentId])
+  @@index([childId])
+  @@map("category_placements")
 }
 
 model Product {
