@@ -21,11 +21,15 @@ import { registerSearchModule } from "@/modules/search/container.js";
 import { registerReturnModule } from "@/modules/return/container.js";
 import { registerStockModule } from "@/modules/stock/container.js";
 import { registerReviewModule } from "@/modules/review/container.js";
+import { S3UploadService } from "./s3-upload.js";
 // import { registerUploadModule } from "@/modules/upload/container.js";
 
 export function setupContainer() {
   // Register PrismaClient instance instead of the class
   container.registerInstance(PrismaClient, getPrismaClient);
+
+  //  ✅ Register S3 service
+  container.registerSingleton("S3UploadService", S3UploadService);
 
   registerAuthModule();
   registerShipmentModule()

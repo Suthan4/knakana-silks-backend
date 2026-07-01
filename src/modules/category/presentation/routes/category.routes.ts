@@ -55,4 +55,21 @@ router.delete(
   (req, res) => getCategoryController().deleteCategory(req, res)
 );
 
+// Admin routes — placement management ("link existing category" feature)
+router.post("/categories/link", authenticate, checkPermission("categories", "create"), (req, res) =>
+  getCategoryController().linkCategory(req, res)
+);
+router.delete(
+  "/categories/placements/:placementId",
+  authenticate,
+  checkPermission("categories", "delete"),
+  (req, res) => getCategoryController().unlinkCategory(req, res)
+);
+router.put(
+  "/categories/placements/:placementId",
+  authenticate,
+  checkPermission("categories", "update"),
+  (req, res) => getCategoryController().updatePlacementOrder(req, res)
+);
+
 export default router;

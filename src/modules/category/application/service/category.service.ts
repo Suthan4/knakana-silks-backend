@@ -51,6 +51,7 @@ export class CategoryService {
     name: string;
     description?: string;
     parentId?: string;
+    isRoot?: boolean;
     metaTitle?: string;
     metaDesc?: string;
     image?: string;
@@ -60,9 +61,10 @@ export class CategoryService {
     videoPurchasingEnabled?: boolean;
     videoConsultationNote?: string;
   }) {
+    let parent = null;
     // 1. If a parentId was provided, validate the parent exists first
     if (data.parentId) {
-      const parent = await this.categoryRepository.findById(BigInt(data.parentId));
+      parent = await this.categoryRepository.findById(BigInt(data.parentId));
       if (!parent) throw new Error("Parent category not found");
     }
 
@@ -77,18 +79,70 @@ export class CategoryService {
       name: data.name,
       slug,
       description: data.description,
-      parentId: data.parentId ? BigInt(data.parentId) : undefined,
       metaTitle: data.metaTitle,
       metaDesc: data.metaDesc,
       image: data.image,
       isActive: data.isActive ?? true,
+      isRoot: data.parentId ? false : data.isRoot ?? false,
       order: data.order ?? 0,
       hasVideoConsultation: data.hasVideoConsultation ?? false,
       videoPurchasingEnabled: data.videoPurchasingEnabled ?? false,
       videoConsultationNote: data.videoConsultationNote,
     });
 
+    if (data.parentId) {
+      await this.categoryRepository.createPlacement(
+        BigInt(data.parentId),
+        category.id,
+        data.order ?? 0
+      );
+    }
+
+
     return category;
+  }
+
+    // ── Link existing category under a parent ──────────────────────────
+
+  async linkCategory(data: { parentId: string; childId: string; order?: number }) {
+    const parentId = BigInt(data.parentId);
+    const childId = BigInt(data.childId);
+
+    if (parentId === childId) {
+      throw new Error("A category cannot be placed under itself");
+    }
+
+    const [parent, child] = await Promise.all([
+      this.categoryRepository.findById(parentId),
+      this.categoryRepository.findById(childId),
+    ]);
+    if (!parent) throw new Error("Parent category not found");
+    if (!child) throw new Error("Category to link not found");
+
+    const existing = await this.categoryRepository.findPlacement(parentId, childId);
+    if (existing) throw new Error("This category is already linked under this parent");
+
+    // Prevent cycles: the chosen parent cannot itself be a descendant of the child being linked
+    const wouldCycle = await this.categoryRepository.isAncestor(parentId, childId);
+    if (wouldCycle) {
+      throw new Error("Cannot link: this would create a circular category hierarchy");
+    }
+
+    return this.categoryRepository.createPlacement(parentId, childId, data.order ?? 0);
+  }
+
+    // ── Unlink (remove from one parent only — category itself is untouched) ─
+
+  async unlinkCategory(placementId: string) {
+    const placement = await this.categoryRepository.findPlacementById(BigInt(placementId));
+    if (!placement) throw new Error("Placement not found");
+    await this.categoryRepository.deletePlacement(placement.id);
+  }
+
+  async updatePlacementOrder(placementId: string, order: number) {
+    const placement = await this.categoryRepository.findPlacementById(BigInt(placementId));
+    if (!placement) throw new Error("Placement not found");
+    return this.categoryRepository.updatePlacementOrder(placement.id, order);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +269,7 @@ export class CategoryService {
     limit: number;
     search?: string;
     isActive?: boolean;
+    isRoot?: boolean;
     parentId?: string;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
@@ -230,16 +285,14 @@ export class CategoryService {
       ];
     }
 
-    if (params.isActive !== undefined) {
-      where.isActive = params.isActive;
-    }
+    if (params.isActive !== undefined) where.isActive = params.isActive;
+    if (params.isRoot !== undefined) where.isRoot = params.isRoot;
 
-    if (params.parentId !== undefined) {
-      where.parentId = params.parentId ? BigInt(params.parentId) : null;
-    }
+    // if (params.parentId !== undefined) {
+    //   where.parentId = params.parentId ? BigInt(params.parentId) : null;
+    // }
 
-    const orderBy: any = {};
-    orderBy[params.sortBy || "order"] = params.sortOrder || "asc";
+    const orderBy: any = { [params.sortBy || "name"]: params.sortOrder || "asc" };
 
     const [categories, total] = await Promise.all([
       this.categoryRepository.findAll({ skip, take: params.limit, where, orderBy }),

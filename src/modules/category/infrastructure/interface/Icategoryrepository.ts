@@ -1,4 +1,4 @@
-import { Category, Prisma } from "@/generated/prisma/client.js";
+import { Category, CategoryPlacement, Prisma } from "@/generated/prisma/client.js";
 
 export interface ICategoryRepository {
   findById(id: bigint): Promise<Category | null>;
@@ -12,11 +12,11 @@ export interface ICategoryRepository {
     include?: Prisma.CategoryInclude;
   }): Promise<Category[]>;
 
-  findAllWithActiveProductCount(params: {
-    skip:     number;
-    take:     number;
-    where?:   any;
-    orderBy?: any;
+findAllWithActiveProductCount(params: {
+    skip: number;
+    take: number;
+    where?: Prisma.CategoryWhereInput;
+    orderBy?: Prisma.CategoryOrderByWithRelationInput;
   }): Promise<Category[]>;
 
   count(where?: any): Promise<number>;
@@ -34,6 +34,7 @@ export interface ICategoryRepository {
     metaDesc?:              string;
     image?:                 string;
     isActive:               boolean;
+    isRoot:               boolean;
     order:                  number;
     hasVideoConsultation?:  boolean;
     videoPurchasingEnabled?: boolean;
@@ -45,6 +46,17 @@ export interface ICategoryRepository {
 
   findChildren(parentId: bigint): Promise<Category[]>;
   findWithChildren(id: bigint): Promise<Category | null>;
+
+  // ── Placement operations ──────────────────────────────────────────────
+  createPlacement(parentId: bigint, childId: bigint, order: number): Promise<CategoryPlacement>;
+  findPlacement(parentId: bigint, childId: bigint): Promise<CategoryPlacement | null>;
+  findPlacementById(id: bigint): Promise<CategoryPlacement | null>;
+  updatePlacementOrder(id: bigint, order: number): Promise<CategoryPlacement>;
+  deletePlacement(id: bigint): Promise<void>;
+  countPlacementsForChild(childId: bigint): Promise<number>;
+
+  findChildPlacements(parentId: bigint): Promise<(CategoryPlacement & { child: Category })[]>;
+  findParentPlacements(childId: bigint): Promise<(CategoryPlacement & { parent: Category })[]>;
 
   // ── Descendant helpers ────────────────────────────────────────────────────
 
@@ -67,4 +79,6 @@ export interface ICategoryRepository {
     categories:      Category[];
     allDescendantIds: bigint[];
   }>;
+  /** Returns true if `candidateAncestorId` is `categoryId` itself or any of its ancestors (cycle check). */
+  isAncestor(categoryId: bigint, candidateAncestorId: bigint): Promise<boolean>;
 }

@@ -37,12 +37,10 @@ const videoFields = {
 export const CreateCategoryDTOSchema = z.object({
   name:        nameField,
   description: z.string().optional(),
-  /**
-   * parentId is optional.  When provided the service will scope the slug as
-   * "<parent-slug>-<name-slug>" so duplicate names across different parents
-   * never collide (e.g. root "Sarees" → "sarees", "What's New > Sarees" → "whats-new-sarees").
-   */
-  parentId:    z.string().optional(),
+  /** If provided, a CategoryPlacement is created linking the new category under this parent. */
+  parentId: z.string().optional(),
+  /** Explicitly mark as a root/top-level entry (e.g. "Sarees", "Weddings"). Ignored if parentId is set. */
+  isRoot: z.boolean().optional().default(false),
   metaTitle:   metaTitleField,
   metaDesc:    metaDescField,
   image:       imageField,
@@ -53,6 +51,20 @@ export const CreateCategoryDTOSchema = z.object({
 
 export type CreateCategoryDTO = z.infer<typeof CreateCategoryDTOSchema>;
 
+// ── Link an EXISTING category under a (possibly different) parent ─────────
+export const LinkCategoryDTOSchema = z.object({
+  parentId: z.string().min(1, "Parent ID is required"),
+  childId: z.string().min(1, "Category to link is required"),
+  order: z.number().int().default(0),
+});
+export type LinkCategoryDTO = z.infer<typeof LinkCategoryDTOSchema>;
+
+// ── Update placement order/position under a given parent ─────────────────
+export const UpdatePlacementDTOSchema = z.object({
+  order: z.number().int(),
+});
+export type UpdatePlacementDTO = z.infer<typeof UpdatePlacementDTOSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Update
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,15 +72,7 @@ export type CreateCategoryDTO = z.infer<typeof CreateCategoryDTOSchema>;
 export const UpdateCategoryDTOSchema = z.object({
   name:        nameField.optional(),
   description: z.string().optional(),
-  /**
-   * parentId can be:
-   *   - undefined  → don't change the parent
-   *   - null       → move to root (no parent)
-   *   - "123"      → reparent to category with id 123
-   *
-   * The service re-computes the slug whenever name OR parentId changes.
-   */
-  parentId:    z.string().nullable().optional(),
+  isRoot: z.boolean().optional(),
   metaTitle:   metaTitleField,
   metaDesc:    metaDescField,
   image:       imageField,
@@ -88,7 +92,7 @@ export const QueryCategoryDTOSchema = z.object({
   limit:     z.number().int().positive().max(100).default(10),
   search:    z.string().optional(),
   isActive:  z.boolean().optional(),
-  parentId:  z.string().optional(),
+  isRoot:  z.boolean().optional(),
   sortBy:    z.enum(["name", "createdAt", "order"]).default("order"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
 });

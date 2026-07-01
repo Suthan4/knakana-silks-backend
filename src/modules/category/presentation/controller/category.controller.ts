@@ -3,8 +3,10 @@ import { inject, injectable } from "tsyringe";
 import { CategoryService } from "../../application/service/category.service.js";
 import {
   CreateCategoryDTOSchema,
+  LinkCategoryDTOSchema,
   QueryCategoryDTOSchema,
   UpdateCategoryDTOSchema,
+  UpdatePlacementDTOSchema,
 } from "../../application/category.dto.js";
 
 @injectable()
@@ -27,6 +29,45 @@ export class CategoryController {
         message: "Category created successfully",
         data:    category,
       });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+    async linkCategory(req: Request, res: Response) {
+    try {
+      const data = LinkCategoryDTOSchema.parse(req.body);
+      const placement = await this.categoryService.linkCategory(data);
+      res.status(201).json({ success: true, message: "Category linked successfully", data: placement });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async unlinkCategory(req: Request, res: Response) {
+    try {
+      const { placementId } = req.params;
+      if (!placementId || Array.isArray(placementId)) {
+        res.status(400).json({ success: false, message: "Placement ID is required" });
+        return;
+      }
+      await this.categoryService.unlinkCategory(placementId);
+      res.json({ success: true, message: "Category unlinked from this parent" });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async updatePlacementOrder(req: Request, res: Response) {
+    try {
+      const { placementId } = req.params;
+      if (!placementId || Array.isArray(placementId)) {
+        res.status(400).json({ success: false, message: "Placement ID is required" });
+        return;
+      }
+      const { order } = UpdatePlacementDTOSchema.parse(req.body);
+      const placement = await this.categoryService.updatePlacementOrder(placementId, order);
+      res.json({ success: true, message: "Order updated", data: placement });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
     }
