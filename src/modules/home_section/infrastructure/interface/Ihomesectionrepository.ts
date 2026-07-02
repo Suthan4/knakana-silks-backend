@@ -15,7 +15,11 @@ export type HomeSectionWithRelations = Prisma.HomeSectionGetPayload<{
     };
     categories: {
       include: {
-        children: true;
+        childPlacements: {
+          include: {
+            child: true;
+          };
+        }
       };
     };
     media: true;

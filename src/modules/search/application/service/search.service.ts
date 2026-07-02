@@ -145,7 +145,7 @@ export class SearchService {
         ],
       },
       include: {
-        parent: true,
+        parentPlacements: { include: { parent: true } },
         _count: {
           select: { products: true },
         },
@@ -163,7 +163,7 @@ export class SearchService {
         description: category.description || undefined,
         image: category.image || undefined,
         productCount: (category as any)._count?.products || 0,
-        parentName: (category as any).parent?.name,
+        parentName: (category as any).parentPlacements?.[0]?.parent?.name,
         relevanceScore,
       };
     });

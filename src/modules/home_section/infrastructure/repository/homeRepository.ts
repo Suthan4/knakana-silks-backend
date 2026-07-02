@@ -33,7 +33,11 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
         categories: {
           include: {
-            children: true,
+            childPlacements: {
+              include: {
+                child: true,
+              },
+            },
           },
         },
         media: {
@@ -76,7 +80,11 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
         categories: {
           include: {
-            children: true,
+            childPlacements: {
+              include: {
+                child: true,
+              },
+            },
           },
         },
         media: {
@@ -148,7 +156,11 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         },
         categories: {
           include: {
-            children: true,
+            childPlacements: {
+              include: {
+                child: true,
+              },
+            },
           },
         },
         media: {
