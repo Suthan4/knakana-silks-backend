@@ -318,7 +318,12 @@ export class CategoryService {
     return this.categoryRepository.findAllWithActiveProductCount({
       skip:     0,
       take:     100,
-      where:    { parentId: null, isActive: true },
+      where:    {
+        isActive: true,
+        isRoot: true,
+        // A root category must not be placed under another category.
+        parentPlacements:{none:{}} 
+      },
       orderBy:  { order: "asc" },
     });
   }
