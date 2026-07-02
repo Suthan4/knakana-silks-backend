@@ -295,7 +295,7 @@ async findAllWithActiveProductCount(params: {
     const category = await this.prisma.category.findUnique({
       where:   { slug },
       include: {
-        parent:   true,
+        parentPlacements:   {include: { parent: true } },
         childPlacements: { orderBy: { order: "asc" } }, // no isActive filter
       },
     });
