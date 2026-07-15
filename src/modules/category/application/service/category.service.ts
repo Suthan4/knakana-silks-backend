@@ -222,16 +222,27 @@ export class CategoryService {
   // DELETE
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async deleteCategory(id: string) {
-    const categoryId = BigInt(id);
+async deleteCategory(id: string) {
+  const categoryId = BigInt(id);
 
-    const children = await this.categoryRepository.findChildren(categoryId);
-    if (children.length > 0) {
-      throw new Error("Cannot delete category with subcategories");
-    }
+  const category = await this.categoryRepository.findById(categoryId);
 
-    await this.categoryRepository.delete(categoryId);
+  if (!category) {
+    throw new Error("Category not found");
   }
+
+  // Children are stored inside CategoryPlacement
+  const childPlacements =
+    await this.categoryRepository.findChildPlacements(categoryId);
+
+  if (childPlacements.length > 0) {
+    throw new Error(
+      "Cannot delete category with subcategories. Remove or unlink the subcategories first."
+    );
+  }
+
+  await this.categoryRepository.delete(categoryId);
+}
 
   // ─────────────────────────────────────────────────────────────────────────────
   // READ
