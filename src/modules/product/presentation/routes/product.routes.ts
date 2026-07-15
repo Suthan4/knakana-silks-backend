@@ -7,6 +7,7 @@ import {
 } from "@/shared/middleware/auth.middleware.js";
 import { UserRole } from "@/generated/prisma/enums.js";
 import { ProductController } from "../controller/prodcut.controller.js";
+import { adminCatalogReadLimiter, adminCatalogWriteLimiter, publicCatalogLimiter } from "@/shared/middleware/rate-limit.middleware.js";
 
 const router = Router();
 
@@ -16,19 +17,19 @@ const getProductController = () => container.resolve(ProductController);
 // PUBLIC ROUTES
 // ==========================================
 
-router.get("/products", (req, res) =>
+router.get("/products",publicCatalogLimiter, (req, res) =>
   getProductController().getProducts(req, res)
 );
 
-router.get("/products/:id", (req, res) =>
+router.get("/products/:id", publicCatalogLimiter, (req, res) =>
   getProductController().getProduct(req, res)
 );
 
-router.get("/products/slug/:slug", (req, res) =>
+router.get("/products/slug/:slug", publicCatalogLimiter, (req, res) =>
   getProductController().getProductBySlug(req, res)
 );
 
-router.get("/products/:id/stock", (req, res) =>
+router.get("/products/:id/stock", publicCatalogLimiter, (req, res) =>
   getProductController().getProductStock(req, res)
 );
 
@@ -39,6 +40,7 @@ router.get("/products/:id/stock", (req, res) =>
 router.post(
   "/products",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "create"),
   (req, res) => getProductController().createProduct(req, res)
 );
@@ -46,6 +48,7 @@ router.post(
 router.get(
   "/admin/products", 
   authenticate,
+  adminCatalogReadLimiter,
   checkPermission("products", "read"),
    (req, res) =>
   getProductController().getAdminProducts(req, res)
@@ -54,6 +57,7 @@ router.get(
 router.put(
   "/products/:id",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().updateProduct(req, res)
 );
@@ -61,6 +65,7 @@ router.put(
 router.delete(
   "/products/:id",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "delete"),
   (req, res) => getProductController().deleteProduct(req, res)
 );
@@ -79,6 +84,7 @@ router.post(
 router.put(
   "/products/:id/specifications/:specId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().updateSpecification(req, res)
 );
@@ -86,6 +92,7 @@ router.put(
 router.delete(
   "/products/:id/specifications/:specId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().deleteSpecification(req, res)
 );
@@ -97,6 +104,7 @@ router.delete(
 router.post(
   "/products/:id/media",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().addMedia(req, res)
 );
@@ -104,6 +112,7 @@ router.post(
 router.delete(
   "/products/:id/media/:mediaId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().deleteMedia(req, res)
 );
@@ -115,6 +124,7 @@ router.delete(
 router.post(
   "/products/:id/variants",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().addVariant(req, res)
 );
@@ -122,6 +132,7 @@ router.post(
 router.get(
   "/products/:id/variants/:variantId",
   authenticate,
+  adminCatalogReadLimiter,
   checkPermission("products", "read"),
   (req, res) => getProductController().getVariant(req, res)
 );
@@ -129,6 +140,7 @@ router.get(
 router.put(
   "/products/:id/variants/:variantId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().updateVariant(req, res)
 );
@@ -136,6 +148,7 @@ router.put(
 router.delete(
   "/products/:id/variants/:variantId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().deleteVariant(req, res)
 );
@@ -147,6 +160,7 @@ router.delete(
 router.post(
   "/products/:id/variants/:variantId/media",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().addVariantMedia(req, res)
 );
@@ -154,6 +168,7 @@ router.post(
 router.delete(
   "/products/:id/variants/:variantId/media/:mediaId",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().deleteVariantMedia(req, res)
 );
@@ -165,6 +180,7 @@ router.delete(
 router.put(
   "/products/:id/stock",
   authenticate,
+  adminCatalogWriteLimiter,
   checkPermission("products", "update"),
   (req, res) => getProductController().updateStock(req, res)
 );

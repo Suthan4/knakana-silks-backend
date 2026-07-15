@@ -3,7 +3,8 @@ import express, { Application } from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+
+import { globalApiLimiter } from "./shared/middleware/rate-limit.middleware.js";
 import { errorHandler } from "./shared/middleware/errorHandler.js";
 import { setupContainer } from "./config/container.js";
 setupContainer();
@@ -74,17 +75,14 @@ app.options("*", cors(corsOptions));
   /* --------------------------------------------------
    * Rate Limiter (EXCLUDE uploads)
    * -------------------------------------------------- */
-  const limiter = rateLimit({
-    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-  });
+  app.use("/api",globalApiLimiter)
 
   app.use("/api", (req, res, next) => {
     // 🚫 DO NOT rate-limit file uploads (multer needs raw stream)
     if (req.path.startsWith("/upload")) {
       return next();
     }
-    return limiter(req, res, next);
+    return globalApiLimiter(req, res, next);
   });
 
   /* --------------------------------------------------
