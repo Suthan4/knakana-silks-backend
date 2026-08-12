@@ -1,14 +1,17 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'ADMIN', 'USER');
 
 -- CreateEnum
-CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED');
+CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'PROCESSING', 'SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'COMPLETED', 'CANCELLED', 'REFUNDED');
 
 -- CreateEnum
 CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED');
 
 -- CreateEnum
-CREATE TYPE "PaymentMethod" AS ENUM ('CARD', 'UPI', 'WALLET', 'NET_BANKING');
+CREATE TYPE "PaymentMethod" AS ENUM ('CARD', 'UPI', 'NETBANKING', 'WALLET', 'EMI', 'COD', 'PAYLATER');
 
 -- CreateEnum
 CREATE TYPE "ConsultationPlatform" AS ENUM ('ZOOM', 'WHATSAPP');
@@ -48,6 +51,12 @@ CREATE TYPE "RefundMethod" AS ENUM ('ORIGINAL_PAYMENT', 'STORE_CREDIT', 'BANK_TR
 
 -- CreateEnum
 CREATE TYPE "AddressType" AS ENUM ('SHIPPING', 'BILLING', 'BOTH');
+
+-- CreateEnum
+CREATE TYPE "RequestStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'FULFILLED', 'CANCELLED');
+
+-- CreateEnum
+CREATE TYPE "CourierPreference" AS ENUM ('CHEAPEST', 'FASTEST', 'CUSTOM');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -104,11 +113,27 @@ CREATE TABLE "categories" (
     "metaDesc" TEXT,
     "image" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "isRoot" BOOLEAN NOT NULL DEFAULT false,
+    "order" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "hasVideoConsultation" BOOLEAN NOT NULL DEFAULT false,
+    "videoPurchasingEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "videoConsultationNote" TEXT,
+
+    CONSTRAINT "categories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "category_placements" (
+    "id" BIGSERIAL NOT NULL,
+    "parentId" BIGINT NOT NULL,
+    "childId" BIGINT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "categories_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "category_placements_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -137,6 +162,10 @@ CREATE TABLE "products" (
     "breadth" DECIMAL(8,2),
     "height" DECIMAL(8,2),
     "volumetricWeight" DECIMAL(8,3),
+    "allowOutOfStockOrders" BOOLEAN NOT NULL DEFAULT false,
+    "hasVideoConsultation" BOOLEAN NOT NULL DEFAULT false,
+    "videoPurchasingEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "videoConsultationNote" TEXT,
 
     CONSTRAINT "products_pkey" PRIMARY KEY ("id")
 );
@@ -221,6 +250,28 @@ CREATE TABLE "product_media" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "product_media_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "product_requests" (
+    "id" BIGSERIAL NOT NULL,
+    "userId" BIGINT NOT NULL,
+    "productId" BIGINT NOT NULL,
+    "variantId" BIGINT,
+    "quantity" INTEGER NOT NULL DEFAULT 1,
+    "status" "RequestStatus" NOT NULL DEFAULT 'PENDING',
+    "customerNote" TEXT,
+    "adminNote" TEXT,
+    "notifyWhenAvailable" BOOLEAN NOT NULL DEFAULT true,
+    "estimatedAvailability" TIMESTAMP(3),
+    "requestNumber" TEXT NOT NULL,
+    "orderId" BIGINT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "approvedAt" TIMESTAMP(3),
+    "fulfilledAt" TIMESTAMP(3),
+
+    CONSTRAINT "product_requests_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -343,6 +394,7 @@ CREATE TABLE "orders" (
     "subtotal" DECIMAL(10,2) NOT NULL,
     "discount" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "shippingCost" DECIMAL(10,2) NOT NULL,
+    "gstAmount" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "total" DECIMAL(10,2) NOT NULL,
     "shippingAddressId" BIGINT NOT NULL,
     "billingAddressId" BIGINT NOT NULL,
@@ -377,6 +429,11 @@ CREATE TABLE "order_shipping_info" (
     "length" INTEGER NOT NULL,
     "breadth" INTEGER NOT NULL,
     "height" INTEGER NOT NULL,
+    "courierPreference" "CourierPreference",
+    "selectedCourierCompanyId" INTEGER,
+    "selectedCourierName" TEXT,
+    "selectedCourierCharge" DECIMAL(10,2),
+    "selectedCourierEtd" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -408,6 +465,12 @@ CREATE TABLE "payments" (
     "refundAmount" DECIMAL(10,2) NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "cardNetwork" TEXT,
+    "cardLast4" TEXT,
+    "cardType" TEXT,
+    "upiId" TEXT,
+    "bankName" TEXT,
+    "walletName" TEXT,
 
     CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
 );
@@ -417,6 +480,9 @@ CREATE TABLE "shipments" (
     "id" BIGSERIAL NOT NULL,
     "orderId" BIGINT NOT NULL,
     "shiprocketOrderId" TEXT,
+    "shiprocketShipmentId" TEXT,
+    "awbCode" TEXT,
+    "courierCompanyId" INTEGER,
     "trackingNumber" TEXT,
     "courierName" TEXT,
     "estimatedDelivery" TIMESTAMP(3),
@@ -578,6 +644,11 @@ CREATE TABLE "consultation_configs" (
     "categoryId" BIGINT,
     "productId" BIGINT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "enableVideoConsultation" BOOLEAN NOT NULL DEFAULT true,
+    "enableVideoPurchasing" BOOLEAN NOT NULL DEFAULT false,
+    "consultationDuration" INTEGER DEFAULT 30,
+    "consultationNote" TEXT,
+    "videoPurchasingInstructions" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -595,10 +666,15 @@ CREATE TABLE "consultations" (
     "preferredTime" TEXT NOT NULL,
     "status" "ConsultationStatus" NOT NULL DEFAULT 'REQUESTED',
     "meetingLink" TEXT,
+    "isPurchaseConsultation" BOOLEAN NOT NULL DEFAULT false,
+    "purchaseCompleted" BOOLEAN NOT NULL DEFAULT false,
+    "orderId" BIGINT,
+    "consultationNotes" TEXT,
     "approvedBy" TEXT,
     "rejectionReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "completedAt" TIMESTAMP(3),
 
     CONSTRAINT "consultations_pkey" PRIMARY KEY ("id")
 );
@@ -808,7 +884,16 @@ CREATE UNIQUE INDEX "categories_slug_key" ON "categories"("slug");
 CREATE INDEX "categories_slug_idx" ON "categories"("slug");
 
 -- CreateIndex
-CREATE INDEX "categories_parentId_idx" ON "categories"("parentId");
+CREATE INDEX "categories_isRoot_idx" ON "categories"("isRoot");
+
+-- CreateIndex
+CREATE INDEX "category_placements_parentId_idx" ON "category_placements"("parentId");
+
+-- CreateIndex
+CREATE INDEX "category_placements_childId_idx" ON "category_placements"("childId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "category_placements_parentId_childId_key" ON "category_placements"("parentId", "childId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "products_slug_key" ON "products"("slug");
@@ -859,6 +944,24 @@ CREATE INDEX "product_media_type_idx" ON "product_media"("type");
 CREATE INDEX "product_media_isActive_idx" ON "product_media"("isActive");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "product_requests_requestNumber_key" ON "product_requests"("requestNumber");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "product_requests_orderId_key" ON "product_requests"("orderId");
+
+-- CreateIndex
+CREATE INDEX "product_requests_userId_idx" ON "product_requests"("userId");
+
+-- CreateIndex
+CREATE INDEX "product_requests_productId_idx" ON "product_requests"("productId");
+
+-- CreateIndex
+CREATE INDEX "product_requests_status_idx" ON "product_requests"("status");
+
+-- CreateIndex
+CREATE INDEX "product_requests_requestNumber_idx" ON "product_requests"("requestNumber");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "warehouses_code_key" ON "warehouses"("code");
 
 -- CreateIndex
@@ -881,6 +984,9 @@ CREATE UNIQUE INDEX "carts_userId_key" ON "carts"("userId");
 
 -- CreateIndex
 CREATE INDEX "cart_items_cartId_idx" ON "cart_items"("cartId");
+
+-- CreateIndex
+CREATE INDEX "cart_items_cartId_productId_idx" ON "cart_items"("cartId", "productId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "cart_items_cartId_productId_variantId_key" ON "cart_items"("cartId", "productId", "variantId");
@@ -908,6 +1014,12 @@ CREATE INDEX "orders_orderNumber_idx" ON "orders"("orderNumber");
 
 -- CreateIndex
 CREATE INDEX "orders_status_idx" ON "orders"("status");
+
+-- CreateIndex
+CREATE INDEX "orders_couponId_idx" ON "orders"("couponId");
+
+-- CreateIndex
+CREATE INDEX "orders_createdAt_idx" ON "orders"("createdAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "order_shipping_info_orderId_key" ON "order_shipping_info"("orderId");
@@ -943,10 +1055,16 @@ CREATE UNIQUE INDEX "shipments_orderId_key" ON "shipments"("orderId");
 CREATE UNIQUE INDEX "shipments_shiprocketOrderId_key" ON "shipments"("shiprocketOrderId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "shipments_shiprocketShipmentId_key" ON "shipments"("shiprocketShipmentId");
+
+-- CreateIndex
 CREATE INDEX "shipments_orderId_idx" ON "shipments"("orderId");
 
 -- CreateIndex
 CREATE INDEX "shipments_trackingNumber_idx" ON "shipments"("trackingNumber");
+
+-- CreateIndex
+CREATE INDEX "shipments_awbCode_idx" ON "shipments"("awbCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "coupons_code_key" ON "coupons"("code");
@@ -1018,10 +1136,16 @@ CREATE INDEX "consultation_configs_categoryId_idx" ON "consultation_configs"("ca
 CREATE INDEX "consultation_configs_productId_idx" ON "consultation_configs"("productId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "consultations_orderId_key" ON "consultations"("orderId");
+
+-- CreateIndex
 CREATE INDEX "consultations_userId_idx" ON "consultations"("userId");
 
 -- CreateIndex
 CREATE INDEX "consultations_status_idx" ON "consultations"("status");
+
+-- CreateIndex
+CREATE INDEX "consultations_isPurchaseConsultation_idx" ON "consultations"("isPurchaseConsultation");
 
 -- CreateIndex
 CREATE INDEX "notifications_userId_idx" ON "notifications"("userId");
@@ -1081,7 +1205,10 @@ ALTER TABLE "permissions" ADD CONSTRAINT "permissions_userId_fkey" FOREIGN KEY (
 ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "categories" ADD CONSTRAINT "categories_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "category_placements" ADD CONSTRAINT "category_placements_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "category_placements" ADD CONSTRAINT "category_placements_childId_fkey" FOREIGN KEY ("childId") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "products" ADD CONSTRAINT "products_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1097,6 +1224,18 @@ ALTER TABLE "product_variant_media" ADD CONSTRAINT "product_variant_media_varian
 
 -- AddForeignKey
 ALTER TABLE "product_media" ADD CONSTRAINT "product_media_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "product_requests" ADD CONSTRAINT "product_requests_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "product_requests" ADD CONSTRAINT "product_requests_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "product_requests" ADD CONSTRAINT "product_requests_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "product_variants"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "product_requests" ADD CONSTRAINT "product_requests_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "orders"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "stocks" ADD CONSTRAINT "stocks_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1216,6 +1355,9 @@ ALTER TABLE "consultation_configs" ADD CONSTRAINT "consultation_configs_productI
 ALTER TABLE "consultations" ADD CONSTRAINT "consultations_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "consultations" ADD CONSTRAINT "consultations_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "orders"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1262,3 +1404,4 @@ ALTER TABLE "_SectionProducts" ADD CONSTRAINT "_SectionProducts_A_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "_SectionProducts" ADD CONSTRAINT "_SectionProducts_B_fkey" FOREIGN KEY ("B") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
