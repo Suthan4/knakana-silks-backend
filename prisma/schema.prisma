@@ -280,6 +280,7 @@ model CategoryPlacement{
   parentId BigInt
   childId  BigInt
   order    Int    @default(0)
+  includeChildren Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
