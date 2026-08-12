@@ -1,6 +1,3 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'ADMIN', 'USER');
 
@@ -130,6 +127,7 @@ CREATE TABLE "category_placements" (
     "parentId" BIGINT NOT NULL,
     "childId" BIGINT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
+    "includeChildren" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -1404,4 +1402,3 @@ ALTER TABLE "_SectionProducts" ADD CONSTRAINT "_SectionProducts_A_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "_SectionProducts" ADD CONSTRAINT "_SectionProducts_B_fkey" FOREIGN KEY ("B") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
