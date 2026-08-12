@@ -65,9 +65,9 @@ export class CategoryController {
         res.status(400).json({ success: false, message: "Placement ID is required" });
         return;
       }
-      const { order } = UpdatePlacementDTOSchema.parse(req.body);
-      const placement = await this.categoryService.updatePlacementOrder(placementId, order);
-      res.json({ success: true, message: "Order updated", data: placement });
+      const data = UpdatePlacementDTOSchema.parse(req.body);
+      const placement = await this.categoryService.updatePlacement(placementId, data);
+      res.json({ success: true, message: "Placement updated", data: placement });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
     }

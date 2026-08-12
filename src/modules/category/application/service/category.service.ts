@@ -52,6 +52,7 @@ export class CategoryService {
     description?: string;
     parentId?: string;
     isRoot?: boolean;
+    includeChildren?: boolean;
     metaTitle?: string;
     metaDesc?: string;
     image?: string;
@@ -94,7 +95,8 @@ export class CategoryService {
       await this.categoryRepository.createPlacement(
         BigInt(data.parentId),
         category.id,
-        data.order ?? 0
+        data.order ?? 0,
+        data.includeChildren ?? true
       );
     }
 
@@ -104,7 +106,12 @@ export class CategoryService {
 
     // ── Link existing category under a parent ──────────────────────────
 
-  async linkCategory(data: { parentId: string; childId: string; order?: number }) {
+  async linkCategory(data: {
+    parentId: string;
+    childId: string;
+    order?: number;
+    includeChildren?: boolean;
+  }) {
     const parentId = BigInt(data.parentId);
     const childId = BigInt(data.childId);
 
@@ -128,7 +135,12 @@ export class CategoryService {
       throw new Error("Cannot link: this would create a circular category hierarchy");
     }
 
-    return this.categoryRepository.createPlacement(parentId, childId, data.order ?? 0);
+    return this.categoryRepository.createPlacement(
+      parentId,
+      childId,
+      data.order ?? 0,
+      data.includeChildren ?? true
+    );
   }
 
     // ── Unlink (remove from one parent only — category itself is untouched) ─
@@ -139,10 +151,14 @@ export class CategoryService {
     await this.categoryRepository.deletePlacement(placement.id);
   }
 
-  async updatePlacementOrder(placementId: string, order: number) {
+  /**
+   * Update a placement's order and/or whether it shows the category's
+   * subcategories in this particular branch of the tree.
+   */
+  async updatePlacement(placementId: string, data: { order?: number; includeChildren?: boolean }) {
     const placement = await this.categoryRepository.findPlacementById(BigInt(placementId));
     if (!placement) throw new Error("Placement not found");
-    return this.categoryRepository.updatePlacementOrder(placement.id, order);
+    return this.categoryRepository.updatePlacement(placement.id, data);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -323,10 +339,11 @@ async deleteCategory(id: string) {
 
   async getCategoryTree(id?: string) {
     if (id) {
-      return this.categoryRepository.findWithChildren(BigInt(id));
+      const tree = await this.categoryRepository.findWithChildren(BigInt(id));
+      return tree ? this.pruneHiddenSubtrees(tree) : tree;
     }
 
-    return this.categoryRepository.findAllWithActiveProductCount({
+    const roots = await this.categoryRepository.findAllWithActiveProductCount({
       skip:     0,
       take:     100,
       where:    {
@@ -337,5 +354,36 @@ async deleteCategory(id: string) {
       },
       orderBy:  { order: "asc" },
     });
+
+    return roots.map((root) => this.pruneHiddenSubtrees(root));
+  }
+
+  /**
+   * Walks a fetched category tree and, for any placement whose
+   * `includeChildren` flag is false, strips that occurrence's nested
+   * childPlacements from the response. The underlying category and its
+   * children are untouched in the database — this only affects how that
+   * particular branch of the tree is rendered (e.g. showing "Banarasi
+   * Sarees" as a flat leaf under "What's New" while it keeps its full
+   * subtree under "sarees").
+   */
+  private pruneHiddenSubtrees(node: any): any {
+    if (!node?.childPlacements?.length) return node;
+
+    return {
+      ...node,
+      childPlacements: node.childPlacements.map((placement: any) => {
+        if (placement.includeChildren === false) {
+          const { child, ...rest } = placement;
+          const { childPlacements, ...childWithoutSubtree } = child ?? {};
+          return { ...rest, child: childWithoutSubtree };
+        }
+
+        return {
+          ...placement,
+          child: placement.child ? this.pruneHiddenSubtrees(placement.child) : placement.child,
+        };
+      }),
+    };
   }
 }

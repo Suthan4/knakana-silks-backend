@@ -48,10 +48,18 @@ findAllWithActiveProductCount(params: {
   findWithChildren(id: bigint): Promise<Category | null>;
 
   // ── Placement operations ──────────────────────────────────────────────
-  createPlacement(parentId: bigint, childId: bigint, order: number): Promise<CategoryPlacement>;
+  createPlacement(
+    parentId: bigint,
+    childId: bigint,
+    order: number,
+    includeChildren?: boolean
+  ): Promise<CategoryPlacement>;
   findPlacement(parentId: bigint, childId: bigint): Promise<CategoryPlacement | null>;
   findPlacementById(id: bigint): Promise<CategoryPlacement | null>;
-  updatePlacementOrder(id: bigint, order: number): Promise<CategoryPlacement>;
+  updatePlacement(
+    id: bigint,
+    data: { order?: number; includeChildren?: boolean }
+  ): Promise<CategoryPlacement>;
   deletePlacement(id: bigint): Promise<void>;
   countPlacementsForChild(childId: bigint): Promise<number>;
 

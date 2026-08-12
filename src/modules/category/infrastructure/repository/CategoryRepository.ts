@@ -190,8 +190,15 @@ async findAllWithActiveProductCount(params: {
 
     // ── Writes: Placement ───────────────────────────────────────────────
 
-  async createPlacement(parentId: bigint, childId: bigint, order: number): Promise<CategoryPlacement> {
-    return this.prisma.categoryPlacement.create({ data: { parentId, childId, order } });
+  async createPlacement(
+    parentId: bigint,
+    childId: bigint,
+    order: number,
+    includeChildren: boolean = true
+  ): Promise<CategoryPlacement> {
+    return this.prisma.categoryPlacement.create({
+      data: { parentId, childId, order, includeChildren },
+    });
   }
 
   async findPlacement(parentId: bigint, childId: bigint): Promise<CategoryPlacement | null> {
@@ -204,8 +211,11 @@ async findAllWithActiveProductCount(params: {
     return this.prisma.categoryPlacement.findUnique({ where: { id } });
   }
 
-  async updatePlacementOrder(id: bigint, order: number): Promise<CategoryPlacement> {
-    return this.prisma.categoryPlacement.update({ where: { id }, data: { order } });
+  async updatePlacement(
+    id: bigint,
+    data: { order?: number; includeChildren?: boolean }
+  ): Promise<CategoryPlacement> {
+    return this.prisma.categoryPlacement.update({ where: { id }, data });
   }
 
   async deletePlacement(id: bigint): Promise<void> {
