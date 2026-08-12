@@ -25,5 +25,5 @@ jobs:
             else
               echo "🚀 Deploying QA..."
               cd /var/www/api-qa
-              ./deploy.sh
+              ./deploy-qa.sh
             fi
