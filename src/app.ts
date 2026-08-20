@@ -93,8 +93,8 @@ app.options("*", cors(corsOptions));
   /* --------------------------------------------------
    * Body parsers (AFTER uploads)
    * -------------------------------------------------- */
-  app.use(express.json({ limit: "100mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+  app.use(express.json({ limit: "400mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "400mb" }));
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
   /* --------------------------------------------------
