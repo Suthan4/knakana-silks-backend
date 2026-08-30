@@ -474,8 +474,16 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
     if (data.paymentMethod === "COD" && breakdown.total > 2000) {
       throw new Error("COD is available only for orders up to ₹2000");
     }
+    const generatedOrderNumber = NumberUtil.generateOrderNumber();
 
-    const orderNumber = NumberUtil.generateOrderNumber();
+    const isTestEnvironment =
+      process.env.NODE_ENV === "qa" ||
+      process.env.NODE_ENV === "development";
+
+    const orderNumber = isTestEnvironment
+      ? `TEST_${generatedOrderNumber}`
+      : generatedOrderNumber;
+
 
     // ✅ Create Razorpay payment session with courier info
     const razorpayOrder = await this.razorpayService.createOrder({
