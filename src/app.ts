@@ -35,6 +35,8 @@ import { setupShipmentCronJobs } from "./modules/shipment/shipment.corn.setup.js
 import returnRoutes from "./modules/return/presentation/routes/return.routes.js";
 import stockRoutes from "./modules/stock/presentation/routes/stock.routes.js";
 import reviewRoutes from "./modules/review/presentation/routes/review.routes.js";
+import { httpLoggerMiddleware } from "./shared/middleware/http-logger.middleware.js";
+import { metricsHandler, metricsMiddleware } from "./shared/middleware/metrics.middleware.js";
 
 export const createApp = (): Application => {
   const app = express();
@@ -71,6 +73,13 @@ app.use(cors(corsOptions));
 // ✅ IMPORTANT: Preflight must use SAME config
 app.options("*", cors(corsOptions));
 
+   /* --------------------------------------------------
+   * Logging & Metrics (BEFORE routes, AFTER security/CORS)
+   * Every request gets a correlation id, structured logs, and RED metrics
+   * -------------------------------------------------- */
+  app.use(httpLoggerMiddleware);
+  app.use(metricsMiddleware);
+
 
   /* --------------------------------------------------
    * Rate Limiter (EXCLUDE uploads)
@@ -93,8 +102,8 @@ app.options("*", cors(corsOptions));
   /* --------------------------------------------------
    * Body parsers (AFTER uploads)
    * -------------------------------------------------- */
-  app.use(express.json({ limit: "100mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+  app.use(express.json({ limit: "400mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "400mb" }));
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
   /* --------------------------------------------------
@@ -131,6 +140,11 @@ app.options("*", cors(corsOptions));
   app.get("/health", (_req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });
   });
+
+    /* --------------------------------------------------
+   * Prometheus scrape endpoint
+   * -------------------------------------------------- */
+  app.get("/metrics", metricsHandler);
 
   /* --------------------------------------------------
    * Global error handler
