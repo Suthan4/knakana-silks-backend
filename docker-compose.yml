@@ -1,0 +1,76 @@
+version: '3.8'
+
+
+
+services:
+
+  redis:
+
+    image: redis:7-alpine
+
+    container_name: kangana-silks-redis
+
+    restart: unless-stopped
+
+    ports:
+
+      - "${REDIS_PORT:-6379}:6379"
+
+    environment:
+
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+
+    volumes:
+
+      - redis_data:/data
+
+    # If REDIS_PASSWORD is provided in .env, requirepass is applied; otherwise runs without password
+
+    command: >
+
+      sh -c '
+
+        if [ -n "$$REDIS_PASSWORD" ]; then
+
+          redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
+
+        else
+
+          redis-server --appendonly yes
+
+        fi
+
+      '
+
+    healthcheck:
+
+      test: >
+
+        sh -c '
+
+          if [ -n "$$REDIS_PASSWORD" ]; then
+
+            redis-cli -a "$$REDIS_PASSWORD" ping
+
+          else
+
+            redis-cli ping
+
+          fi
+
+        '
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+
+
+volumes:
+
+  redis_data:
+
+    driver: local 
+

@@ -1,12 +1,17 @@
 import { injectable, inject } from "tsyringe";
 import { SlugUtil } from "@/shared/utils/index.js";
 import { ICategoryRepository } from "../../infrastructure/interface/Icategoryrepository.js";
+import { CacheService } from "@/cache/cache.service.js";
+import { CacheKeys, CacheTTL } from "@/cache/cache.keys.js";
+import { CacheModule } from "@/config/cache.module.js";
 
 @injectable()
 export class CategoryService {
   constructor(
     @inject("ICategoryRepository")
-    private categoryRepository: ICategoryRepository
+    private categoryRepository: ICategoryRepository,
+    @inject(CacheService)
+    private cacheService: CacheService
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +74,7 @@ export class CategoryService {
       if (!parent) throw new Error("Parent category not found");
     }
 
-    // 2. Build a parent-scoped slug  (e.g. "whats-new-sarees" instead of "sarees")
+    // 2. Build a parent-scoped slug (e.g. "whats-new-sarees" instead of "sarees")
     const slug = await this.buildScopedSlug(data.name, data.parentId);
 
     // 3. Ensure the resulting slug is unique (no other category has it)
@@ -100,11 +105,13 @@ export class CategoryService {
       );
     }
 
+    // 5. Invalidate category cache
+    await CacheModule.category.onCategoryCreate();
 
     return category;
   }
 
-    // ── Link existing category under a parent ──────────────────────────
+  // ── Link existing category under a parent ──────────────────────────
 
   async linkCategory(data: {
     parentId: string;
@@ -135,20 +142,28 @@ export class CategoryService {
       throw new Error("Cannot link: this would create a circular category hierarchy");
     }
 
-    return this.categoryRepository.createPlacement(
+    const placement = await this.categoryRepository.createPlacement(
       parentId,
       childId,
       data.order ?? 0,
       data.includeChildren ?? true
     );
+
+    // Invalidate hierarchy cache
+    await CacheModule.category.onHierarchyChange();
+
+    return placement;
   }
 
-    // ── Unlink (remove from one parent only — category itself is untouched) ─
+  // ── Unlink (remove from one parent only — category itself is untouched) ─
 
   async unlinkCategory(placementId: string) {
     const placement = await this.categoryRepository.findPlacementById(BigInt(placementId));
     if (!placement) throw new Error("Placement not found");
     await this.categoryRepository.deletePlacement(placement.id);
+
+    // Invalidate hierarchy cache
+    await CacheModule.category.onHierarchyChange();
   }
 
   /**
@@ -158,7 +173,12 @@ export class CategoryService {
   async updatePlacement(placementId: string, data: { order?: number; includeChildren?: boolean }) {
     const placement = await this.categoryRepository.findPlacementById(BigInt(placementId));
     if (!placement) throw new Error("Placement not found");
-    return this.categoryRepository.updatePlacement(placement.id, data);
+    const result = await this.categoryRepository.updatePlacement(placement.id, data);
+
+    // Invalidate hierarchy cache
+    await CacheModule.category.onHierarchyChange();
+
+    return result;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -200,11 +220,11 @@ export class CategoryService {
 
     if (nameChanging || parentChanging) {
       // Resolve the effective name and parentId after the update
-      const effectiveName     = data.name     ?? category.name;
+      const effectiveName = data.name ?? category.name;
       const effectiveParentId =
         parentChanging
-          ? (data.parentId ?? null)                        // explicitly set (incl. null = move to root)
-          : (category.parentId?.toString() ?? null);       // unchanged
+          ? (data.parentId ?? null) // explicitly set (incl. null = move to root)
+          : (category.parentId?.toString() ?? null); // unchanged
 
       // Validate the new parent exists (if any)
       if (effectiveParentId) {
@@ -231,6 +251,12 @@ export class CategoryService {
           : undefined,
     });
 
+    // 4. Invalidate category cache (both old slug and new slug)
+    await CacheModule.category.onCategoryUpdate(id, category.slug);
+    if (updated.slug !== category.slug) {
+      await CacheModule.category.onCategoryUpdate(id, updated.slug);
+    }
+
     return updated;
   }
 
@@ -238,57 +264,89 @@ export class CategoryService {
   // DELETE
   // ─────────────────────────────────────────────────────────────────────────────
 
-async deleteCategory(id: string) {
-  const categoryId = BigInt(id);
+  async deleteCategory(id: string) {
+    const categoryId = BigInt(id);
 
-  const category = await this.categoryRepository.findById(categoryId);
+    const category = await this.categoryRepository.findById(categoryId);
 
-  if (!category) {
-    throw new Error("Category not found");
+    if (!category) {
+      throw new Error("Category not found");
+    }
+
+    // Children are stored inside CategoryPlacement
+    const childPlacements =
+      await this.categoryRepository.findChildPlacements(categoryId);
+
+    if (childPlacements.length > 0) {
+      throw new Error(
+        "Cannot delete category with subcategories. Remove or unlink the subcategories first."
+      );
+    }
+
+    await this.categoryRepository.delete(categoryId);
+
+    // Invalidate category cache
+    await CacheModule.category.onCategoryDelete(id, category.slug);
   }
-
-  // Children are stored inside CategoryPlacement
-  const childPlacements =
-    await this.categoryRepository.findChildPlacements(categoryId);
-
-  if (childPlacements.length > 0) {
-    throw new Error(
-      "Cannot delete category with subcategories. Remove or unlink the subcategories first."
-    );
-  }
-
-  await this.categoryRepository.delete(categoryId);
-}
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // READ
+  // READ (Cache-Aside Pattern with 10-min / 600s TTL + HIT/MISS Tracking)
   // ─────────────────────────────────────────────────────────────────────────────
 
   async getCategory(id: string) {
-    const category = await this.categoryRepository.findById(BigInt(id));
-    if (!category) throw new Error("Category not found");
-    return category;
+    return this.cacheService.getOrSetWithMeta(
+      CacheKeys.category.detail(id),
+      async () => {
+        const category = await this.categoryRepository.findById(BigInt(id));
+        if (!category) throw new Error("Category not found");
+        return category;
+      },
+      CacheTTL.category.detail
+    );
+  }
+
+  // Alias for compatibility
+  async getCategoryById(id: string) {
+    return this.getCategory(id);
   }
 
   async getCategoryBySlug(slug: string) {
-    const category = await this.categoryRepository.findBySlug(slug);
-    if (!category) throw new Error("Category not found");
-    return category;
+    return this.cacheService.getOrSetWithMeta(
+      CacheKeys.category.detailBySlug(slug),
+      async () => {
+        const category = await this.categoryRepository.findBySlug(slug);
+        if (!category) throw new Error("Category not found");
+        return category;
+      },
+      CacheTTL.category.detail
+    );
   }
 
   /**
    * Get category + all descendant IDs (used by ProductController for nested product queries).
    */
   async getCategoryWithDescendants(slug: string) {
-    const result = await this.categoryRepository.getCategoryWithDescendants(slug);
-    if (!result) throw new Error("Category not found");
-    return result;
+    return this.cacheService.getOrSet(
+      CacheKeys.category.withDescendants(slug),
+      async () => {
+        const result = await this.categoryRepository.getCategoryWithDescendants(slug);
+        if (!result) throw new Error("Category not found");
+        return result;
+      },
+      CacheTTL.category.descendants
+    );
   }
 
   async getCategoryWithDescendantsAdmin(slug: string) {
-    const result = await this.categoryRepository.getCategoryWithDescendantsAdmin(slug);
-    if (!result) throw new Error("Category not found");
-    return result;
+    return this.cacheService.getOrSet(
+      CacheKeys.category.withDescendantsAdmin(slug),
+      async () => {
+        const result = await this.categoryRepository.getCategoryWithDescendantsAdmin(slug);
+        if (!result) throw new Error("Category not found");
+        return result;
+      },
+      CacheTTL.category.descendants
+    );
   }
 
   async getCategories(params: {
@@ -301,71 +359,93 @@ async deleteCategory(id: string) {
     sortBy?: string;
     sortOrder?: "asc" | "desc";
   }) {
-    const skip = (params.page - 1) * params.limit;
+    const cacheKey = CacheKeys.category.list(params);
 
-    const where: any = {};
+    return this.cacheService.getOrSetWithMeta(
+      cacheKey,
+      async () => {
+        const skip = (params.page - 1) * params.limit;
 
-    if (params.search) {
-      where.OR = [
-        { name:        { contains: params.search, mode: "insensitive" } },
-        { description: { contains: params.search, mode: "insensitive" } },
-      ];
-    }
+        const where: any = {};
 
-    if (params.isActive !== undefined) where.isActive = params.isActive;
-    if (params.isRoot !== undefined) where.isRoot = params.isRoot;
+        if (params.search) {
+          where.OR = [
+            { name: { contains: params.search, mode: "insensitive" } },
+            { description: { contains: params.search, mode: "insensitive" } },
+          ];
+        }
 
-    // if (params.parentId !== undefined) {
-    //   where.parentId = params.parentId ? BigInt(params.parentId) : null;
-    // }
+        if (params.isActive !== undefined) where.isActive = params.isActive;
+        if (params.isRoot !== undefined) where.isRoot = params.isRoot;
 
-    const orderBy: any = { [params.sortBy || "name"]: params.sortOrder || "asc" };
+        const orderBy: any = { [params.sortBy || "name"]: params.sortOrder || "asc" };
 
-    const [categories, total] = await Promise.all([
-      this.categoryRepository.findAll({ skip, take: params.limit, where, orderBy }),
-      this.categoryRepository.count(where),
-    ]);
+        const [categories, total] = await Promise.all([
+          this.categoryRepository.findAll({ skip, take: params.limit, where, orderBy }),
+          this.categoryRepository.count(where),
+        ]);
 
-    return {
-      categories,
-      pagination: {
-        page:       params.page,
-        limit:      params.limit,
-        total,
-        totalPages: Math.ceil(total / params.limit),
+        return {
+          categories,
+          pagination: {
+            page: params.page,
+            limit: params.limit,
+            total,
+            totalPages: Math.ceil(total / params.limit),
+          },
+        };
       },
-    };
+      CacheTTL.category.list
+    );
+  }
+
+  // Alias for compatibility
+  async getAllCategories(params: {
+    page: number;
+    limit: number;
+    search?: string;
+    isActive?: boolean;
+    isRoot?: boolean;
+    parentId?: string;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+  }) {
+    return this.getCategories(params);
   }
 
   async getCategoryTree(id?: string) {
-    if (id) {
-      const tree = await this.categoryRepository.findWithChildren(BigInt(id));
-      return tree ? this.pruneHiddenSubtrees(tree) : tree;
-    }
+    const cacheKey = CacheKeys.category.tree(id);
 
-    const roots = await this.categoryRepository.findAllWithActiveProductCount({
-      skip:     0,
-      take:     100,
-      where:    {
-        isActive: true,
-        isRoot: true,
-        // A root category must not be placed under another category.
-        parentPlacements:{none:{}} 
+    return this.cacheService.getOrSetWithMeta(
+      cacheKey,
+      async () => {
+        if (id) {
+          const tree = await this.categoryRepository.findWithChildren(BigInt(id));
+          return tree ? this.pruneHiddenSubtrees(tree) : tree;
+        }
+
+        const roots = await this.categoryRepository.findAllWithActiveProductCount({
+          skip: 0,
+          take: 100,
+          where: {
+            isActive: true,
+            isRoot: true,
+            // A root category must not be placed under another category.
+            parentPlacements: { none: {} },
+          },
+          orderBy: { order: "asc" },
+        });
+
+        return roots.map((root) => this.pruneHiddenSubtrees(root));
       },
-      orderBy:  { order: "asc" },
-    });
-
-    return roots.map((root) => this.pruneHiddenSubtrees(root));
+      CacheTTL.category.tree
+    );
   }
 
   /**
    * Walks a fetched category tree and, for any placement whose
    * `includeChildren` flag is false, strips that occurrence's nested
-   * childPlacements from the response. The underlying category and its
-   * children are untouched in the database — this only affects how that
-   * particular branch of the tree is rendered (e.g. showing "Banarasi
-   * Sarees" as a flat leaf under "What's New" while it keeps its full
-   * subtree under "sarees").
+   * childPlacements from the response.
    */
   private pruneHiddenSubtrees(node: any): any {
     if (!node?.childPlacements?.length) return node;

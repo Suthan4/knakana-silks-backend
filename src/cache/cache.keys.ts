@@ -1,27 +1,77 @@
 /**
- * 🔑 Centralized Cache Keys
+ * 🔑 Centralized Cache Keys & Patterns
  * 
  * Standard naming convention:
  * {module}:{operation}:{identifier}
  * 
  * Examples:
- * - product:detail:123
- * - category:tree
- * - product:list:page:1:limit:12
+ * - category:detail:123
+ * - category:slug:sarees
+ * - category:tree:root
+ * - category:list:page:1:limit:10
  */
 
 export const CacheKeys = {
   /**
+   * 📁 CATEGORY MODULE
+   */
+  category: {
+    // Single category detail by ID
+    detail: (id: string | number | bigint) => `category:detail:${id.toString()}`,
+    
+    // Category by slug
+    detailBySlug: (slug: string) => `category:slug:${slug}`,
+    
+    // Category with active descendants
+    withDescendants: (slug: string) => `category:descendants:${slug}`,
+
+    // Category with all descendants (admin)
+    withDescendantsAdmin: (slug: string) => `category:descendants:admin:${slug}`,
+    
+    // Full category tree or branch
+    tree: (id?: string | number | bigint) => (id ? `category:tree:${id.toString()}` : `category:tree:root`),
+    
+    // Root categories only
+    rootCategories: () => `category:root`,
+    
+    // Category children
+    children: (id: string | number | bigint) => `category:children:${id.toString()}`,
+    
+    // All categories list with query parameters
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      isActive?: boolean;
+      isRoot?: boolean;
+      parentId?: string;
+      sortBy?: string;
+      sortOrder?: string;
+    }) => {
+      if (!params) return `category:list:all`;
+      
+      const parts = ["category:list"];
+      if (params.page !== undefined) parts.push(`p:${params.page}`);
+      if (params.limit !== undefined) parts.push(`l:${params.limit}`);
+      if (params.search) parts.push(`s:${params.search.toLowerCase().trim()}`);
+      if (params.isActive !== undefined) parts.push(`act:${params.isActive}`);
+      if (params.isRoot !== undefined) parts.push(`root:${params.isRoot}`);
+      if (params.parentId !== undefined) parts.push(`parent:${params.parentId}`);
+      if (params.sortBy) parts.push(`sort:${params.sortBy}:${params.sortOrder || "asc"}`);
+      
+      return parts.join(":");
+    },
+    
+    // Category product count
+    productCount: (id: string | number | bigint) => `category:products:count:${id.toString()}`,
+  },
+
+  /**
    * 📦 PRODUCT MODULE
    */
   product: {
-    // Single product detail
-    detail: (id: string | number) => `product:detail:${id}`,
-    
-    // Single product by slug
+    detail: (id: string | number | bigint) => `product:detail:${id.toString()}`,
     detailBySlug: (slug: string) => `product:slug:${slug}`,
-    
-    // Product list with pagination
     list: (params?: {
       page?: number;
       limit?: number;
@@ -31,109 +81,36 @@ export const CacheKeys = {
       sortOrder?: string;
     }) => {
       if (!params) return `product:list:all`;
-      
       const parts = ["product:list"];
       if (params.page) parts.push(`page:${params.page}`);
       if (params.limit) parts.push(`limit:${params.limit}`);
       if (params.categorySlug) parts.push(`cat:${params.categorySlug}`);
       if (params.search) parts.push(`search:${params.search}`);
       if (params.sortBy) parts.push(`sort:${params.sortBy}:${params.sortOrder || "asc"}`);
-      
       return parts.join(":");
     },
-    
-    // Products by category (including descendants)
     byCategory: (categorySlug: string) => `product:category:${categorySlug}`,
-    
-    // Product stock
-    stock: (productId: string | number, warehouseId: string | number, variantId?: string | number) => 
+    stock: (productId: string | number | bigint, warehouseId: string | number | bigint, variantId?: string | number | bigint) => 
       variantId 
         ? `product:stock:${productId}:variant:${variantId}:warehouse:${warehouseId}`
         : `product:stock:${productId}:warehouse:${warehouseId}`,
-    
-    // Product variants
-    variants: (productId: string | number) => `product:variants:${productId}`,
-    
-    // Single variant detail
-    variantDetail: (variantId: string | number) => `product:variant:${variantId}`,
-    
-    // Product specifications
-    specifications: (productId: string | number) => `product:specs:${productId}`,
-    
-    // Product media
-    media: (productId: string | number) => `product:media:${productId}`,
-    
-    // Variant media
-    variantMedia: (variantId: string | number) => `product:variant:media:${variantId}`,
-    
-    // Featured products
+    variants: (productId: string | number | bigint) => `product:variants:${productId}`,
+    variantDetail: (variantId: string | number | bigint) => `product:variant:${variantId}`,
+    specifications: (productId: string | number | bigint) => `product:specs:${productId}`,
+    media: (productId: string | number | bigint) => `product:media:${productId}`,
+    variantMedia: (variantId: string | number | bigint) => `product:variant:media:${variantId}`,
     featured: () => `product:featured`,
-    
-    // New arrivals
     newArrivals: (limit?: number) => `product:new:${limit || 10}`,
-    
-    // Best sellers
     bestSellers: (limit?: number) => `product:bestsellers:${limit || 10}`,
-    
-    // Related products
-    related: (productId: string | number) => `product:related:${productId}`,
-  },
-
-  /**
-   * 📁 CATEGORY MODULE
-   */
-  category: {
-    // Single category detail
-    detail: (id: string | number) => `category:detail:${id}`,
-    
-    // Category by slug
-    detailBySlug: (slug: string) => `category:slug:${slug}`,
-    
-    // Category with descendants
-    withDescendants: (slug: string) => `category:descendants:${slug}`,
-    
-    // Full category tree
-    tree: () => `category:tree`,
-    
-    // Root categories only
-    rootCategories: () => `category:root`,
-    
-    // Category children
-    children: (id: string | number) => `category:children:${id}`,
-    
-    // All categories list
-    list: (params?: {
-      page?: number;
-      limit?: number;
-      parentId?: string;
-      isActive?: boolean;
-    }) => {
-      if (!params) return `category:list:all`;
-      
-      const parts = ["category:list"];
-      if (params.page) parts.push(`page:${params.page}`);
-      if (params.limit) parts.push(`limit:${params.limit}`);
-      if (params.parentId) parts.push(`parent:${params.parentId}`);
-      if (params.isActive !== undefined) parts.push(`active:${params.isActive}`);
-      
-      return parts.join(":");
-    },
-    
-    // Category product count
-    productCount: (id: string | number) => `category:products:count:${id}`,
+    related: (productId: string | number | bigint) => `product:related:${productId}`,
   },
 
   /**
    * 🏠 HOME/UI MODULE
    */
   home: {
-    // Home sections
     sections: () => `home:sections`,
-    
-    // Banners
     banners: () => `home:banners`,
-    
-    // Featured collections
     featuredCollections: () => `home:collections:featured`,
   },
 
@@ -141,50 +118,29 @@ export const CacheKeys = {
    * 👤 USER MODULE
    */
   user: {
-    // User detail
-    detail: (id: string | number) => `user:detail:${id}`,
-    
-    // User by email
+    detail: (id: string | number | bigint) => `user:detail:${id}`,
     detailByEmail: (email: string) => `user:email:${email}`,
-    
-    // User permissions
-    permissions: (id: string | number) => `user:permissions:${id}`,
-    
-    // User addresses
-    addresses: (id: string | number) => `user:addresses:${id}`,
-    
-    // User cart
-    cart: (id: string | number) => `user:cart:${id}`,
-    
-    // User wishlist
-    wishlist: (id: string | number) => `user:wishlist:${id}`,
+    permissions: (id: string | number | bigint) => `user:permissions:${id}`,
+    addresses: (id: string | number | bigint) => `user:addresses:${id}`,
+    cart: (id: string | number | bigint) => `user:cart:${id}`,
+    wishlist: (id: string | number | bigint) => `user:wishlist:${id}`,
   },
 
   /**
    * 📦 ORDER MODULE
    */
   order: {
-    // Order detail
-    detail: (id: string | number) => `order:detail:${id}`,
-    
-    // Order by number
+    detail: (id: string | number | bigint) => `order:detail:${id}`,
     detailByNumber: (orderNumber: string) => `order:number:${orderNumber}`,
-    
-    // User orders
-    userOrders: (userId: string | number) => `order:user:${userId}`,
+    userOrders: (userId: string | number | bigint) => `order:user:${userId}`,
   },
 
   /**
    * 🏢 WAREHOUSE MODULE
    */
   warehouse: {
-    // Warehouse detail
-    detail: (id: string | number) => `warehouse:detail:${id}`,
-    
-    // All warehouses
+    detail: (id: string | number | bigint) => `warehouse:detail:${id}`,
     list: () => `warehouse:list`,
-    
-    // Active warehouses only
     active: () => `warehouse:active`,
   },
 
@@ -192,36 +148,35 @@ export const CacheKeys = {
    * 🎟️ COUPON MODULE
    */
   coupon: {
-    // Coupon detail
-    detail: (id: string | number) => `coupon:detail:${id}`,
-    
-    // Coupon by code
+    detail: (id: string | number | bigint) => `coupon:detail:${id}`,
     detailByCode: (code: string) => `coupon:code:${code}`,
-    
-    // Active coupons
     active: () => `coupon:active`,
-    
-    // User eligible coupons
-    userEligible: (userId: string | number) => `coupon:user:${userId}`,
+    userEligible: (userId: string | number | bigint) => `coupon:user:${userId}`,
   },
 
   /**
    * ⭐ REVIEW MODULE
    */
   review: {
-    // Product reviews
-    productReviews: (productId: string | number) => `review:product:${productId}`,
-    
-    // User reviews
-    userReviews: (userId: string | number) => `review:user:${userId}`,
+    productReviews: (productId: string | number | bigint) => `review:product:${productId}`,
+    userReviews: (userId: string | number | bigint) => `review:user:${userId}`,
   },
 };
 
 /**
- * 🎯 Cache Key Patterns for Bulk Operations
- * Use with cacheService.delByPattern()
+ * 🎯 Cache Key Patterns for Bulk Invalidation
+ * Use with cacheService.invalidatePattern()
  */
 export const CachePatterns = {
+  category: {
+    all: "category:*",
+    lists: "category:list:*",
+    trees: "category:tree*",
+    details: "category:detail:*",
+    slugs: "category:slug:*",
+    descendants: "category:descendants:*",
+  },
+  
   product: {
     all: "product:*",
     lists: "product:list:*",
@@ -230,14 +185,6 @@ export const CachePatterns = {
     slugs: "product:slug:*",
     stock: "product:stock:*",
     variants: "product:variant*",
-  },
-  
-  category: {
-    all: "category:*",
-    lists: "category:list:*",
-    trees: "category:tree*",
-    details: "category:detail:*",
-    slugs: "category:slug:*",
   },
   
   user: {
@@ -257,19 +204,22 @@ export const CachePatterns = {
 
 /**
  * 🕐 Cache TTL Configuration (in seconds)
+ * Production rule: 10 minutes (600 seconds) for Category module
  */
 export const CacheTTL = {
+  category: {
+    default: 600,       // 10 minutes
+    detail: 600,        // 10 minutes
+    tree: 600,          // 10 minutes
+    list: 600,          // 10 minutes
+    descendants: 600,   // 10 minutes
+  },
+
   product: {
     detail: 3600,        // 1 hour
     list: 1800,          // 30 minutes
-    stock: 300,          // 5 minutes (frequently updated)
+    stock: 300,          // 5 minutes
     featured: 7200,      // 2 hours
-  },
-  
-  category: {
-    detail: 7200,        // 2 hours (rarely changes)
-    tree: 7200,          // 2 hours
-    list: 3600,          // 1 hour
   },
   
   user: {
@@ -284,7 +234,7 @@ export const CacheTTL = {
   },
   
   short: 300,            // 5 minutes
-  medium: 1800,          // 30 minutes
-  long: 7200,            // 2 hours
+  medium: 600,           // 10 minutes
+  long: 3600,            // 1 hour
   veryLong: 86400,       // 24 hours
 };
