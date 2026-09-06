@@ -2,8 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { SlugUtil } from "@/shared/utils/index.js";
 import { ICategoryRepository } from "../../infrastructure/interface/Icategoryrepository.js";
 import { CacheService } from "@/cache/cache.service.js";
-import { CacheKeys, CacheTTL } from "@/cache/cache.keys.js";
-import { CacheModule } from "@/config/cache.module.js";
+import { CategoryCacheKeys, CategoryCacheTTL, CategoryCacheModule } from "../../category.cache.js";
 
 @injectable()
 export class CategoryService {
@@ -106,7 +105,7 @@ export class CategoryService {
     }
 
     // 5. Invalidate category cache
-    await CacheModule.category.onCategoryCreate();
+    await CategoryCacheModule.onCategoryCreate();
 
     return category;
   }
@@ -150,7 +149,7 @@ export class CategoryService {
     );
 
     // Invalidate hierarchy cache
-    await CacheModule.category.onHierarchyChange();
+    await CategoryCacheModule.onHierarchyChange();
 
     return placement;
   }
@@ -163,7 +162,7 @@ export class CategoryService {
     await this.categoryRepository.deletePlacement(placement.id);
 
     // Invalidate hierarchy cache
-    await CacheModule.category.onHierarchyChange();
+    await CategoryCacheModule.onHierarchyChange();
   }
 
   /**
@@ -176,7 +175,7 @@ export class CategoryService {
     const result = await this.categoryRepository.updatePlacement(placement.id, data);
 
     // Invalidate hierarchy cache
-    await CacheModule.category.onHierarchyChange();
+    await CategoryCacheModule.onHierarchyChange();
 
     return result;
   }
@@ -252,9 +251,9 @@ export class CategoryService {
     });
 
     // 4. Invalidate category cache (both old slug and new slug)
-    await CacheModule.category.onCategoryUpdate(id, category.slug);
+    await CategoryCacheModule.onCategoryUpdate(id, category.slug);
     if (updated.slug !== category.slug) {
-      await CacheModule.category.onCategoryUpdate(id, updated.slug);
+      await CategoryCacheModule.onCategoryUpdate(id, updated.slug);
     }
 
     return updated;
@@ -286,7 +285,7 @@ export class CategoryService {
     await this.categoryRepository.delete(categoryId);
 
     // Invalidate category cache
-    await CacheModule.category.onCategoryDelete(id, category.slug);
+    await CategoryCacheModule.onCategoryDelete(id, category.slug);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -295,13 +294,13 @@ export class CategoryService {
 
   async getCategory(id: string) {
     return this.cacheService.getOrSetWithMeta(
-      CacheKeys.category.detail(id),
+      CategoryCacheKeys.detail(id),
       async () => {
         const category = await this.categoryRepository.findById(BigInt(id));
         if (!category) throw new Error("Category not found");
         return category;
       },
-      CacheTTL.category.detail
+      CategoryCacheTTL.detail
     );
   }
 
@@ -312,13 +311,13 @@ export class CategoryService {
 
   async getCategoryBySlug(slug: string) {
     return this.cacheService.getOrSetWithMeta(
-      CacheKeys.category.detailBySlug(slug),
+      CategoryCacheKeys.detailBySlug(slug),
       async () => {
         const category = await this.categoryRepository.findBySlug(slug);
         if (!category) throw new Error("Category not found");
         return category;
       },
-      CacheTTL.category.detail
+      CategoryCacheTTL.detail
     );
   }
 
@@ -327,25 +326,25 @@ export class CategoryService {
    */
   async getCategoryWithDescendants(slug: string) {
     return this.cacheService.getOrSet(
-      CacheKeys.category.withDescendants(slug),
+      CategoryCacheKeys.withDescendants(slug),
       async () => {
         const result = await this.categoryRepository.getCategoryWithDescendants(slug);
         if (!result) throw new Error("Category not found");
         return result;
       },
-      CacheTTL.category.descendants
+      CategoryCacheTTL.descendants
     );
   }
 
   async getCategoryWithDescendantsAdmin(slug: string) {
     return this.cacheService.getOrSet(
-      CacheKeys.category.withDescendantsAdmin(slug),
+      CategoryCacheKeys.withDescendantsAdmin(slug),
       async () => {
         const result = await this.categoryRepository.getCategoryWithDescendantsAdmin(slug);
         if (!result) throw new Error("Category not found");
         return result;
       },
-      CacheTTL.category.descendants
+      CategoryCacheTTL.descendants
     );
   }
 
@@ -359,7 +358,7 @@ export class CategoryService {
     sortBy?: string;
     sortOrder?: "asc" | "desc";
   }) {
-    const cacheKey = CacheKeys.category.list(params);
+    const cacheKey = CategoryCacheKeys.list(params);
 
     return this.cacheService.getOrSetWithMeta(
       cacheKey,
@@ -395,7 +394,7 @@ export class CategoryService {
           },
         };
       },
-      CacheTTL.category.list
+      CategoryCacheTTL.list
     );
   }
 
@@ -414,7 +413,7 @@ export class CategoryService {
   }
 
   async getCategoryTree(id?: string) {
-    const cacheKey = CacheKeys.category.tree(id);
+    const cacheKey = CategoryCacheKeys.tree(id);
 
     return this.cacheService.getOrSetWithMeta(
       cacheKey,
@@ -438,7 +437,7 @@ export class CategoryService {
 
         return roots.map((root) => this.pruneHiddenSubtrees(root));
       },
-      CacheTTL.category.tree
+      CategoryCacheTTL.tree
     );
   }
 

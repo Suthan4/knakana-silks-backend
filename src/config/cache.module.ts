@@ -1,5 +1,6 @@
 import { cacheService } from "@/cache/cache.service.js";
 import { CacheKeys, CachePatterns } from "@/cache/cache.keys.js";
+import { CategoryCacheModule } from "@/modules/category/category.cache.js";
 
 /**
  * 🧩 Module-Level Cache Management
@@ -136,99 +137,10 @@ export const CacheModule = {
   },
 
   /**
-   * 📁 CATEGORY MODULE CACHE OPERATIONS
+   * 📁 CATEGORY MODULE CACHE OPERATIONS (Decentralized)
+   * Implemented in src/modules/category/category.cache.ts
    */
-  category: {
-    /**
-     * Clear all category-related cache
-     */
-    async clearAll(): Promise<void> {
-      console.log("🧹 Clearing ALL category cache...");
-      await cacheService.invalidatePattern(CachePatterns.category.all);
-    },
-
-    /**
-     * Clear single category cache
-     */
-    async clearCategory(id: string | number | bigint, slug?: string): Promise<void> {
-      console.log(`🧹 Clearing category cache for ID: ${id}`);
-      const keys = [CacheKeys.category.detail(id)];
-      
-      if (slug) {
-        keys.push(
-          CacheKeys.category.detailBySlug(slug),
-          CacheKeys.category.withDescendants(slug),
-          CacheKeys.category.withDescendantsAdmin(slug)
-        );
-      }
-      
-      await cacheService.delMultiple(keys);
-    },
-
-    /**
-     * Clear category tree cache
-     */
-    async clearTree(): Promise<void> {
-      console.log("🧹 Clearing category tree cache...");
-      await cacheService.invalidatePattern(CachePatterns.category.trees);
-      await cacheService.del(CacheKeys.category.rootCategories());
-    },
-
-    /**
-     * Clear category lists
-     */
-    async clearLists(): Promise<void> {
-      console.log("🧹 Clearing category lists...");
-      await cacheService.invalidatePattern(CachePatterns.category.lists);
-    },
-
-    /**
-     * Complete category update cache strategy
-     */
-    async onCategoryUpdate(id: string | number | bigint, slug?: string): Promise<void> {
-      console.log(`🧹 Category update cache clear for ID: ${id}`);
-      await this.clearCategory(id, slug);
-      await this.clearTree();
-      await this.clearLists();
-      await cacheService.invalidatePattern(CachePatterns.category.descendants);
-      if (slug) {
-        await CacheModule.product.clearByCategory(slug);
-      }
-    },
-
-    /**
-     * Category creation cache strategy
-     */
-    async onCategoryCreate(): Promise<void> {
-      console.log(`🧹 Category creation cache clear`);
-      await this.clearTree();
-      await this.clearLists();
-      await CacheModule.product.clearLists();
-    },
-
-    /**
-     * Category deletion cache strategy
-     */
-    async onCategoryDelete(id: string | number | bigint, slug?: string): Promise<void> {
-      console.log(`🧹 Category deletion cache clear for ID: ${id}`);
-      await this.clearCategory(id, slug);
-      await this.clearTree();
-      await this.clearLists();
-      await cacheService.invalidatePattern(CachePatterns.category.descendants);
-      if (slug) {
-        await CacheModule.product.clearByCategory(slug);
-      }
-    },
-
-    /**
-     * Category hierarchy / placement change strategy
-     */
-    async onHierarchyChange(): Promise<void> {
-      console.log(`🧹 Category hierarchy change - clearing all category cache`);
-      await this.clearAll();
-      await CacheModule.product.clearLists();
-    },
-  },
+  category: CategoryCacheModule,
 
   /**
    * 🏠 HOME MODULE CACHE OPERATIONS
@@ -291,6 +203,19 @@ export const CacheModule = {
     },
   },
 };
+
+/**
+ * 🔗 Decoupled Cross-Module Cache Coordination
+ * Bridges category invalidation events to product cache invalidations
+ * without Category knowing anything about Product.
+ */
+CategoryCacheModule.onInvalidate(async (event) => {
+  if (event.slug) {
+    await CacheModule.product.clearByCategory(event.slug);
+  } else {
+    await CacheModule.product.clearLists();
+  }
+});
 
 /**
  * 🎯 Cache Warmer
