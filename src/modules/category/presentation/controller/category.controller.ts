@@ -130,7 +130,8 @@ export class CategoryController {
         return;
       }
 
-      const category = await this.categoryService.getCategory(id);
+      const { data: category, source } = await this.categoryService.getCategory(id);
+      res.setHeader("X-Cache", source);
       res.json({ success: true, data: category });
     } catch (error: any) {
       res.status(404).json({ success: false, message: error.message });
@@ -145,7 +146,8 @@ export class CategoryController {
         return;
       }
 
-      const category = await this.categoryService.getCategoryBySlug(slug);
+      const { data: category, source } = await this.categoryService.getCategoryBySlug(slug);
+      res.setHeader("X-Cache", source);
       res.json({ success: true, data: category });
     } catch (error: any) {
       res.status(404).json({ success: false, message: error.message });
@@ -170,7 +172,8 @@ export class CategoryController {
         sortOrder: req.query.sortOrder as any,
       });
 
-      const result = await this.categoryService.getCategories(params);
+      const { data: result, source } = await this.categoryService.getCategories(params);
+      res.setHeader("X-Cache", source);
       res.json({ success: true, data: result });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
@@ -180,11 +183,12 @@ export class CategoryController {
   async getCategoryTree(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const tree   =
+      const { data: tree, source } =
         id && !Array.isArray(id)
           ? await this.categoryService.getCategoryTree(id)
           : await this.categoryService.getCategoryTree();
 
+      res.setHeader("X-Cache", source);
       res.json({ success: true, data: tree });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
@@ -193,7 +197,8 @@ export class CategoryController {
 
   async getRootCategories(req: Request, res: Response) {
     try {
-      const tree = await this.categoryService.getCategoryTree();
+      const { data: tree, source } = await this.categoryService.getCategoryTree();
+      res.setHeader("X-Cache", source);
       res.json({ success: true, data: tree });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
