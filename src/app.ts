@@ -55,7 +55,7 @@ app.use(helmet({
 
 const corsOptions = {
   origin: [
-    "http://localhost:3001",
+    "http://localhost:5174",  
     "http://localhost:5173",
     "https://admin.kankanasilks.com",
     "https://www.kankanasilks.com",
