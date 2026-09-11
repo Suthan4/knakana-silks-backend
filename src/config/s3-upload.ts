@@ -183,6 +183,8 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
 } from "@aws-sdk/client-s3";
 
 export class S3UploadService {
@@ -190,14 +192,46 @@ export class S3UploadService {
   private bucket: string;
 
   constructor() {
-    this.s3Client = new S3Client({
-      region: process.env.AWS_REGION!,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-      },
-    });
+   const isProd = process.env.NODE_ENV === "production";
+
+    this.s3Client = new S3Client(
+      isProd
+        ? {
+            // Production: Real AWS S3 Configuration
+            region: process.env.AWS_REGION!,
+            credentials: {
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+            },
+          }
+        : {
+            // Development / LocalStack Fallback
+            region: process.env.AWS_REGION || "us-east-1",
+            endpoint: process.env.AWS_S3_ENDPOINT || "http://localhost:4566",
+            forcePathStyle: true,
+            credentials: {
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID || "test",
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "test",
+            },
+          }
+    );
     this.bucket = process.env.AWS_S3_BUCKET!;
+    if (!isProd) {
+      this.ensureBucketExists();
+    }
+  }
+
+  private async ensureBucketExists(): Promise<void> {
+    try {
+      await this.s3Client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch {
+      try {
+        await this.s3Client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+        console.log(`🪣 Created missing local S3 bucket: ${this.bucket}`);
+      } catch (err) {
+        console.error("Failed to auto-create local S3 bucket:", err);
+      }
+    }
   }
 
   /**
@@ -232,7 +266,11 @@ export class S3UploadService {
         })
       );
 
-      const url = `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+      // URL Generation: Production first, Dev/LocalStack in else
+      const isProd = process.env.NODE_ENV === "production";
+      const url = isProd
+        ? `https://d2eb3zuw9j68gk.cloudfront.net/${key}`
+        : `${process.env.AWS_S3_ENDPOINT || "http://localhost:4566"}/${this.bucket}/${key}`;
       console.log(`✅ Uploaded: ${url}`);
       return { url, key };
     } catch (error) {
