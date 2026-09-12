@@ -6,6 +6,7 @@ export const CreateBannerDTOSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
   type: z.nativeEnum(MediaType).default(MediaType.IMAGE), // NEW
   url: z.string().url("Invalid media URL"), // UPDATED: Changed from 'image' to 'url'
+  mobileUrl: z.string().url("Invalid mobile media URL").optional().nullable(), // NEW: Mobile view image
   key: z.string().optional(), // NEW: R2 object key
   thumbnailUrl: z.string().url().optional(), // NEW: For video banners
   link: z.string().url().optional(),
@@ -26,6 +27,7 @@ export const UpdateBannerDTOSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   type: z.nativeEnum(MediaType).optional(), // NEW
   url: z.string().url().optional(), // UPDATED: Changed from 'image'
+  mobileUrl: z.string().url("Invalid mobile media URL").optional().nullable(), // NEW: Mobile view image
   key: z.string().optional(), // NEW
   thumbnailUrl: z.string().url().optional().nullable(), // NEW
   link: z.string().url().optional().nullable(),
