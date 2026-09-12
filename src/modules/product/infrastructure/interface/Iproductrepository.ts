@@ -42,49 +42,56 @@ export interface PaginatedProductParams {
 }
 
 export interface IProductRepository {
-  create(data: {
-    name: string;
-    slug: string;
-    description: string;
-    categoryId: bigint;
-    basePrice: number;
-    sellingPrice: number;
-    sku?: string;
-    isActive: boolean;
-    hasVariants: boolean;
-    hsnCode?: string;
-    artisanName?: string;
-    artisanAbout?: string;
-    artisanLocation?: string;
-    weight?: number;
-    length?: number;
-    breadth?: number;
-    height?: number;
-    volumetricWeight?: number;
-    metaTitle?: string;
-    metaDesc?: string;
-    schemaMarkup?: string;
-  }): Promise<Product>;
+  create(
+    data: {
+      name: string;
+      slug: string;
+      description: string;
+      categoryId: bigint;
+      basePrice: number;
+      sellingPrice: number;
+      sku?: string;
+      isActive: boolean;
+      hasVariants: boolean;
+      hsnCode?: string;
+      artisanName?: string;
+      artisanAbout?: string;
+      artisanLocation?: string;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+      metaTitle?: string;
+      metaDesc?: string;
+      schemaMarkup?: string;
+      allowOutOfStockOrders?: boolean;
+      hasVideoConsultation?: boolean;
+      videoPurchasingEnabled?: boolean;
+      videoConsultationNote?: string;
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<Product>;
 
-  update(id: bigint, data: any): Promise<Product>;
-  delete(id: bigint): Promise<void>;
+  update(id: bigint, data: any, tx?: Prisma.TransactionClient): Promise<Product>;
+  delete(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
 
-  findById(id: bigint): Promise<ProductWithRelations | null>;
-  findBySlug(slug: string): Promise<Product | null>;
-  findBySku(sku: string): Promise<Product | null>;
+  findById(id: bigint, tx?: Prisma.TransactionClient): Promise<ProductWithRelations | null>;
+  findBySlug(slug: string, tx?: Prisma.TransactionClient): Promise<Product | null>;
+  findBySku(sku: string, tx?: Prisma.TransactionClient): Promise<Product | null>;
 
   // User-facing: respects isActive on products + media
-  findAll(params: PaginatedProductParams): Promise<Product[]>;
-  count(where: any): Promise<number>;
+  findAll(params: PaginatedProductParams, tx?: Prisma.TransactionClient): Promise<Product[]>;
+  count(where: any, tx?: Prisma.TransactionClient): Promise<number>;
 
   // 🆕 Admin: fetches all products regardless of isActive
-  findAllAdmin(params: PaginatedProductParams): Promise<AdminProductWithRelations[]>;
-  countAdmin(where?: Prisma.ProductWhereInput): Promise<number>;
+  findAllAdmin(params: PaginatedProductParams, tx?: Prisma.TransactionClient): Promise<AdminProductWithRelations[]>;
+  countAdmin(where?: Prisma.ProductWhereInput, tx?: Prisma.TransactionClient): Promise<number>;
 
   // Specifications
-  addSpecification(productId: bigint, key: string, value: string): Promise<any>;
-  updateSpecification(id: bigint, value: string): Promise<any>;
-  deleteSpecification(id: bigint): Promise<void>;
+  addSpecification(productId: bigint, key: string, value: string, tx?: Prisma.TransactionClient): Promise<any>;
+  updateSpecification(id: bigint, value: string, tx?: Prisma.TransactionClient): Promise<any>;
+  deleteSpecification(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
 
   // Media
   addMedia(
@@ -104,28 +111,32 @@ export interface IProductRepository {
       height?: number;
       order?: number;
       isActive?: boolean;
-    }
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<any>;
-  updateMedia(id: bigint, data: any): Promise<any>;
-  deleteMedia(id: bigint): Promise<void>;
+  updateMedia(id: bigint, data: any, tx?: Prisma.TransactionClient): Promise<any>;
+  deleteMedia(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
 
   // Variants
-  addVariant(data: {
-    productId: bigint;
-    attributes?: Record<string, any>;
-    size?: string;
-    color?: string;
-    fabric?: string;
-    basePrice?: number;
-    sellingPrice?: number;
-    price: number;
-    weight?: number;
-    length?: number;
-    breadth?: number;
-    height?: number;
-    volumetricWeight?: number;
-    sku: string;
-  }): Promise<ProductVariant>;
+  addVariant(
+    data: {
+      productId: bigint;
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
+      price: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+      sku: string;
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<ProductVariant>;
 
   updateVariant(
     id: bigint,
@@ -142,11 +153,13 @@ export interface IProductRepository {
       breadth?: number;
       height?: number;
       volumetricWeight?: number;
-    }
+      sku?: string;
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<ProductVariant>;
 
-  deleteVariant(id: bigint): Promise<void>;
-  findVariantById(id: bigint): Promise<ProductVariant | null>;
+  deleteVariant(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
+  findVariantById(id: bigint, tx?: Prisma.TransactionClient): Promise<ProductVariant | null>;
 
   // Variant Media
   addVariantMedia(
@@ -166,16 +179,18 @@ export interface IProductRepository {
       height?: number;
       order?: number;
       isActive?: boolean;
-    }
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<any>;
-  updateVariantMedia(id: bigint, data: any): Promise<any>;
-  deleteVariantMedia(id: bigint): Promise<void>;
+  updateVariantMedia(id: bigint, data: any, tx?: Prisma.TransactionClient): Promise<any>;
+  deleteVariantMedia(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
 
   // Stock
   getStock(
     productId: bigint,
     warehouseId: bigint,
-    variantId: bigint | null
+    variantId: bigint | null,
+    tx?: Prisma.TransactionClient
   ): Promise<any>;
   updateStock(
     productId: bigint,
@@ -183,6 +198,8 @@ export interface IProductRepository {
     warehouseId: bigint,
     quantity: number,
     lowStockThreshold: number,
-    reason: string
+    reason: string,
+    tx?: Prisma.TransactionClient
   ): Promise<any>;
+  getAllDescendantIdsAdmin(categoryId: bigint): Promise<bigint[]>;
 }
