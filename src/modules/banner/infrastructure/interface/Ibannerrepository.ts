@@ -14,6 +14,7 @@ export interface IBannerRepository {
     title: string;
     type: MediaType; // NEW
     url: string; // UPDATED: Changed from 'image'
+    mobileUrl?: string | null; // NEW: Mobile view image
     key?: string; // NEW
     thumbnailUrl?: string; // NEW
     link?: string;
