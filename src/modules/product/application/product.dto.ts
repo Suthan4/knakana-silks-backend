@@ -51,9 +51,11 @@ const VariantMediaSchema = z.object({
 });
 
 // 🆕 ENHANCED: Variant schema with media, pricing, dimensions, and dynamic attributes
-const VariantSchema = z.object({
+export const VariantSchema = z.object({
+  id: z.union([z.string(), z.number()]).optional(), // For targeted updates
+
   // Dynamic attributes (flexible key-value pairs)
-  attributes: z.record(z.string(),z.string()).optional(),
+  attributes: z.record(z.string(), z.any()).optional(),
 
   // Legacy fields (backward compatibility)
   size: z.string().optional(),
@@ -66,13 +68,16 @@ const VariantSchema = z.object({
     .number()
     .positive("Selling price must be positive")
     .optional(),
-  price: z.number().positive("Variant price must be positive"), // Legacy field
+  price: z.number().positive("Variant price must be positive").optional(), // Legacy field (optional fallback)
 
   // Shipping dimensions (optional - falls back to product dimensions)
   weight: z.number().positive().max(50).optional(),
   length: z.number().positive().max(200).optional(),
   breadth: z.number().positive().max(200).optional(),
   height: z.number().positive().max(200).optional(),
+
+  sku: z.string().optional(),
+  isActive: z.boolean().optional(),
 
   // Variant-specific media
   media: z.array(VariantMediaSchema).optional(),
@@ -82,76 +87,50 @@ const VariantSchema = z.object({
 });
 
 // Create Product DTO
-export const CreateProductDTOSchema = z
-  .object({
-    name: z.string().min(1, "Product name is required"),
-    description: z.string().min(1, "Product description is required"),
-    categoryId: z.string().min(1, "Category ID is required"),
-    basePrice: z.number().positive("Base price must be positive"),
-    sellingPrice: z.number().positive("Selling price must be positive"),
-    sku: z.string().optional(), // 🆕 Optional - will auto-generate if not provided
-    isActive: z.boolean().optional().default(true),
-    hsnCode: z.string().optional(),
-    artisanName: z.string().optional(),
-    artisanAbout: z.string().optional(),
-    artisanLocation: z.string().optional(),
-    allowOutOfStockOrders: z.boolean().optional().default(false),
-    hasVideoConsultation: z.boolean().optional().default(false),
-    videoPurchasingEnabled: z.boolean().optional().default(false),
-    videoConsultationNote: z.string().optional(),
+export const CreateProductDTOSchema = z.object({
+  name: z.string().min(1, "Product name is required"),
+  description: z.string().min(1, "Product description is required"),
+  categoryId: z.string().min(1, "Category ID is required"),
+  basePrice: z.number().positive("Base price must be positive"),
+  sellingPrice: z.number().positive("Selling price must be positive"),
+  sku: z.string().optional(), // 🆕 Optional - will auto-generate if not provided
+  isActive: z.boolean().optional().default(true),
+  hasVariants: z.boolean().optional(),
+  hsnCode: z.string().optional(),
+  artisanName: z.string().optional(),
+  artisanAbout: z.string().optional(),
+  artisanLocation: z.string().optional(),
+  allowOutOfStockOrders: z.boolean().optional().default(false),
+  hasVideoConsultation: z.boolean().optional().default(false),
+  videoPurchasingEnabled: z.boolean().optional().default(false),
+  videoConsultationNote: z.string().optional(),
 
-    // 🆕 Shipping Dimensions (Required for Shiprocket)
-    weight: z
-      .number()
-      .positive("Weight must be positive")
-      .max(50, "Weight cannot exceed 50kg"),
-    length: z
-      .number()
-      .positive("Length must be positive")
-      .max(200, "Length cannot exceed 200cm"),
-    breadth: z
-      .number()
-      .positive("Breadth must be positive")
-      .max(200, "Breadth cannot exceed 200cm"),
-    height: z
-      .number()
-      .positive("Height must be positive")
-      .max(200, "Height cannot exceed 200cm"),
+  // 🆕 Shipping Dimensions (Required for Shiprocket)
+  weight: z
+    .number()
+    .positive("Weight must be positive")
+    .max(50, "Weight cannot exceed 50kg"),
+  length: z
+    .number()
+    .positive("Length must be positive")
+    .max(200, "Length cannot exceed 200cm"),
+  breadth: z
+    .number()
+    .positive("Breadth must be positive")
+    .max(200, "Breadth cannot exceed 200cm"),
+  height: z
+    .number()
+    .positive("Height must be positive")
+    .max(200, "Height cannot exceed 200cm"),
 
-    metaTitle: z.string().optional(),
-    metaDesc: z.string().optional(),
-    schemaMarkup: z.string().optional(),
-    specifications: z.array(SpecificationSchema).optional(),
-    media: z.array(MediaSchema).optional(), // UPDATED: Changed from images to media
-    variants: z.array(VariantSchema).optional(),
-    stock: StockSchema.optional(), // For simple products
-  })
-  .refine(
-    (data) => {
-      // Either variants OR stock must be provided, but not both
-      const hasVariants = data.variants && data.variants.length > 0;
-      const hasStock = !!data.stock;
-
-      if (hasVariants && hasStock) {
-        return false; // Cannot have both
-      }
-
-      if (!hasVariants && !hasStock) {
-        return false; // Must have one
-      }
-
-      // If has variants, each variant should have stock
-      if (hasVariants) {
-        return data.variants!.every((v) => v.stock !== undefined);
-      }
-
-      return true;
-    },
-    {
-      message:
-        "Product must have either stock (simple product) or variants with stock (variable product), but not both",
-    }
-  );
+  metaTitle: z.string().optional(),
+  metaDesc: z.string().optional(),
+  schemaMarkup: z.string().optional(),
+  specifications: z.array(SpecificationSchema).optional(),
+  media: z.array(MediaSchema).optional(), // UPDATED: Changed from images to media
+  variants: z.array(VariantSchema).optional(),
+  stock: StockSchema.optional(), // For simple products
+});
 
 export type CreateProductDTO = z.infer<typeof CreateProductDTOSchema>;
 
@@ -164,14 +143,15 @@ export const UpdateProductDTOSchema = z.object({
   sellingPrice: z.number().positive().optional(),
   sku: z.string().optional(), // 🆕 Allow SKU updates
   isActive: z.boolean().optional(),
+  hasVariants: z.boolean().optional(),
   hsnCode: z.string().optional(),
   artisanName: z.string().optional(),
   artisanAbout: z.string().optional(),
   artisanLocation: z.string().optional(),
-allowOutOfStockOrders: z.boolean().optional().default(false),
-hasVideoConsultation: z.boolean().optional().default(false),
-videoPurchasingEnabled: z.boolean().optional().default(false),
-videoConsultationNote: z.string().optional(),
+  allowOutOfStockOrders: z.boolean().optional(),
+  hasVideoConsultation: z.boolean().optional(),
+  videoPurchasingEnabled: z.boolean().optional(),
+  videoConsultationNote: z.string().optional(),
 
   // 🆕 Shipping Dimensions (Optional in update)
   weight: z.number().positive().max(50).optional(),
@@ -179,7 +159,6 @@ videoConsultationNote: z.string().optional(),
   breadth: z.number().positive().max(200).optional(),
   height: z.number().positive().max(200).optional(),
 
-   // ✅ ADD THESE
   stock: StockSchema.optional(),
   variants: z.array(VariantSchema).optional(),
 
@@ -191,6 +170,15 @@ videoConsultationNote: z.string().optional(),
 });
 
 export type UpdateProductDTO = z.infer<typeof UpdateProductDTOSchema>;
+
+// Patch Product DTO
+export const PatchProductDTOSchema = UpdateProductDTOSchema.partial().extend({
+  variants: z.array(VariantSchema.partial()).optional(),
+  stock: StockSchema.partial().optional(),
+  specifications: z.array(SpecificationSchema.partial()).optional(),
+  media: z.array(MediaSchema.partial()).optional(),
+});
+export type PatchProductDTO = z.infer<typeof PatchProductDTOSchema>;
 
 // Query Product DTO
 // Enhanced Product Query DTO with URL params support

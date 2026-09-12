@@ -1,9 +1,10 @@
-version: '3.8'
-
-
+version: "3.8"
 
 services:
 
+  # =========================
+  # Redis
+  # =========================
   redis:
 
     image: redis:7-alpine
@@ -13,64 +14,83 @@ services:
     restart: unless-stopped
 
     ports:
-
       - "${REDIS_PORT:-6379}:6379"
 
     environment:
-
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
 
     volumes:
-
       - redis_data:/data
 
-    # If REDIS_PASSWORD is provided in .env, requirepass is applied; otherwise runs without password
-
     command: >
-
       sh -c '
-
         if [ -n "$$REDIS_PASSWORD" ]; then
-
           redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
-
         else
-
           redis-server --appendonly yes
-
         fi
-
       '
 
     healthcheck:
-
       test: >
-
         sh -c '
-
           if [ -n "$$REDIS_PASSWORD" ]; then
-
             redis-cli -a "$$REDIS_PASSWORD" ping
-
           else
-
             redis-cli ping
-
           fi
-
         '
 
       interval: 10s
-
       timeout: 5s
-
       retries: 5
 
 
+  # =========================
+  # LocalStack
+  # =========================
+  localstack:
 
+    image: localstack/localstack-pro:latest
+
+    container_name: kangana-silks-localstack
+
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:4566:4566"
+      - "127.0.0.1:4510-4559:4510-4559"
+
+    environment:
+      - SERVICES=s3
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - PERSISTENCE=1
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
+
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:4566/_localstack/health
+
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+# =========================
+# Volumes
+# =========================
 volumes:
 
   redis_data:
+    driver: local
 
-    driver: local 
-
+  localstack_data:
+    driver: local

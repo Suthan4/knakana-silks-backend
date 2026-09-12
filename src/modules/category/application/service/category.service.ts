@@ -336,11 +336,35 @@ export class CategoryService {
     );
   }
 
+  async getCategoryWithDescendantsById(id: string) {
+    return this.cacheService.getOrSet(
+      CategoryCacheKeys.withDescendantsById(id),
+      async () => {
+        const result = await this.categoryRepository.getCategoryWithDescendantsById(BigInt(id));
+        if (!result) throw new Error("Category not found");
+        return result;
+      },
+      CategoryCacheTTL.descendants
+    );
+  }
+
   async getCategoryWithDescendantsAdmin(slug: string) {
     return this.cacheService.getOrSet(
       CategoryCacheKeys.withDescendantsAdmin(slug),
       async () => {
         const result = await this.categoryRepository.getCategoryWithDescendantsAdmin(slug);
+        if (!result) throw new Error("Category not found");
+        return result;
+      },
+      CategoryCacheTTL.descendants
+    );
+  }
+
+  async getCategoryWithDescendantsByIdAdmin(id: string) {
+    return this.cacheService.getOrSet(
+      CategoryCacheKeys.withDescendantsByIdAdmin(id),
+      async () => {
+        const result = await this.categoryRepository.getCategoryWithDescendantsByIdAdmin(BigInt(id));
         if (!result) throw new Error("Category not found");
         return result;
       },
