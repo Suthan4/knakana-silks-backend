@@ -86,7 +86,7 @@ export class S3UploadService {
       );
 
       // URL Generation: Production first, Dev/LocalStack in else
-      const isProd = process.env.NODE_ENV === "production";
+      const isProd = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "qa";
       const url = isProd
         ? `https://d2eb3zuw9j68gk.cloudfront.net/${key}`
         : `${process.env.AWS_S3_ENDPOINT || "http://localhost:4566"}/${this.bucket}/${key}`;
