@@ -14,6 +14,7 @@ export class BannerService {
     title: string;
     type?: MediaType; // NEW
     url: string; // UPDATED: Changed from 'image'
+    mobileUrl?: string | null; // NEW: Mobile view image
     key?: string; // NEW
     thumbnailUrl?: string; // NEW
     link?: string;
@@ -30,6 +31,7 @@ export class BannerService {
       title: data.title,
       type: data.type ?? MediaType.IMAGE,
       url: data.url,
+      mobileUrl: data.mobileUrl,
       key: data.key,
       thumbnailUrl: data.thumbnailUrl,
       link: data.link,
@@ -52,6 +54,7 @@ export class BannerService {
       title?: string;
       type?: MediaType; // NEW
       url?: string; // UPDATED
+      mobileUrl?: string | null; // NEW: Mobile view image
       key?: string; // NEW
       thumbnailUrl?: string | null; // NEW
       link?: string | null;

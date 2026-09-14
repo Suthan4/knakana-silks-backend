@@ -14,78 +14,107 @@ import { MediaType } from "@/generated/prisma/enums.js";
 import { AdminProductWithRelations, IProductRepository, PaginatedProductParams, ProductWithRelations } from "../interface/Iproductrepository.js";
 import { QueryProductDTO } from "../../application/product.dto.js";
 
+const standardProductInclude = {
+  category: true,
+  specifications: true,
+  variants: {
+    include: {
+      media: { where: { isActive: true }, orderBy: { order: "asc" as const } },
+      stock: true,
+    },
+  },
+  media: { where: { isActive: true }, orderBy: { order: "asc" as const } },
+  stock: true,
+} as const;
+
+const adminProductInclude = {
+  category: true,
+  specifications: true,
+  variants: {
+    include: {
+      media: { orderBy: { order: "asc" as const } },
+      stock: true,
+    },
+  },
+  media: { orderBy: { order: "asc" as const } },
+  stock: true,
+} as const;
+
 @injectable()
 export class ProductRepository implements IProductRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
-  findAllAdmin(params: PaginatedProductParams): Promise<AdminProductWithRelations[]> {
-    throw new Error("Method not implemented.");
-  }
-  countAdmin(where?: Prisma.ProductWhereInput): Promise<number> {
-    throw new Error("Method not implemented.");
+
+  private getClient(tx?: Prisma.TransactionClient) {
+    return tx || this.prisma;
   }
 
-  async findById(id: bigint): Promise<ProductWithRelations | null> {
-    return this.prisma.product.findUnique({
+  async findAllAdmin(
+    params: PaginatedProductParams,
+    tx?: Prisma.TransactionClient
+  ): Promise<AdminProductWithRelations[]> {
+    const client = this.getClient(tx);
+    return client.product.findMany({
+      where: params.where,
+      skip: params.skip,
+      take: params.take,
+      orderBy: params.orderBy,
+      include: adminProductInclude,
+    });
+  }
+
+  async countAdmin(
+    where?: Prisma.ProductWhereInput,
+    tx?: Prisma.TransactionClient
+  ): Promise<number> {
+    const client = this.getClient(tx);
+    return client.product.count({ where });
+  }
+
+  async findById(
+    id: bigint,
+    tx?: Prisma.TransactionClient
+  ): Promise<ProductWithRelations | null> {
+    const client = this.getClient(tx);
+    return client.product.findUnique({
       where: { id },
-      include: {
-        category: true,
-        specifications: true,
-        variants: {
-          include: {
-            media: { where: { isActive: true }, orderBy: { order: "asc" } },
-            stock: true,
-          },
-        },
-        media: { where: { isActive: true }, orderBy: { order: "asc" } },
-        stock: true,
-      },
+      include: standardProductInclude,
     });
   }
 
-  async findBySlug(slug: string): Promise<Product | null> {
-    return this.prisma.product.findUnique({
+  async findBySlug(
+    slug: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<Product | null> {
+    const client = this.getClient(tx);
+    return client.product.findUnique({
       where: { slug },
-      include: {
-        category: true,
-        specifications: true,
-        variants: {
-          include: {
-            media: { where: { isActive: true }, orderBy: { order: "asc" } },
-            stock: true,
-          },
-        },
-        media: { where: { isActive: true }, orderBy: { order: "asc" } },
-        stock: true,
-      },
+      include: standardProductInclude,
     });
   }
 
-  async findBySku(sku: string): Promise<Product | null> {
-    return this.prisma.product.findUnique({
+  async findBySku(
+    sku: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<Product | null> {
+    const client = this.getClient(tx);
+    return client.product.findUnique({
       where: { sku },
-      include: {
-        category: true,
-        specifications: true,
-        variants: {
-          include: {
-            media: { where: { isActive: true }, orderBy: { order: "asc" } },
-            stock: true,
-          },
-        },
-        media: { where: { isActive: true }, orderBy: { order: "asc" } },
-        stock: true,
-      },
+      include: standardProductInclude,
     });
   }
 
-  async findAll(params: {
-    skip: number;
-    take: number;
-    where?: any;
-    orderBy?: any;
-    include?: any;
-  }): Promise<Product[]> {
-    return this.prisma.product.findMany({
+  async findAll(
+    params: {
+      skip: number;
+      take: number;
+      where?: any;
+      orderBy?: any;
+      include?: any;
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<Product[]> {
+    const client = this.getClient(tx);
+    return client.product.findMany({
       skip: params.skip,
       take: params.take,
       where: params.where,
@@ -98,16 +127,16 @@ export class ProductRepository implements IProductRepository {
           take: 1,
         },
         stock: true,
-      variants: {                          // 👈 ADD THIS
-        include: {
-          media: {
-            where: { isActive: true },
-            orderBy: { order: "asc" },
-            take: 1,
+        variants: {
+          include: {
+            media: {
+              where: { isActive: true },
+              orderBy: { order: "asc" },
+              take: 1,
+            },
+            stock: true,
           },
-          stock: true,
         },
-      },
         _count: {
           select: { reviews: true, variants: true },
         },
@@ -115,134 +144,123 @@ export class ProductRepository implements IProductRepository {
     });
   }
 
-  async count(where?: any): Promise<number> {
-    return this.prisma.product.count({ where });
+  async count(where?: any, tx?: Prisma.TransactionClient): Promise<number> {
+    const client = this.getClient(tx);
+    return client.product.count({ where });
   }
 
-  async create(data: {
-    name: string;
-    slug: string;
-    description: string;
-    categoryId: bigint;
-    basePrice: number;
-    sellingPrice: number;
-    sku: string;
-    isActive: boolean;
-    hasVariants: boolean;
-    hsnCode?: string;
-    artisanName?: string;
-    artisanAbout?: string;
-    artisanLocation?: string;
-    // 🆕 Shipping Dimensions
-    weight?: number;
-    length?: number;
-    breadth?: number;
-    height?: number;
-    volumetricWeight?: number;
-    metaTitle?: string;
-    metaDesc?: string;
-    schemaMarkup?: string;
-  }): Promise<Product> {
-    console.log("🔵 ProductRepository.create called with:", {
-      name: data.name,
-      sku: data.sku,
-      categoryId: data.categoryId.toString(),
-      hasVariants: data.hasVariants,
-      weight: data.weight,
-      dimensions: `${data.length}x${data.breadth}x${data.height}`,
+  async create(
+    data: {
+      name: string;
+      slug: string;
+      description: string;
+      categoryId: bigint;
+      basePrice: number;
+      sellingPrice: number;
+      sku?: string;
+      isActive: boolean;
+      hasVariants: boolean;
+      hsnCode?: string;
+      artisanName?: string;
+      artisanAbout?: string;
+      artisanLocation?: string;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+      metaTitle?: string;
+      metaDesc?: string;
+      schemaMarkup?: string;
+      allowOutOfStockOrders?: boolean;
+      hasVideoConsultation?: boolean;
+      videoPurchasingEnabled?: boolean;
+      videoConsultationNote?: string;
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<Product> {
+    const client = this.getClient(tx);
+    return client.product.create({
+      data: {
+        name: data.name,
+        slug: data.slug,
+        description: data.description,
+        categoryId: data.categoryId,
+        basePrice: data.basePrice,
+        sellingPrice: data.sellingPrice,
+        sku: data.sku!,
+        isActive: data.isActive,
+        hasVariants: data.hasVariants,
+        hsnCode: data.hsnCode,
+        artisanName: data.artisanName || "",
+        artisanAbout: data.artisanAbout || "",
+        artisanLocation: data.artisanLocation || "",
+        weight: data.weight,
+        length: data.length,
+        breadth: data.breadth,
+        height: data.height,
+        volumetricWeight: data.volumetricWeight,
+        metaTitle: data.metaTitle,
+        metaDesc: data.metaDesc,
+        schemaMarkup: data.schemaMarkup,
+        allowOutOfStockOrders: data.allowOutOfStockOrders ?? false,
+        hasVideoConsultation: data.hasVideoConsultation ?? false,
+        videoPurchasingEnabled: data.videoPurchasingEnabled ?? false,
+        videoConsultationNote: data.videoConsultationNote,
+      },
+      include: standardProductInclude,
     });
-
-    try {
-      const product = await this.prisma.product.create({
-        data: {
-          name: data.name,
-          slug: data.slug,
-          description: data.description,
-          categoryId: data.categoryId,
-          basePrice: data.basePrice,
-          sellingPrice: data.sellingPrice,
-          sku: data.sku,
-          isActive: data.isActive,
-          hasVariants: data.hasVariants,
-          hsnCode: data.hsnCode,
-          artisanName: data.artisanName || "",
-          artisanAbout: data.artisanAbout || "",
-          artisanLocation: data.artisanLocation || "",
-          // 🆕 Shipping Dimensions
-          weight: data.weight,
-          length: data.length,
-          breadth: data.breadth,
-          height: data.height,
-          volumetricWeight: data.volumetricWeight,
-          metaTitle: data.metaTitle,
-          metaDesc: data.metaDesc,
-          schemaMarkup: data.schemaMarkup,
-        },
-        include: {
-          category: true,
-          specifications: true,
-          variants: {
-            include: {
-              media: true,
-              stock: true,
-            },
-          },
-          media: true,
-          stock: true,
-        },
-      });
-
-      console.log("✅ Product created in database:", product.id);
-      return product;
-    } catch (error) {
-      console.error("❌ Error in ProductRepository.create:", error);
-      throw error;
-    }
   }
 
-  async update(id: bigint, data: Partial<Product>): Promise<Product> {
-    return this.prisma.product.update({
+  async update(
+    id: bigint,
+    data: Partial<Product>,
+    tx?: Prisma.TransactionClient
+  ): Promise<Product> {
+    const client = this.getClient(tx);
+    return client.product.update({
       where: { id },
       data,
-      include: {
-        category: true,
-        specifications: true,
-        variants: {
-          include: {
-            media: { where: { isActive: true }, orderBy: { order: "asc" } },
-            stock: true,
-          },
-        },
-        media: { where: { isActive: true }, orderBy: { order: "asc" } },
-        stock: true,
-      },
+      include: standardProductInclude,
     });
   }
 
-  async delete(id: bigint): Promise<void> {
-    await this.prisma.product.delete({ where: { id } });
+  async delete(id: bigint, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = this.getClient(tx);
+    await client.product.delete({ where: { id } });
   }
 
   // Specifications
   async addSpecification(
     productId: bigint,
     key: string,
-    value: string
+    value: string,
+    tx?: Prisma.TransactionClient
   ): Promise<Specification> {
-    return this.prisma.specification.create({
+    const client = this.getClient(tx);
+    return client.specification.create({
       data: { productId, key, value },
     });
   }
 
-  async updateSpecification(id: bigint, value: string): Promise<Specification> {
-    return this.prisma.specification.update({
+  async updateSpecification(
+    id: bigint,
+    value: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<Specification> {
+    const client = this.getClient(tx);
+    return client.specification.update({
       where: { id },
       data: { value },
     });
   }
 
-  async deleteSpecification(id: bigint): Promise<void> {
-    await this.prisma.specification.delete({ where: { id } });
+  async deleteSpecification(
+    id: bigint,
+    tx?: Prisma.TransactionClient
+  ): Promise<void> {
+    const client = this.getClient(tx);
+    await client.specification.delete({ where: { id } });
   }
 
   // UPDATED: Media methods (replaces image methods)
@@ -263,9 +281,11 @@ export class ProductRepository implements IProductRepository {
       height?: number;
       order?: number;
       isActive?: boolean;
-    }
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<ProductMedia> {
-    return this.prisma.productMedia.create({
+    const client = this.getClient(tx);
+    return client.productMedia.create({
       data: {
         productId,
         type: data.type,
@@ -288,40 +308,47 @@ export class ProductRepository implements IProductRepository {
 
   async updateMedia(
     id: bigint,
-    data: Partial<ProductMedia>
+    data: Partial<ProductMedia>,
+    tx?: Prisma.TransactionClient
   ): Promise<ProductMedia> {
-    return this.prisma.productMedia.update({
+    const client = this.getClient(tx);
+    return client.productMedia.update({
       where: { id },
       data,
     });
   }
 
-  async deleteMedia(id: bigint): Promise<void> {
+  async deleteMedia(id: bigint, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = this.getClient(tx);
     // Soft delete - mark as inactive
-    await this.prisma.productMedia.update({
+    await client.productMedia.update({
       where: { id },
       data: { isActive: false },
     });
   }
 
   // 🆕 ENHANCED: Variants with media, pricing, and dimensions
-  async addVariant(data: {
-    productId: bigint;
-    attributes?: Record<string, any>;
-    size?: string;
-    color?: string;
-    fabric?: string;
-    basePrice?: number;
-    sellingPrice?: number;
-    price: number;
-    weight?: number;
-    length?: number;
-    breadth?: number;
-    height?: number;
-    volumetricWeight?: number;
-    sku: string;
-  }): Promise<ProductVariant> {
-    return this.prisma.productVariant.create({
+  async addVariant(
+    data: {
+      productId: bigint;
+      attributes?: Record<string, any>;
+      size?: string;
+      color?: string;
+      fabric?: string;
+      basePrice?: number;
+      sellingPrice?: number;
+      price: number;
+      weight?: number;
+      length?: number;
+      breadth?: number;
+      height?: number;
+      volumetricWeight?: number;
+      sku: string;
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<ProductVariant> {
+    const client = this.getClient(tx);
+    return client.productVariant.create({
       data: {
         productId: data.productId,
         attributes: data.attributes,
@@ -360,9 +387,12 @@ export class ProductRepository implements IProductRepository {
       breadth?: number;
       height?: number;
       volumetricWeight?: number;
-    }
+      sku?: string;
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<ProductVariant> {
-    return this.prisma.productVariant.update({
+    const client = this.getClient(tx);
+    return client.productVariant.update({
       where: { id },
       data,
       include: {
@@ -372,12 +402,17 @@ export class ProductRepository implements IProductRepository {
     });
   }
 
-  async deleteVariant(id: bigint): Promise<void> {
-    await this.prisma.productVariant.delete({ where: { id } });
+  async deleteVariant(id: bigint, tx?: Prisma.TransactionClient): Promise<void> {
+    const client = this.getClient(tx);
+    await client.productVariant.delete({ where: { id } });
   }
 
-  async findVariantById(id: bigint): Promise<ProductVariant | null> {
-    return this.prisma.productVariant.findUnique({
+  async findVariantById(
+    id: bigint,
+    tx?: Prisma.TransactionClient
+  ): Promise<ProductVariant | null> {
+    const client = this.getClient(tx);
+    return client.productVariant.findUnique({
       where: { id },
       include: {
         media: { where: { isActive: true }, orderBy: { order: "asc" } },
@@ -405,9 +440,11 @@ export class ProductRepository implements IProductRepository {
       height?: number;
       order?: number;
       isActive?: boolean;
-    }
+    },
+    tx?: Prisma.TransactionClient
   ): Promise<ProductVariantMedia> {
-    return this.prisma.productVariantMedia.create({
+    const client = this.getClient(tx);
+    return client.productVariantMedia.create({
       data: {
         variantId,
         type: data.type,
@@ -430,17 +467,23 @@ export class ProductRepository implements IProductRepository {
 
   async updateVariantMedia(
     id: bigint,
-    data: Partial<ProductVariantMedia>
+    data: Partial<ProductVariantMedia>,
+    tx?: Prisma.TransactionClient
   ): Promise<ProductVariantMedia> {
-    return this.prisma.productVariantMedia.update({
+    const client = this.getClient(tx);
+    return client.productVariantMedia.update({
       where: { id },
       data,
     });
   }
 
-  async deleteVariantMedia(id: bigint): Promise<void> {
+  async deleteVariantMedia(
+    id: bigint,
+    tx?: Prisma.TransactionClient
+  ): Promise<void> {
+    const client = this.getClient(tx);
     // Soft delete - mark as inactive
-    await this.prisma.productVariantMedia.update({
+    await client.productVariantMedia.update({
       where: { id },
       data: { isActive: false },
     });
@@ -449,14 +492,16 @@ export class ProductRepository implements IProductRepository {
   // Stock
   async getStock(
     productId: bigint,
-    variantId: bigint,
-    warehouseId: bigint
+    warehouseId: bigint,
+    variantId: bigint | null,
+    tx?: Prisma.TransactionClient
   ): Promise<Stock | null> {
-    return this.prisma.stock.findUnique({
+    const client = this.getClient(tx);
+    return client.stock.findUnique({
       where: {
         productId_variantId_warehouseId: {
           productId,
-          variantId,
+          variantId: variantId ?? null as any,
           warehouseId,
         },
       },
@@ -469,12 +514,14 @@ export class ProductRepository implements IProductRepository {
     warehouseId: bigint,
     quantity: number,
     lowStockThreshold: number,
-    reason: string
+    reason: string,
+    tx?: Prisma.TransactionClient
   ) {
-    const existingStock = await this.prisma.stock.findFirst({
+    const client = this.getClient(tx);
+    const existingStock = await client.stock.findFirst({
       where: {
         productId,
-        variantId,
+        variantId: variantId ?? null,
         warehouseId,
       },
     });
@@ -482,7 +529,7 @@ export class ProductRepository implements IProductRepository {
     let stock;
 
     if (existingStock) {
-      stock = await this.prisma.stock.update({
+      stock = await client.stock.update({
         where: { id: existingStock.id },
         data: {
           quantity,
@@ -490,10 +537,10 @@ export class ProductRepository implements IProductRepository {
         },
       });
     } else {
-      stock = await this.prisma.stock.create({
+      stock = await client.stock.create({
         data: {
           productId,
-          variantId,
+          variantId: variantId ?? null,
           warehouseId,
           quantity,
           lowStockThreshold,
@@ -501,7 +548,7 @@ export class ProductRepository implements IProductRepository {
       });
     }
 
-    await this.prisma.stockAdjustment.create({
+    await client.stockAdjustment.create({
       data: {
         stockId: stock.id,
         quantity,

@@ -62,6 +62,14 @@ router.put(
   (req, res) => getProductController().updateProduct(req, res)
 );
 
+router.patch(
+  "/products/:id",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().patchProduct(req, res)
+);
+
 router.delete(
   "/products/:id",
   authenticate,

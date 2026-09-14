@@ -32,8 +32,14 @@ export const CategoryCacheKeys = {
   // Category with active descendants (public catalog)
   withDescendants: (slug: string): string => `category:descendants:${slug}`,
 
+  // Category with active descendants by ID (public catalog)
+  withDescendantsById: (id: string | number | bigint): string => `category:descendants:id:${id.toString()}`,
+
   // Category with all descendants (admin views)
   withDescendantsAdmin: (slug: string): string => `category:descendants:admin:${slug}`,
+
+  // Category with all descendants by ID (admin views)
+  withDescendantsByIdAdmin: (id: string | number | bigint): string => `category:descendants:admin:id:${id.toString()}`,
 
   // Category hierarchy tree (root or scoped to parent category ID)
   tree: (id?: string | number | bigint): string =>
@@ -164,6 +170,14 @@ export const CategoryCacheModule = {
   },
 
   /**
+   * Clear descendants cache
+   */
+  async clearDescendants(): Promise<void> {
+    console.log("🧹 Clearing category descendants cache...");
+    await cacheService.invalidatePattern(CategoryCachePatterns.descendants);
+  },
+
+  /**
    * Complete category update cache strategy
    */
   async onCategoryUpdate(id: string | number | bigint, slug?: string): Promise<void> {
@@ -182,6 +196,7 @@ export const CategoryCacheModule = {
     console.log(`🧹 Category creation cache clear`);
     await this.clearTree();
     await this.clearLists();
+    await cacheService.invalidatePattern(CategoryCachePatterns.descendants);
     await this.notifyListeners({ type: "create" });
   },
 

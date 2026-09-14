@@ -231,6 +231,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         sectionId,
         type: m.type,
         url: m.url,
+        mobileUrl: m.mobileUrl,
         thumbnailUrl: m.thumbnailUrl,
         altText: m.altText,
         title: m.title,

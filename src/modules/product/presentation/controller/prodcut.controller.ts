@@ -6,6 +6,7 @@ import {
   QueryProductDTOSchema,
   CreateProductDTOSchema,
   UpdateProductDTOSchema,
+  PatchProductDTOSchema,
   AddSpecificationDTOSchema,
   AddMediaDTOSchema,
   AddVariantDTOSchema,
@@ -13,6 +14,13 @@ import {
   AddVariantMediaDTOSchema,
   UpdateStockDTOSchema,
 } from "../../application/product.dto.js";
+
+import { CategoryCacheModule } from "@/modules/category/category.cache.js";
+
+// Clear stale descendant cache on module initialization to ensure updated category hierarchy is picked up
+CategoryCacheModule.clearDescendants().catch((err) => {
+  console.warn("⚠️ Failed to clear descendant cache on startup:", err.message);
+});
 
 @injectable()
 export class ProductController {
@@ -24,149 +32,237 @@ export class ProductController {
   /**
    * ✅ ENHANCED: Get products with full URL params support + descendant fetching
    */
-async getProducts(req: Request, res: Response) {
-  try {
-    const params = QueryProductDTOSchema.parse(req.query);
+  async getProducts(req: Request, res: Response) {
+    try {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
 
-    // ✅ helper (ONLY for fabric)
-    const parseArrayParam = (value: any): string[] | undefined => {
-      if (!value) return undefined;
-      if (Array.isArray(value)) return value;
+      const params = QueryProductDTOSchema.parse(req.query);
 
-      return String(value)
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean);
-    };
+      // ✅ helper (ONLY for fabric)
+      const parseArrayParam = (value: any): string[] | undefined => {
+        if (!value) return undefined;
+        if (Array.isArray(value)) return value;
 
-    // ✅ only fabric converted to array
-    const parsedParams = {
-      ...params,
-      fabric: parseArrayParam(req.query.fabric),
-    };
+        return String(value)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+      };
 
-    let categoryIds: string[] | undefined;
+      // ✅ only fabric converted to array
+      const parsedParams = {
+        ...params,
+        fabric: parseArrayParam(req.query.fabric),
+      };
 
-    if (params.categorySlug) {
-      try {
-        const { category, descendantIds } =
-          await this.categoryService.getCategoryWithDescendants(
-            params.categorySlug
+      let categoryIds: string[] | undefined;
+
+      if (params.categorySlug) {
+        try {
+          const { category, descendantIds } =
+            await this.categoryService.getCategoryWithDescendants(
+              params.categorySlug
+            );
+
+          categoryIds = Array.from(
+            new Set(descendantIds.map((id) => id.toString()))
           );
 
-        categoryIds = descendantIds.map((id) => id.toString());
+          console.log(
+            `Category: ${category.name} (slug: ${params.categorySlug})`
+          );
+          console.log(
+            `Fetching products from ${categoryIds.length} categories:`,
+            categoryIds
+          );
+        } catch (error: any) {
+          return res.status(404).json({
+            success: false,
+            message: `Category with slug "${params.categorySlug}" not found`,
+          });
+        }
+      } else if (params.categoryId) {
+        try {
+          const { category, descendantIds } =
+            await this.categoryService.getCategoryWithDescendantsById(
+              params.categoryId
+            );
 
-        console.log(
-          `Category: ${category.name} (slug: ${params.categorySlug})`
-        );
-        console.log(
-          `Fetching products from ${categoryIds.length} categories`
-        );
-      } catch (error: any) {
-        return res.status(404).json({
+          categoryIds = Array.from(
+            new Set(descendantIds.map((id) => id.toString()))
+          );
+
+          console.log(
+            `Category: ${category.name} (id: ${params.categoryId})`
+          );
+          console.log(
+            `Fetching products from ${categoryIds.length} categories:`,
+            categoryIds
+          );
+        } catch (error: any) {
+          return res.status(404).json({
+            success: false,
+            message: `Category with ID "${params.categoryId}" not found`,
+          });
+        }
+      } else if (params.categoryIds && params.categoryIds.length > 0) {
+        const allCategoryIds = new Set<string>();
+        for (const catId of params.categoryIds) {
+          try {
+            const { descendantIds } =
+              await this.categoryService.getCategoryWithDescendantsById(catId);
+            descendantIds.forEach((id) => allCategoryIds.add(id.toString()));
+          } catch {
+            allCategoryIds.add(catId);
+          }
+        }
+        categoryIds = Array.from(allCategoryIds);
+      }
+
+      // Remove categoryId and categorySlug from parsedParams so categoryIds takes precedence
+      const {
+        categoryId: _cId,
+        categorySlug: _cSlug,
+        categoryIds: _cIds,
+        ...restParams
+      } = parsedParams;
+
+      const result = await this.productService.getProducts({
+        ...restParams,
+        ...parsedParams,
+        categoryIds,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        meta: {
+          query: {
+            categorySlug: params.categorySlug,
+            categoriesSearched: categoryIds?.length || 0,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error fetching products:", error);
+
+      if (error.name === "ZodError") {
+        return res.status(400).json({
           success: false,
-          message: `Category with slug "${params.categorySlug}" not found`,
+          message: "Invalid query parameters",
+          errors: error.errors,
         });
       }
-    } else if (params.categoryIds && params.categoryIds.length > 0) {
-      categoryIds = params.categoryIds;
-    } else if (params.categoryId) {
-      categoryIds = [params.categoryId];
-    }
 
-    const result = await this.productService.getProducts({
-      ...parsedParams,
-      categoryIds,
-    });
-
-    res.json({
-      success: true,
-      data: result,
-      meta: {
-        query: {
-          categorySlug: params.categorySlug,
-          categoriesSearched: categoryIds?.length || 0,
-        },
-      },
-    });
-  } catch (error: any) {
-    console.error("Error fetching products:", error);
-
-    if (error.name === "ZodError") {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: "Invalid query parameters",
-        errors: error.errors,
+        message: error.message || "Failed to fetch products",
       });
     }
-
-    res.status(400).json({
-      success: false,
-      message: error.message || "Failed to fetch products",
-    });
   }
-}
 
   /**
- * ADMIN: Get all products regardless of isActive status
- */
-async getAdminProducts(req: Request, res: Response) {
-  try {
-    const params = QueryProductDTOSchema.parse(req.query);
+   * ADMIN: Get all products regardless of isActive status
+   */
+  async getAdminProducts(req: Request, res: Response) {
+    try {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
 
-    let categoryIds: string[] | undefined;
+      const params = QueryProductDTOSchema.parse(req.query);
 
-    if (params.categorySlug) {
-      try {
-        const { category, descendantIds } =
-          await this.categoryService.getCategoryWithDescendantsAdmin(
-            params.categorySlug
+      let categoryIds: string[] | undefined;
+
+      if (params.categorySlug) {
+        try {
+          const { category, descendantIds } =
+            await this.categoryService.getCategoryWithDescendantsAdmin(
+              params.categorySlug
+            );
+
+          categoryIds = Array.from(
+            new Set(descendantIds.map((id) => id.toString()))
           );
 
-        categoryIds = descendantIds.map((id) => id.toString());
+          console.log(`📂 Admin Category: ${category.name} (slug: ${params.categorySlug})`);
+          console.log(`📊 Fetching ALL products from ${categoryIds.length} categories:`, categoryIds);
+        } catch (error: any) {
+          return res.status(404).json({
+            success: false,
+            message: `Category with slug "${params.categorySlug}" not found`,
+          });
+        }
+      } else if (params.categoryId) {
+        try {
+          const { category, descendantIds } =
+            await this.categoryService.getCategoryWithDescendantsByIdAdmin(
+              params.categoryId
+            );
 
-        console.log(`📂 Admin Category: ${category.name} (slug: ${params.categorySlug})`);
-        console.log(`📊 Fetching ALL products from ${categoryIds.length} categories`);
-      } catch (error: any) {
-        return res.status(404).json({
+          categoryIds = Array.from(
+            new Set(descendantIds.map((id) => id.toString()))
+          );
+
+          console.log(`📂 Admin Category: ${category.name} (id: ${params.categoryId})`);
+          console.log(`📊 Fetching ALL products from ${categoryIds.length} categories:`, categoryIds);
+        } catch (error: any) {
+          return res.status(404).json({
+            success: false,
+            message: `Category with ID "${params.categoryId}" not found`,
+          });
+        }
+      } else if (params.categoryIds && params.categoryIds.length > 0) {
+        const allCategoryIds = new Set<string>();
+        for (const catId of params.categoryIds) {
+          try {
+            const { descendantIds } =
+              await this.categoryService.getCategoryWithDescendantsByIdAdmin(catId);
+            descendantIds.forEach((id) => allCategoryIds.add(id.toString()));
+          } catch {
+            allCategoryIds.add(catId);
+          }
+        }
+        categoryIds = Array.from(allCategoryIds);
+      }
+
+      const {
+        categoryId: _cId,
+        categorySlug: _cSlug,
+        categoryIds: _cIds,
+        ...restAdminParams
+      } = params;
+
+      const result = await this.productService.getAdminProducts({
+        ...restAdminParams,
+        categoryIds,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        meta: {
+          query: {
+            categorySlug: params.categorySlug,
+            categoriesSearched: categoryIds?.length || 0,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("❌ Error fetching admin products:", error);
+
+      if (error.name === "ZodError") {
+        return res.status(400).json({
           success: false,
-          message: `Category with slug "${params.categorySlug}" not found`,
+          message: "Invalid query parameters",
+          errors: error.errors,
         });
       }
-    } else if (params.categoryIds && params.categoryIds.length > 0) {
-      categoryIds = params.categoryIds;
-    } else if (params.categoryId) {
-      categoryIds = [params.categoryId];
-    }
 
-    const result = await this.productService.getAdminProducts({
-      ...params,
-      categoryIds,
-    });
-
-    res.json({
-      success: true,
-      data: result,
-      meta: {
-        query: {
-          categorySlug: params.categorySlug,
-          categoriesSearched: categoryIds?.length || 0,
-        },
-      },
-    });
-  } catch (error: any) {
-    console.error("❌ Error fetching admin products:", error);
-
-    if (error.name === "ZodError") {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: "Invalid query parameters",
-        errors: error.errors,
-      });
-    }
-
-    res.status(400).json({
-      success: false,
       message: error.message || "Failed to fetch products",
     });
   }
@@ -246,6 +342,35 @@ async getAdminProducts(req: Request, res: Response) {
         data: product,
       });
     } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  async patchProduct(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id || Array.isArray(id)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Product ID is required" });
+      }
+
+      const data = PatchProductDTOSchema.parse(req.body);
+      const product = await this.productService.patchProduct(id, data);
+
+      res.json({
+        success: true,
+        message: "Product updated successfully",
+        data: product,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          errors: error.errors,
+        });
+      }
       res.status(400).json({ success: false, message: error.message });
     }
   }

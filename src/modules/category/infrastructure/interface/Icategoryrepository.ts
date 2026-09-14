@@ -77,8 +77,20 @@ findAllWithActiveProductCount(params: {
     descendantIds:  bigint[];
   } | null>;
 
+  /** Public-facing: active categories only (by ID). */
+  getCategoryWithDescendantsById(id: bigint): Promise<{
+    category:       Category;
+    descendantIds:  bigint[];
+  } | null>;
+
   /** Admin-facing: includes inactive categories. */
   getCategoryWithDescendantsAdmin(slug: string): Promise<{
+    category:       Category;
+    descendantIds:  bigint[];
+  } | null>;
+
+  /** Admin-facing: includes inactive categories (by ID). */
+  getCategoryWithDescendantsByIdAdmin(id: bigint): Promise<{
     category:       Category;
     descendantIds:  bigint[];
   } | null>;

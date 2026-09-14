@@ -1112,7 +1112,8 @@ model Banner {
   id          BigInt     @id @default(autoincrement())
   title       String
   type        MediaType  @default(IMAGE)          // NEW: Support for image/video banners
-  url         String                              // Media URL (Cloudflare R2)
+  url         String                              // Media URL (Desktop view)
+  mobileUrl   String?                             // Mobile Media URL (Mobile view)
   key         String?                             // R2 object key
   thumbnailUrl String?                            // Thumbnail for video banners
   link        String?                             // Click-through URL
@@ -1176,6 +1177,7 @@ model SectionMedia {
   
   type            MediaType
   url             String
+  mobileUrl       String?                         // Mobile Media URL (for banner and aesthetic-fullscreen)
   thumbnailUrl    String?
   altText         String?
   title           String?

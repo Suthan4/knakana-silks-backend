@@ -2,7 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { SlugUtil } from "@/shared/utils/index.js";
 import { IProductRepository } from "../../infrastructure/interface/Iproductrepository.js";
 import { ICategoryRepository } from "@/modules/category/infrastructure/interface/Icategoryrepository.js";
-import { Prisma, Product, ProductVariant } from "@/generated/prisma/client.js";
+import { Prisma, Product, ProductVariant, PrismaClient } from "@/generated/prisma/client.js";
 import { Decimal } from "@prisma/client/runtime/client";
 import { IWarehouseRepository } from "@/modules/warehouse/infrastructure/interface/Iwarehouserepository.js";
 import { MediaType } from "@/generated/prisma/enums.js";
@@ -11,7 +11,12 @@ import {
   NotFoundError,
   ValidationError,
 } from "@/shared/utils/errors.js";
-import { QueryProductDTO } from "../product.dto.js";
+import {
+  CreateProductDTO,
+  UpdateProductDTO,
+  PatchProductDTO,
+  QueryProductDTO,
+} from "../product.dto.js";
 import { S3UploadService } from "@/config/s3-upload.js";
 
 @injectable()
@@ -22,635 +27,145 @@ export class ProductService {
     private categoryRepository: ICategoryRepository,
     @inject("IWarehouseRepository")
     private warehouseRepository: IWarehouseRepository,
-    @inject("S3UploadService") private s3Service: S3UploadService
+    @inject("S3UploadService") private s3Service: S3UploadService,
+    @inject(PrismaClient) private prisma: PrismaClient
   ) {}
 
-  async createProduct(data: {
-    name: string;
-    description: string;
-    categoryId: string;
-    basePrice: number;
-    sellingPrice: number;
-    sku?: string;
-    isActive?: boolean;
-    hsnCode?: string;
-    artisanName?: string;
-    artisanAbout?: string;
-    artisanLocation?: string;
-    weight: number;
-    length: number;
-    breadth: number;
-    height: number;
-    metaTitle?: string;
-    metaDesc?: string;
-    schemaMarkup?: string;
-    specifications?: Array<{ key: string; value: string }>;
-    media?: Array<{
-      type: MediaType;
-      url: string;
-      key?: string;
-      thumbnailUrl?: string;
-      altText?: string;
-      title?: string;
-      description?: string;
-      mimeType?: string;
-      fileSize?: number;
-      duration?: number;
-      width?: number;
-      height?: number;
-      order?: number;
-      isActive?: boolean;
-    }>;
-    variants?: Array<{
-      attributes?: Record<string, any>;
-      size?: string;
-      color?: string;
-      fabric?: string;
-      basePrice?: number;
-      sellingPrice?: number;
-      price: number;
-      weight?: number;
-      length?: number;
-      breadth?: number;
-      height?: number;
-      media?: Array<{
-        type: MediaType;
-        url: string;
-        key?: string;
-        thumbnailUrl?: string;
-        altText?: string;
-        title?: string;
-        description?: string;
-        mimeType?: string;
-        fileSize?: number;
-        duration?: number;
-        width?: number;
-        height?: number;
-        order?: number;
-        isActive?: boolean;
-      }>;
-      stock?: {
-        warehouseId: string;
-        quantity: number;
-        lowStockThreshold?: number;
-      };
-    }>;
-    stock?: {
-      warehouseId: string;
-      quantity: number;
-      lowStockThreshold?: number;
-    };
-  }): Promise<Product | null> {
+  async createProduct(data: CreateProductDTO): Promise<Product | null> {
     try {
       console.log("🔵 ProductService.createProduct called");
 
-      // Validate category
-      const category = await this.categoryRepository.findById(
-        BigInt(data.categoryId)
-      );
-      if (!category) {
-        throw new NotFoundError(
-          `Category with ID ${data.categoryId} not found`
+      return await this.prisma.$transaction(async (tx) => {
+        // Validate category
+        const category = await this.categoryRepository.findById(
+          BigInt(data.categoryId)
         );
-      }
-
-      const hasVariants = !!(data.variants && data.variants.length > 0);
-
-      if (hasVariants && data.stock) {
-        throw new ValidationError(
-          "Cannot provide both variants and direct stock."
-        );
-      }
-
-      if (!hasVariants && !data.stock) {
-        throw new ValidationError(
-          "Simple products must have stock information."
-        );
-      }
-
-      // Validate warehouses
-      if (!hasVariants && data.stock) {
-        const warehouse = await this.warehouseRepository.findById(
-          BigInt(data.stock.warehouseId)
-        );
-        if (!warehouse) {
+        if (!category) {
           throw new NotFoundError(
-            `Warehouse with ID ${data.stock.warehouseId} not found`
+            `Category with ID ${data.categoryId} not found`
           );
         }
-        if (!warehouse.isActive) {
-          throw new ValidationError(
-            `Warehouse with ID ${data.stock.warehouseId} is inactive`
-          );
-        }
-      }
 
-      // 🆕 Calculate volumetric weight
-      const volumetricWeight =
-        (data.length * data.breadth * data.height) / 5000;
+        const hasCustomVariants = Boolean(
+          data.variants && data.variants.length > 0
+        );
+        const isMultiVariant = Boolean(
+          data.hasVariants !== undefined ? data.hasVariants : hasCustomVariants
+        );
 
-      if (hasVariants && data.variants) {
-        for (let i = 0; i < data.variants.length; i++) {
-          const variant = data.variants[i];
-          if (!variant?.stock) {
-            throw new ValidationError(
-              `Variant ${i + 1} is missing stock information`
-            );
-          }
+        // Validate warehouses
+        if (!isMultiVariant && data.stock) {
           const warehouse = await this.warehouseRepository.findById(
-            BigInt(variant.stock.warehouseId)
+            BigInt(data.stock.warehouseId)
           );
           if (!warehouse) {
             throw new NotFoundError(
-              `Warehouse with ID ${
-                variant.stock.warehouseId
-              } not found for variant ${i + 1}`
+              `Warehouse with ID ${data.stock.warehouseId} not found`
             );
           }
           if (!warehouse.isActive) {
             throw new ValidationError(
-              `Warehouse with ID ${
-                variant.stock.warehouseId
-              } is inactive for variant ${i + 1}`
+              `Warehouse with ID ${data.stock.warehouseId} is inactive`
             );
           }
         }
-      }
 
-      const slug = SlugUtil.generateSlug(data.name);
-
-      // 🆕 Handle SKU - use provided SKU or auto-generate
-      let sku: string;
-      if (data.sku) {
-        // Validate provided SKU is not already in use
-        const existingSku = await this.productRepository.findBySku(data.sku);
-        if (existingSku) {
-          throw new ConflictError(`SKU "${data.sku}" is already in use`);
+        if (isMultiVariant && hasCustomVariants) {
+          for (let i = 0; i < data.variants!.length; i++) {
+            const variant = data.variants![i];
+            if (variant.stock) {
+              const warehouse = await this.warehouseRepository.findById(
+                BigInt(variant.stock.warehouseId)
+              );
+              if (!warehouse) {
+                throw new NotFoundError(
+                  `Warehouse with ID ${variant.stock.warehouseId} not found for variant ${i + 1}`
+                );
+              }
+              if (!warehouse.isActive) {
+                throw new ValidationError(
+                  `Warehouse with ID ${variant.stock.warehouseId} is inactive for variant ${i + 1}`
+                );
+              }
+            }
+          }
         }
-        sku = data.sku;
-      } else {
-        // Auto-generate SKU
-        sku = this.generateSKU(data.name);
-        const existingSku = await this.productRepository.findBySku(sku);
-        if (existingSku) {
-          sku = this.generateSKU(data.name + "-" + Date.now());
-        }
-      }
 
-      const existingSlug = await this.productRepository.findBySlug(slug);
-      if (existingSlug) {
-        throw new ConflictError(
-          `Product with name "${data.name}" already exists`
+        const volumetricWeight =
+          (data.length * data.breadth * data.height) / 5000;
+
+        let sku: string;
+        if (data.sku) {
+          const existingSku = await this.productRepository.findBySku(data.sku, tx);
+          if (existingSku) {
+            throw new ConflictError(`SKU "${data.sku}" is already in use`);
+          }
+          sku = data.sku;
+        } else {
+          sku = this.generateSKU(data.name);
+          const existingSku = await this.productRepository.findBySku(sku, tx);
+          if (existingSku) {
+            sku = this.generateSKU(data.name + "-" + Date.now());
+          }
+        }
+
+        const slug = SlugUtil.generateSlug(data.name);
+        const existingSlug = await this.productRepository.findBySlug(slug, tx);
+        if (existingSlug) {
+          throw new ConflictError(
+            `Product with name "${data.name}" already exists`
+          );
+        }
+
+        const product = await this.productRepository.create(
+          {
+            name: data.name,
+            slug,
+            description: data.description,
+            categoryId: BigInt(data.categoryId),
+            basePrice: data.basePrice,
+            sellingPrice: data.sellingPrice,
+            sku,
+            isActive: data.isActive ?? true,
+            hasVariants: isMultiVariant,
+            hsnCode: data.hsnCode,
+            artisanName: data.artisanName || "",
+            artisanAbout: data.artisanAbout || "",
+            artisanLocation: data.artisanLocation || "",
+            weight: data.weight,
+            length: data.length,
+            breadth: data.breadth,
+            height: data.height,
+            volumetricWeight,
+            metaTitle: data.metaTitle,
+            metaDesc: data.metaDesc,
+            schemaMarkup: data.schemaMarkup,
+            allowOutOfStockOrders: data.allowOutOfStockOrders ?? false,
+            hasVideoConsultation: data.hasVideoConsultation ?? false,
+            videoPurchasingEnabled: data.videoPurchasingEnabled ?? false,
+            videoConsultationNote: data.videoConsultationNote,
+          },
+          tx
         );
-      }
 
-      return this.createProductWithSku(
-        data,
-        slug,
-        sku,
-        hasVariants,
-        volumetricWeight
-      );
-    } catch (error) {
-      console.error("❌ Error in ProductService.createProduct:", error);
-      throw error;
-    }
-  }
-
-  private async createProductWithSku(
-    data: any,
-    slug: string,
-    sku: string,
-    hasVariants: boolean,
-    volumetricWeight: number
-  ): Promise<Product | null> {
-    try {
-      const product = await this.productRepository.create({
-        name: data.name,
-        slug,
-        description: data.description,
-        categoryId: BigInt(data.categoryId),
-        basePrice: data.basePrice,
-        sellingPrice: data.sellingPrice,
-        sku,
-        isActive: data.isActive ?? true,
-        hasVariants,
-        hsnCode: data.hsnCode,
-        artisanName: data.artisanName || "",
-        artisanAbout: data.artisanAbout || "",
-        artisanLocation: data.artisanLocation || "",
-        weight: data.weight,
-        length: data.length,
-        breadth: data.breadth,
-        height: data.height,
-        volumetricWeight,
-        metaTitle: data.metaTitle,
-        metaDesc: data.metaDesc,
-        schemaMarkup: data.schemaMarkup,
-      });
-
-      // Add specifications
-      if (data.specifications?.length) {
-        await Promise.all(
-          data.specifications.map((spec: any) =>
-            this.productRepository.addSpecification(
+        // Add specifications
+        if (data.specifications?.length) {
+          for (const spec of data.specifications) {
+            await this.productRepository.addSpecification(
               product.id,
               spec.key,
-              spec.value
-            )
-          )
-        );
-      }
-
-      // Add product-level media
-      if (data.media?.length) {
-        await Promise.all(
-          data.media.map((mediaItem: any) =>
-            this.productRepository.addMedia(product.id, {
-              type: mediaItem.type || MediaType.IMAGE,
-              url: mediaItem.url,
-              key: mediaItem.key,
-              thumbnailUrl: mediaItem.thumbnailUrl,
-              altText: mediaItem.altText,
-              title: mediaItem.title,
-              description: mediaItem.description,
-              mimeType: mediaItem.mimeType,
-              fileSize: mediaItem.fileSize
-                ? BigInt(mediaItem.fileSize)
-                : undefined,
-              duration: mediaItem.duration,
-              width: mediaItem.width,
-              height: mediaItem.height,
-              order: mediaItem.order,
-              isActive: mediaItem.isActive,
-            })
-          )
-        );
-      }
-
-      // Handle variants with media, pricing, and dimensions
-      if (hasVariants) {
-        for (const variant of data.variants!) {
-          // Generate variant SKU
-          const variantSku = this.generateSKU(
-            `${data.name}-${variant.size || ""}-${variant.color || ""}-${
-              variant.fabric || ""
-            }-${JSON.stringify(variant.attributes || {})}`
-          );
-
-          // 🆕 Calculate variant-specific volumetric weight if dimensions provided
-          let variantVolumetricWeight: number | undefined;
-          if (
-            variant.weight &&
-            variant.length &&
-            variant.breadth &&
-            variant.height
-          ) {
-            variantVolumetricWeight =
-              (variant.length * variant.breadth * variant.height) / 5000;
-          }
-
-          // Create variant with all new features
-          const createdVariant = await this.productRepository.addVariant({
-            productId: product.id,
-            attributes: variant.attributes,
-            size: variant.size,
-            color: variant.color,
-            fabric: variant.fabric,
-            basePrice: variant.basePrice,
-            sellingPrice: variant.sellingPrice,
-            price: variant.price,
-            weight: variant.weight,
-            length: variant.length,
-            breadth: variant.breadth,
-            height: variant.height,
-            volumetricWeight: variantVolumetricWeight,
-            sku: variantSku,
-          });
-
-          // 🆕 Add variant-specific media
-          if (variant.media?.length) {
-            await Promise.all(
-              variant.media.map((mediaItem: any) =>
-                this.productRepository.addVariantMedia(createdVariant.id, {
-                  type: mediaItem.type || MediaType.IMAGE,
-                  url: mediaItem.url,
-                  key: mediaItem.key,
-                  thumbnailUrl: mediaItem.thumbnailUrl,
-                  altText: mediaItem.altText,
-                  title: mediaItem.title,
-                  description: mediaItem.description,
-                  mimeType: mediaItem.mimeType,
-                  fileSize: mediaItem.fileSize
-                    ? BigInt(mediaItem.fileSize)
-                    : undefined,
-                  duration: mediaItem.duration,
-                  width: mediaItem.width,
-                  height: mediaItem.height,
-                  order: mediaItem.order,
-                  isActive: mediaItem.isActive,
-                })
-              )
+              spec.value,
+              tx
             );
           }
+        }
 
-          // Add stock
-          if (variant.stock) {
-            await this.productRepository.updateStock(
+        // Add product-level media
+        if (data.media?.length) {
+          for (const mediaItem of data.media) {
+            await this.productRepository.addMedia(
               product.id,
-              createdVariant.id,
-              BigInt(variant.stock.warehouseId),
-              variant.stock.quantity,
-              variant.stock.lowStockThreshold || 10,
-              "Initial variant stock"
-            );
-          }
-        }
-      } else {
-        // Simple product stock
-        await this.productRepository.updateStock(
-          product.id,
-          null,
-          BigInt(data.stock!.warehouseId),
-          data.stock!.quantity,
-          data.stock!.lowStockThreshold || 10,
-          "Initial product stock"
-        );
-      }
-
-      return await this.productRepository.findById(product.id);
-    } catch (error) {
-      console.error("❌ Error in createProductWithSku:", error);
-      throw error;
-    }
-  }
-
-async updateProduct(
-  id: string,
-  data: {
-    name?: string;
-    description?: string;
-    categoryId?: string;
-    basePrice?: number;
-    sellingPrice?: number;
-    sku?: string;
-    isActive?: boolean;
-    hsnCode?: string;
-    artisanName?: string;
-    artisanAbout?: string;
-    artisanLocation?: string;
-    weight?: number;
-    length?: number;
-    breadth?: number;
-    height?: number;
-    metaTitle?: string;
-    metaDesc?: string;
-    schemaMarkup?: string;
-    specifications?: Array<{ key: string; value: string }>;
-    media?: Array<{
-      type: MediaType;
-      url: string;
-      key?: string;
-      thumbnailUrl?: string;
-      altText?: string;
-      title?: string;
-      description?: string;
-      mimeType?: string;
-      fileSize?: number;
-      duration?: number;
-      width?: number;
-      height?: number;
-      order?: number;
-      isActive?: boolean;
-    }>;
-    variants?: Array<{
-      attributes?: Record<string, any>;
-      size?: string;
-      color?: string;
-      fabric?: string;
-      basePrice?: number;
-      sellingPrice?: number;
-      price: number;
-      weight?: number;
-      length?: number;
-      breadth?: number;
-      height?: number;
-      media?: Array<{
-        type: MediaType;
-        url: string;
-        key?: string;
-        thumbnailUrl?: string;
-        altText?: string;
-        title?: string;
-        description?: string;
-        mimeType?: string;
-        fileSize?: number;
-        duration?: number;
-        width?: number;
-        height?: number;
-        order?: number;
-        isActive?: boolean;
-      }>;
-      stock?: {
-        warehouseId: string;
-        quantity: number;
-        lowStockThreshold?: number;
-      };
-    }>;
-    stock?: {
-      warehouseId: string;
-      quantity: number;
-      lowStockThreshold?: number;
-    };
-  }
-): Promise<Product> {
-  const productId = BigInt(id);
-  const product = await this.productRepository.findById(productId);
-
-  if (!product) {
-    throw new NotFoundError("Product not found");
-  }
-
-  if (data.categoryId) {
-    const category = await this.categoryRepository.findById(
-      BigInt(data.categoryId)
-    );
-    if (!category) {
-      throw new NotFoundError("Category not found");
-    }
-  }
-
-  let slug = product.slug;
-  if (data.name && data.name !== product.name) {
-    slug = SlugUtil.generateSlug(data.name);
-    const existing = await this.productRepository.findBySlug(slug);
-    if (existing && existing.id !== productId) {
-      throw new ConflictError("Product with this name already exists");
-    }
-  }
-
-  // Validate SKU if provided
-  if (data.sku && data.sku !== product.sku) {
-    const existingSku = await this.productRepository.findBySku(data.sku);
-    if (existingSku && existingSku.id !== productId) {
-      throw new ConflictError(`SKU "${data.sku}" is already in use`);
-    }
-  }
-
-  const updateData: any = {
-    ...data,
-    slug,
-    categoryId: data.categoryId ? BigInt(data.categoryId) : undefined,
-    // Remove these fields - they'll be handled separately
-    specifications: undefined,
-    media: undefined,
-    variants: undefined,
-    stock: undefined,
-  };
-
-  if (data.basePrice !== undefined) {
-    updateData.basePrice = new Decimal(data.basePrice);
-  }
-
-  if (data.sellingPrice !== undefined) {
-    updateData.sellingPrice = new Decimal(data.sellingPrice);
-  }
-
-  // Calculate volumetric weight if dimensions are updated
-  if (data.weight || data.length || data.breadth || data.height) {
-    const weight = data.weight ?? Number(product.weight);
-    const length = data.length ?? Number(product.length);
-    const breadth = data.breadth ?? Number(product.breadth);
-    const height = data.height ?? Number(product.height);
-
-    updateData.volumetricWeight = (length * breadth * height) / 5000;
-  }
-
-  // Update the product basic info
-  await this.productRepository.update(productId, updateData);
-
-  // 🆕 Handle specifications
-  if (data.specifications !== undefined) {
-    // ✅ Fetch fresh product with includes to get specifications
-    const productWithSpecs = await this.productRepository.findById(productId);
-    
-    if (productWithSpecs?.specifications && productWithSpecs.specifications.length > 0) {
-      // Delete existing specifications
-      await Promise.all(
-        productWithSpecs.specifications.map((spec) =>
-          this.productRepository.deleteSpecification(spec.id)
-        )
-      );
-    }
-
-    // Add new specifications
-    if (data.specifications.length > 0) {
-      await Promise.all(
-        data.specifications.map((spec) =>
-          this.productRepository.addSpecification(
-            productId,
-            spec.key,
-            spec.value
-          )
-        )
-      );
-    }
-  }
-
-  // 🆕 Handle product-level media
-  if (data.media !== undefined) {
-    // ✅ Fetch fresh product with includes to get media
-    const productWithMedia = await this.productRepository.findById(productId);
-    
-    if (productWithMedia?.media && productWithMedia.media.length > 0) {
-      // Delete existing media (soft delete)
-      await Promise.all(
-        productWithMedia.media.map((m) =>
-          this.productRepository.deleteMedia(m.id)
-        )
-      );
-    }
-
-    // Add new media
-    if (data.media.length > 0) {
-      await Promise.all(
-        data.media.map((mediaItem) =>
-          this.productRepository.addMedia(productId, {
-            type: mediaItem.type || MediaType.IMAGE,
-            url: mediaItem.url,
-            key: mediaItem.key,
-            thumbnailUrl: mediaItem.thumbnailUrl,
-            altText: mediaItem.altText,
-            title: mediaItem.title,
-            description: mediaItem.description,
-            mimeType: mediaItem.mimeType,
-            fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
-            duration: mediaItem.duration,
-            width: mediaItem.width,
-            height: mediaItem.height,
-            order: mediaItem.order,
-            isActive: mediaItem.isActive,
-          })
-        )
-      );
-    }
-  }
-
-  // 🆕 Handle variants for variable products
-  if (product.hasVariants && data.variants !== undefined) {
-    // ✅ Fetch fresh product with includes to get variants
-    const productWithVariants = await this.productRepository.findById(productId);
-    const existingVariants = productWithVariants?.variants || [];
-
-    // Delete all existing variants (cascade will handle stock and media)
-    if (existingVariants.length > 0) {
-      await Promise.all(
-        existingVariants.map((v) => this.productRepository.deleteVariant(v.id))
-      );
-    }
-
-    // Create new variants
-    if (data.variants.length > 0) {
-      for (const variant of data.variants) {
-        const variantSku = this.generateSKU(
-          `${product.name}-${variant.size || ""}-${variant.color || ""}-${
-            variant.fabric || ""
-          }-${JSON.stringify(variant.attributes || {})}`
-        );
-
-        let variantVolumetricWeight: number | undefined;
-        if (
-          variant.weight &&
-          variant.length &&
-          variant.breadth &&
-          variant.height
-        ) {
-          variantVolumetricWeight =
-            (variant.length * variant.breadth * variant.height) / 5000;
-        }
-
-        const createdVariant = await this.productRepository.addVariant({
-          productId,
-          attributes: variant.attributes,
-          size: variant.size,
-          color: variant.color,
-          fabric: variant.fabric,
-          basePrice: variant.basePrice,
-          sellingPrice: variant.sellingPrice,
-          price: variant.price,
-          weight: variant.weight,
-          length: variant.length,
-          breadth: variant.breadth,
-          height: variant.height,
-          volumetricWeight: variantVolumetricWeight,
-          sku: variantSku,
-        });
-
-        // Add variant media
-        if (variant.media && variant.media.length > 0) {
-          await Promise.all(
-            variant.media.map((mediaItem) =>
-              this.productRepository.addVariantMedia(createdVariant.id, {
+              {
                 type: mediaItem.type || MediaType.IMAGE,
                 url: mediaItem.url,
                 key: mediaItem.key,
@@ -667,41 +182,796 @@ async updateProduct(
                 height: mediaItem.height,
                 order: mediaItem.order,
                 isActive: mediaItem.isActive,
-              })
-            )
-          );
+              },
+              tx
+            );
+          }
         }
 
-        // Add variant stock
-        if (variant.stock) {
-          await this.productRepository.updateStock(
-            productId,
-            createdVariant.id,
-            BigInt(variant.stock.warehouseId),
-            variant.stock.quantity,
-            variant.stock.lowStockThreshold || 10,
-            "Updated variant stock"
+        // Unified Product Model: Default Single Product
+        if (!isMultiVariant) {
+          const defaultVariant = await this.productRepository.addVariant(
+            {
+              productId: product.id,
+              attributes: { default: "true" },
+              basePrice: data.basePrice,
+              sellingPrice: data.sellingPrice,
+              price: data.sellingPrice,
+              weight: data.weight,
+              length: data.length,
+              breadth: data.breadth,
+              height: data.height,
+              volumetricWeight,
+              sku,
+            },
+            tx
           );
+
+          if (data.stock) {
+            await this.productRepository.updateStock(
+              product.id,
+              defaultVariant.id,
+              BigInt(data.stock.warehouseId),
+              data.stock.quantity,
+              data.stock.lowStockThreshold || 10,
+              "Initial product stock",
+              tx
+            );
+          }
+        } else if (hasCustomVariants) {
+          // Multi-variant product: persist each custom variant
+          for (const variant of data.variants!) {
+            const variantSku =
+              variant.sku ||
+              this.generateSKU(
+                `${data.name}-${variant.size || ""}-${variant.color || ""}-${
+                  variant.fabric || ""
+                }-${JSON.stringify(variant.attributes || {})}`
+              );
+
+            let variantVolumetricWeight: number | undefined;
+            if (
+              variant.weight &&
+              variant.length &&
+              variant.breadth &&
+              variant.height
+            ) {
+              variantVolumetricWeight =
+                (variant.length * variant.breadth * variant.height) / 5000;
+            }
+
+            const vBasePrice = variant.basePrice ?? data.basePrice;
+            const vSellingPrice =
+              variant.sellingPrice ?? variant.price ?? data.sellingPrice;
+            const vPrice =
+              variant.price ?? variant.sellingPrice ?? data.sellingPrice;
+
+            const createdVariant = await this.productRepository.addVariant(
+              {
+                productId: product.id,
+                attributes: variant.attributes,
+                size: variant.size,
+                color: variant.color,
+                fabric: variant.fabric,
+                basePrice: vBasePrice,
+                sellingPrice: vSellingPrice,
+                price: vPrice,
+                weight: variant.weight ?? data.weight,
+                length: variant.length ?? data.length,
+                breadth: variant.breadth ?? data.breadth,
+                height: variant.height ?? data.height,
+                volumetricWeight: variantVolumetricWeight ?? volumetricWeight,
+                sku: variantSku,
+              },
+              tx
+            );
+
+            if (variant.media?.length) {
+              for (const mediaItem of variant.media) {
+                await this.productRepository.addVariantMedia(
+                  createdVariant.id,
+                  {
+                    type: mediaItem.type || MediaType.IMAGE,
+                    url: mediaItem.url,
+                    key: mediaItem.key,
+                    thumbnailUrl: mediaItem.thumbnailUrl,
+                    altText: mediaItem.altText,
+                    title: mediaItem.title,
+                    description: mediaItem.description,
+                    mimeType: mediaItem.mimeType,
+                    fileSize: mediaItem.fileSize
+                      ? BigInt(mediaItem.fileSize)
+                      : undefined,
+                    duration: mediaItem.duration,
+                    width: mediaItem.width,
+                    height: mediaItem.height,
+                    order: mediaItem.order,
+                    isActive: mediaItem.isActive,
+                  },
+                  tx
+                );
+              }
+            }
+
+            if (variant.stock) {
+              await this.productRepository.updateStock(
+                product.id,
+                createdVariant.id,
+                BigInt(variant.stock.warehouseId),
+                variant.stock.quantity,
+                variant.stock.lowStockThreshold || 10,
+                "Initial variant stock",
+                tx
+              );
+            }
+          }
         }
-      }
+
+        return await this.productRepository.findById(product.id, tx);
+      });
+    } catch (error) {
+      console.error("❌ Error in ProductService.createProduct:", error);
+      throw error;
     }
   }
 
-  // 🆕 Handle stock for simple products
-  if (!product.hasVariants && data.stock !== undefined) {
-    await this.productRepository.updateStock(
-      productId,
-      null,
-      BigInt(data.stock.warehouseId),
-      data.stock.quantity,
-      data.stock.lowStockThreshold || 10,
-      "Updated product stock"
-    );
+  async updateProduct(id: string, data: UpdateProductDTO): Promise<Product> {
+    const productId = BigInt(id);
+
+    return (await this.prisma.$transaction(async (tx) => {
+      const product = await this.productRepository.findById(productId, tx);
+      if (!product) {
+        throw new NotFoundError("Product not found");
+      }
+
+      if (data.categoryId) {
+        const category = await this.categoryRepository.findById(
+          BigInt(data.categoryId)
+        );
+        if (!category) {
+          throw new NotFoundError("Category not found");
+        }
+      }
+
+      let slug = product.slug;
+      if (data.name && data.name !== product.name) {
+        slug = SlugUtil.generateSlug(data.name);
+        const existing = await this.productRepository.findBySlug(slug, tx);
+        if (existing && existing.id !== productId) {
+          throw new ConflictError("Product with this name already exists");
+        }
+      }
+
+      if (data.sku && data.sku !== product.sku) {
+        const existingSku = await this.productRepository.findBySku(data.sku, tx);
+        if (existingSku && existingSku.id !== productId) {
+          throw new ConflictError(`SKU "${data.sku}" is already in use`);
+        }
+      }
+
+      const updateData: any = {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(slug !== product.slug && { slug }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.categoryId !== undefined && { categoryId: BigInt(data.categoryId) }),
+        ...(data.sku !== undefined && { sku: data.sku }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.hsnCode !== undefined && { hsnCode: data.hsnCode }),
+        ...(data.artisanName !== undefined && { artisanName: data.artisanName }),
+        ...(data.artisanAbout !== undefined && { artisanAbout: data.artisanAbout }),
+        ...(data.artisanLocation !== undefined && { artisanLocation: data.artisanLocation }),
+        ...(data.allowOutOfStockOrders !== undefined && { allowOutOfStockOrders: data.allowOutOfStockOrders }),
+        ...(data.hasVideoConsultation !== undefined && { hasVideoConsultation: data.hasVideoConsultation }),
+        ...(data.videoPurchasingEnabled !== undefined && { videoPurchasingEnabled: data.videoPurchasingEnabled }),
+        ...(data.videoConsultationNote !== undefined && { videoConsultationNote: data.videoConsultationNote }),
+        ...(data.metaTitle !== undefined && { metaTitle: data.metaTitle }),
+        ...(data.metaDesc !== undefined && { metaDesc: data.metaDesc }),
+        ...(data.schemaMarkup !== undefined && { schemaMarkup: data.schemaMarkup }),
+      };
+
+      if (data.basePrice !== undefined) {
+        updateData.basePrice = new Decimal(data.basePrice);
+      }
+      if (data.sellingPrice !== undefined) {
+        updateData.sellingPrice = new Decimal(data.sellingPrice);
+      }
+
+      let volumetricWeight: number | undefined;
+      if (data.weight || data.length || data.breadth || data.height) {
+        const weight = data.weight ?? Number(product.weight);
+        const length = data.length ?? Number(product.length);
+        const breadth = data.breadth ?? Number(product.breadth);
+        const height = data.height ?? Number(product.height);
+        volumetricWeight = (length * breadth * height) / 5000;
+        updateData.weight = weight;
+        updateData.length = length;
+        updateData.breadth = breadth;
+        updateData.height = height;
+        updateData.volumetricWeight = volumetricWeight;
+      }
+
+      // Handle specifications
+      if (data.specifications !== undefined) {
+        if (product.specifications?.length) {
+          for (const spec of product.specifications) {
+            await this.productRepository.deleteSpecification(spec.id, tx);
+          }
+        }
+        for (const spec of data.specifications) {
+          await this.productRepository.addSpecification(productId, spec.key, spec.value, tx);
+        }
+      }
+
+      // Handle media
+      if (data.media !== undefined) {
+        if (product.media?.length) {
+          for (const m of product.media) {
+            await this.productRepository.deleteMedia(m.id, tx);
+          }
+        }
+        for (const mediaItem of data.media) {
+          await this.productRepository.addMedia(productId, {
+            type: mediaItem.type || MediaType.IMAGE,
+            url: mediaItem.url,
+            key: mediaItem.key,
+            thumbnailUrl: mediaItem.thumbnailUrl,
+            altText: mediaItem.altText,
+            title: mediaItem.title,
+            description: mediaItem.description,
+            mimeType: mediaItem.mimeType,
+            fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
+            duration: mediaItem.duration,
+            width: mediaItem.width,
+            height: mediaItem.height,
+            order: mediaItem.order,
+            isActive: mediaItem.isActive,
+          }, tx);
+        }
+      }
+
+      // Determine target variant state
+      const targetIsMulti = data.hasVariants !== undefined
+        ? data.hasVariants
+        : (data.variants && data.variants.length > 0 ? true : product.hasVariants);
+
+      updateData.hasVariants = targetIsMulti;
+      await this.productRepository.update(productId, updateData, tx);
+
+      // Transitions & Variant Handlers:
+      if (!product.hasVariants && targetIsMulti) {
+        // Simple -> Multi-Variant: delete default variant, create custom variants
+        if (product.variants?.length) {
+          for (const v of product.variants) {
+            await this.productRepository.deleteVariant(v.id, tx);
+          }
+        }
+
+        if (data.variants?.length) {
+          for (const variant of data.variants) {
+            const variantSku = variant.sku || this.generateSKU(
+              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${
+                variant.fabric || ""
+              }-${JSON.stringify(variant.attributes || {})}`
+            );
+
+            let vVolWeight: number | undefined;
+            if (variant.weight && variant.length && variant.breadth && variant.height) {
+              vVolWeight = (variant.length * variant.breadth * variant.height) / 5000;
+            }
+
+            const createdVariant = await this.productRepository.addVariant({
+              productId,
+              attributes: variant.attributes,
+              size: variant.size,
+              color: variant.color,
+              fabric: variant.fabric,
+              basePrice: variant.basePrice ?? (data.basePrice ?? Number(product.basePrice)),
+              sellingPrice: variant.sellingPrice ?? variant.price ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              price: variant.price ?? variant.sellingPrice ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              weight: variant.weight ?? (data.weight ?? (product.weight ? Number(product.weight) : undefined)),
+              length: variant.length ?? (data.length ?? (product.length ? Number(product.length) : undefined)),
+              breadth: variant.breadth ?? (data.breadth ?? (product.breadth ? Number(product.breadth) : undefined)),
+              height: variant.height ?? (data.height ?? (product.height ? Number(product.height) : undefined)),
+              volumetricWeight: vVolWeight,
+              sku: variantSku,
+            }, tx);
+
+            if (variant.media?.length) {
+              for (const mediaItem of variant.media) {
+                await this.productRepository.addVariantMedia(createdVariant.id, {
+                  type: mediaItem.type || MediaType.IMAGE,
+                  url: mediaItem.url,
+                  key: mediaItem.key,
+                  thumbnailUrl: mediaItem.thumbnailUrl,
+                  altText: mediaItem.altText,
+                  title: mediaItem.title,
+                  description: mediaItem.description,
+                  mimeType: mediaItem.mimeType,
+                  fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
+                  duration: mediaItem.duration,
+                  width: mediaItem.width,
+                  height: mediaItem.height,
+                  order: mediaItem.order,
+                  isActive: mediaItem.isActive,
+                }, tx);
+              }
+            }
+
+            if (variant.stock) {
+              await this.productRepository.updateStock(
+                productId,
+                createdVariant.id,
+                BigInt(variant.stock.warehouseId),
+                variant.stock.quantity,
+                variant.stock.lowStockThreshold || 10,
+                "Updated variant stock",
+                tx
+              );
+            }
+          }
+        }
+      } else if (product.hasVariants && !targetIsMulti) {
+        // Multi-Variant -> Simple: delete all custom variants, collapse down to single default variant
+        if (product.variants?.length) {
+          for (const v of product.variants) {
+            await this.productRepository.deleteVariant(v.id, tx);
+          }
+        }
+
+        const effectiveBasePrice = data.basePrice ?? Number(product.basePrice);
+        const effectiveSellingPrice = data.sellingPrice ?? Number(product.sellingPrice);
+        const effectiveSku = data.sku ?? product.sku;
+
+        const defaultVariant = await this.productRepository.addVariant({
+          productId,
+          attributes: { default: "true" },
+          basePrice: effectiveBasePrice,
+          sellingPrice: effectiveSellingPrice,
+          price: effectiveSellingPrice,
+          weight: data.weight ?? (product.weight ? Number(product.weight) : undefined),
+          length: data.length ?? (product.length ? Number(product.length) : undefined),
+          breadth: data.breadth ?? (product.breadth ? Number(product.breadth) : undefined),
+          height: data.height ?? (product.height ? Number(product.height) : undefined),
+          volumetricWeight: volumetricWeight ?? (product.volumetricWeight ? Number(product.volumetricWeight) : undefined),
+          sku: effectiveSku,
+        }, tx);
+
+        if (data.stock) {
+          await this.productRepository.updateStock(
+            productId,
+            defaultVariant.id,
+            BigInt(data.stock.warehouseId),
+            data.stock.quantity,
+            data.stock.lowStockThreshold || 10,
+            "Updated product stock",
+            tx
+          );
+        }
+      } else if (targetIsMulti) {
+        // Remaining Multi-Variant: if variants passed, replace
+        if (data.variants !== undefined) {
+          if (product.variants?.length) {
+            for (const v of product.variants) {
+              await this.productRepository.deleteVariant(v.id, tx);
+            }
+          }
+
+          for (const variant of data.variants) {
+            const variantSku = variant.sku || this.generateSKU(
+              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${
+                variant.fabric || ""
+              }-${JSON.stringify(variant.attributes || {})}`
+            );
+
+            let vVolWeight: number | undefined;
+            if (variant.weight && variant.length && variant.breadth && variant.height) {
+              vVolWeight = (variant.length * variant.breadth * variant.height) / 5000;
+            }
+
+            const createdVariant = await this.productRepository.addVariant({
+              productId,
+              attributes: variant.attributes,
+              size: variant.size,
+              color: variant.color,
+              fabric: variant.fabric,
+              basePrice: variant.basePrice ?? (data.basePrice ?? Number(product.basePrice)),
+              sellingPrice: variant.sellingPrice ?? variant.price ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              price: variant.price ?? variant.sellingPrice ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              weight: variant.weight ?? (data.weight ?? (product.weight ? Number(product.weight) : undefined)),
+              length: variant.length ?? (data.length ?? (product.length ? Number(product.length) : undefined)),
+              breadth: variant.breadth ?? (data.breadth ?? (product.breadth ? Number(product.breadth) : undefined)),
+              height: variant.height ?? (data.height ?? (product.height ? Number(product.height) : undefined)),
+              volumetricWeight: vVolWeight,
+              sku: variantSku,
+            }, tx);
+
+            if (variant.media?.length) {
+              for (const mediaItem of variant.media) {
+                await this.productRepository.addVariantMedia(createdVariant.id, {
+                  type: mediaItem.type || MediaType.IMAGE,
+                  url: mediaItem.url,
+                  key: mediaItem.key,
+                  thumbnailUrl: mediaItem.thumbnailUrl,
+                  altText: mediaItem.altText,
+                  title: mediaItem.title,
+                  description: mediaItem.description,
+                  mimeType: mediaItem.mimeType,
+                  fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
+                  duration: mediaItem.duration,
+                  width: mediaItem.width,
+                  height: mediaItem.height,
+                  order: mediaItem.order,
+                  isActive: mediaItem.isActive,
+                }, tx);
+              }
+            }
+
+            if (variant.stock) {
+              await this.productRepository.updateStock(
+                productId,
+                createdVariant.id,
+                BigInt(variant.stock.warehouseId),
+                variant.stock.quantity,
+                variant.stock.lowStockThreshold || 10,
+                "Updated variant stock",
+                tx
+              );
+            }
+          }
+        }
+      } else {
+        // Remaining Simple: Single-variant sync
+        let defaultVariant: ProductVariant | undefined = product.variants?.[0];
+        const effectiveBasePrice = data.basePrice ?? Number(product.basePrice);
+        const effectiveSellingPrice = data.sellingPrice ?? Number(product.sellingPrice);
+        const effectiveSku = data.sku ?? product.sku;
+
+        if (defaultVariant) {
+          await this.productRepository.updateVariant(defaultVariant.id, {
+            basePrice: effectiveBasePrice,
+            sellingPrice: effectiveSellingPrice,
+            price: effectiveSellingPrice,
+            weight: data.weight ?? (product.weight ? Number(product.weight) : undefined),
+            length: data.length ?? (product.length ? Number(product.length) : undefined),
+            breadth: data.breadth ?? (product.breadth ? Number(product.breadth) : undefined),
+            height: data.height ?? (product.height ? Number(product.height) : undefined),
+            volumetricWeight: volumetricWeight ?? (product.volumetricWeight ? Number(product.volumetricWeight) : undefined),
+            sku: effectiveSku,
+          }, tx);
+        } else {
+          defaultVariant = await this.productRepository.addVariant({
+            productId,
+            attributes: { default: "true" },
+            basePrice: effectiveBasePrice,
+            sellingPrice: effectiveSellingPrice,
+            price: effectiveSellingPrice,
+            weight: data.weight ?? (product.weight ? Number(product.weight) : undefined),
+            length: data.length ?? (product.length ? Number(product.length) : undefined),
+            breadth: data.breadth ?? (product.breadth ? Number(product.breadth) : undefined),
+            height: data.height ?? (product.height ? Number(product.height) : undefined),
+            volumetricWeight: volumetricWeight ?? (product.volumetricWeight ? Number(product.volumetricWeight) : undefined),
+            sku: effectiveSku,
+          }, tx);
+        }
+
+        if (data.stock !== undefined) {
+          await this.productRepository.updateStock(
+            productId,
+            defaultVariant.id,
+            BigInt(data.stock.warehouseId),
+            data.stock.quantity,
+            data.stock.lowStockThreshold || 10,
+            "Updated product stock",
+            tx
+          );
+        }
+      }
+
+      return (await this.productRepository.findById(productId, tx)) as Product;
+    })) as Product;
   }
 
-  // Return the fully updated product with all relations
-  return await this.productRepository.findById(productId) as Product;
-}
+  async patchProduct(id: string, data: PatchProductDTO): Promise<Product> {
+    const productId = BigInt(id);
+
+    return (await this.prisma.$transaction(async (tx) => {
+      const product = await this.productRepository.findById(productId, tx);
+      if (!product) {
+        throw new NotFoundError("Product not found");
+      }
+
+      if (data.categoryId) {
+        const category = await this.categoryRepository.findById(
+          BigInt(data.categoryId)
+        );
+        if (!category) {
+          throw new NotFoundError("Category not found");
+        }
+      }
+
+      let slug = product.slug;
+      if (data.name && data.name !== product.name) {
+        slug = SlugUtil.generateSlug(data.name);
+        const existing = await this.productRepository.findBySlug(slug, tx);
+        if (existing && existing.id !== productId) {
+          throw new ConflictError("Product with this name already exists");
+        }
+      }
+
+      if (data.sku && data.sku !== product.sku) {
+        const existingSku = await this.productRepository.findBySku(data.sku, tx);
+        if (existingSku && existingSku.id !== productId) {
+          throw new ConflictError(`SKU "${data.sku}" is already in use`);
+        }
+      }
+
+      // Partial core updates
+      const patchData: any = {};
+      if (data.name !== undefined) patchData.name = data.name;
+      if (slug !== product.slug) patchData.slug = slug;
+      if (data.description !== undefined) patchData.description = data.description;
+      if (data.categoryId !== undefined) patchData.categoryId = BigInt(data.categoryId);
+      if (data.basePrice !== undefined) patchData.basePrice = new Decimal(data.basePrice);
+      if (data.sellingPrice !== undefined) patchData.sellingPrice = new Decimal(data.sellingPrice);
+      if (data.sku !== undefined) patchData.sku = data.sku;
+      if (data.isActive !== undefined) patchData.isActive = data.isActive;
+      if (data.hsnCode !== undefined) patchData.hsnCode = data.hsnCode;
+      if (data.artisanName !== undefined) patchData.artisanName = data.artisanName;
+      if (data.artisanAbout !== undefined) patchData.artisanAbout = data.artisanAbout;
+      if (data.artisanLocation !== undefined) patchData.artisanLocation = data.artisanLocation;
+      if (data.allowOutOfStockOrders !== undefined) patchData.allowOutOfStockOrders = data.allowOutOfStockOrders;
+      if (data.hasVideoConsultation !== undefined) patchData.hasVideoConsultation = data.hasVideoConsultation;
+      if (data.videoPurchasingEnabled !== undefined) patchData.videoPurchasingEnabled = data.videoPurchasingEnabled;
+      if (data.videoConsultationNote !== undefined) patchData.videoConsultationNote = data.videoConsultationNote;
+      if (data.metaTitle !== undefined) patchData.metaTitle = data.metaTitle;
+      if (data.metaDesc !== undefined) patchData.metaDesc = data.metaDesc;
+      if (data.schemaMarkup !== undefined) patchData.schemaMarkup = data.schemaMarkup;
+
+      let volumetricWeight: number | undefined;
+      if (data.weight !== undefined || data.length !== undefined || data.breadth !== undefined || data.height !== undefined) {
+        const weight = data.weight ?? Number(product.weight);
+        const length = data.length ?? Number(product.length);
+        const breadth = data.breadth ?? Number(product.breadth);
+        const height = data.height ?? Number(product.height);
+        volumetricWeight = (length * breadth * height) / 5000;
+        if (data.weight !== undefined) patchData.weight = weight;
+        if (data.length !== undefined) patchData.length = length;
+        if (data.breadth !== undefined) patchData.breadth = breadth;
+        if (data.height !== undefined) patchData.height = height;
+        patchData.volumetricWeight = volumetricWeight;
+      }
+
+      if (data.hasVariants !== undefined) {
+        patchData.hasVariants = data.hasVariants;
+      }
+
+      if (Object.keys(patchData).length > 0) {
+        await this.productRepository.update(productId, patchData, tx);
+      }
+
+      // Specifications update if provided
+      if (data.specifications !== undefined) {
+        if (product.specifications?.length) {
+          for (const s of product.specifications) {
+            await this.productRepository.deleteSpecification(s.id, tx);
+          }
+        }
+        for (const spec of data.specifications) {
+          if (spec.key && spec.value) {
+            await this.productRepository.addSpecification(productId, spec.key, spec.value, tx);
+          }
+        }
+      }
+
+      // Media update if provided
+      if (data.media !== undefined) {
+        if (product.media?.length) {
+          for (const m of product.media) {
+            await this.productRepository.deleteMedia(m.id, tx);
+          }
+        }
+        for (const mediaItem of data.media) {
+          if (mediaItem.url) {
+            await this.productRepository.addMedia(productId, {
+              type: mediaItem.type || MediaType.IMAGE,
+              url: mediaItem.url,
+              key: mediaItem.key,
+              thumbnailUrl: mediaItem.thumbnailUrl,
+              altText: mediaItem.altText,
+              title: mediaItem.title,
+              description: mediaItem.description,
+              mimeType: mediaItem.mimeType,
+              fileSize: mediaItem.fileSize ? BigInt(mediaItem.fileSize) : undefined,
+              duration: mediaItem.duration,
+              width: mediaItem.width,
+              height: mediaItem.height,
+              order: mediaItem.order,
+              isActive: mediaItem.isActive,
+            }, tx);
+          }
+        }
+      }
+
+      // Targeted Variant Updates vs Single-Variant Price Sync
+      if (data.variants && data.variants.length > 0) {
+        // Targeted variant update by id or append new variants
+        for (const v of data.variants) {
+          if (v.id) {
+            const vId = BigInt(v.id);
+            const existingVariant = product.variants?.find((ev) => ev.id === vId);
+            if (existingVariant) {
+              let vVolWeight: number | undefined;
+              if (v.weight || v.length || v.breadth || v.height) {
+                const w = v.weight ?? (existingVariant.weight ? Number(existingVariant.weight) : undefined);
+                const l = v.length ?? (existingVariant.length ? Number(existingVariant.length) : undefined);
+                const b = v.breadth ?? (existingVariant.breadth ? Number(existingVariant.breadth) : undefined);
+                const h = v.height ?? (existingVariant.height ? Number(existingVariant.height) : undefined);
+                if (l && b && h) {
+                  vVolWeight = (l * b * h) / 5000;
+                }
+              }
+
+              const variantUpdateData: any = {
+                ...(v.attributes !== undefined && { attributes: v.attributes }),
+                ...(v.size !== undefined && { size: v.size }),
+                ...(v.color !== undefined && { color: v.color }),
+                ...(v.fabric !== undefined && { fabric: v.fabric }),
+                ...(v.basePrice !== undefined && { basePrice: v.basePrice }),
+                ...(v.sellingPrice !== undefined && {
+                  sellingPrice: v.sellingPrice,
+                  price: v.price ?? v.sellingPrice,
+                }),
+                ...(v.price !== undefined && v.sellingPrice === undefined && {
+                  price: v.price,
+                  sellingPrice: v.price,
+                }),
+                ...(v.weight !== undefined && { weight: v.weight }),
+                ...(v.length !== undefined && { length: v.length }),
+                ...(v.breadth !== undefined && { breadth: v.breadth }),
+                ...(v.height !== undefined && { height: v.height }),
+                ...(vVolWeight !== undefined && { volumetricWeight: vVolWeight }),
+                ...(v.sku !== undefined && { sku: v.sku }),
+              };
+
+              await this.productRepository.updateVariant(vId, variantUpdateData, tx);
+
+              if (v.stock && v.stock.warehouseId) {
+                await this.productRepository.updateStock(
+                  productId,
+                  vId,
+                  BigInt(v.stock.warehouseId),
+                  v.stock.quantity ?? 0,
+                  v.stock.lowStockThreshold ?? 10,
+                  "PATCH updated variant stock",
+                  tx
+                );
+              }
+            }
+          } else {
+            // New variant added without id
+            const variantSku = v.sku || this.generateSKU(
+              `${product.name}-${v.size || ""}-${v.color || ""}-${
+                v.fabric || ""
+              }-${JSON.stringify(v.attributes || {})}`
+            );
+
+            let vVolWeight: number | undefined;
+            if (v.weight && v.length && v.breadth && v.height) {
+              vVolWeight = (v.length * v.breadth * v.height) / 5000;
+            }
+
+            const createdVariant = await this.productRepository.addVariant({
+              productId,
+              attributes: v.attributes,
+              size: v.size,
+              color: v.color,
+              fabric: v.fabric,
+              basePrice: v.basePrice ?? (data.basePrice ?? Number(product.basePrice)),
+              sellingPrice: v.sellingPrice ?? v.price ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              price: v.price ?? v.sellingPrice ?? (data.sellingPrice ?? Number(product.sellingPrice)),
+              weight: v.weight ?? (data.weight ?? (product.weight ? Number(product.weight) : undefined)),
+              length: v.length ?? (data.length ?? (product.length ? Number(product.length) : undefined)),
+              breadth: v.breadth ?? (data.breadth ?? (product.breadth ? Number(product.breadth) : undefined)),
+              height: v.height ?? (data.height ?? (product.height ? Number(product.height) : undefined)),
+              volumetricWeight: vVolWeight,
+              sku: variantSku,
+            }, tx);
+
+            if (v.stock && v.stock.warehouseId) {
+              await this.productRepository.updateStock(
+                productId,
+                createdVariant.id,
+                BigInt(v.stock.warehouseId),
+                v.stock.quantity ?? 0,
+                v.stock.lowStockThreshold ?? 10,
+                "PATCH added variant stock",
+                tx
+              );
+            }
+          }
+        }
+      } else if (data.variants === undefined) {
+        // Variants untouched: Single-Variant Price Sync for simple product
+        const isSimple = !product.hasVariants || (product.variants?.length === 1);
+        if (isSimple && product.variants?.length) {
+          const defaultVariant = product.variants[0];
+          const hasPriceOrDimensionChange =
+            data.basePrice !== undefined ||
+            data.sellingPrice !== undefined ||
+            data.weight !== undefined ||
+            data.length !== undefined ||
+            data.breadth !== undefined ||
+            data.height !== undefined ||
+            data.sku !== undefined;
+
+          if (hasPriceOrDimensionChange) {
+            await this.productRepository.updateVariant(defaultVariant.id, {
+              ...(data.basePrice !== undefined && { basePrice: data.basePrice }),
+              ...(data.sellingPrice !== undefined && {
+                sellingPrice: data.sellingPrice,
+                price: data.sellingPrice,
+              }),
+              ...(data.weight !== undefined && { weight: data.weight }),
+              ...(data.length !== undefined && { length: data.length }),
+              ...(data.breadth !== undefined && { breadth: data.breadth }),
+              ...(data.height !== undefined && { height: data.height }),
+              ...(volumetricWeight !== undefined && { volumetricWeight }),
+              ...(data.sku !== undefined && { sku: data.sku }),
+            }, tx);
+          }
+
+          if (data.stock && data.stock.warehouseId) {
+            await this.productRepository.updateStock(
+              productId,
+              defaultVariant.id,
+              BigInt(data.stock.warehouseId),
+              data.stock.quantity ?? 0,
+              data.stock.lowStockThreshold ?? 10,
+              "PATCH updated product stock",
+              tx
+            );
+          }
+        }
+      }
+
+      // Handle transitions explicitly toggled via data.hasVariants
+      if (data.hasVariants !== undefined && data.hasVariants !== product.hasVariants) {
+        if (!data.hasVariants && product.variants?.length && product.variants.length > 1) {
+          // Collapse multi-variant down to single default variant
+          for (const v of product.variants) {
+            await this.productRepository.deleteVariant(v.id, tx);
+          }
+          const defaultVariant = await this.productRepository.addVariant({
+            productId,
+            attributes: { default: "true" },
+            basePrice: data.basePrice ?? Number(product.basePrice),
+            sellingPrice: data.sellingPrice ?? Number(product.sellingPrice),
+            price: data.sellingPrice ?? Number(product.sellingPrice),
+            weight: data.weight ?? (product.weight ? Number(product.weight) : undefined),
+            length: data.length ?? (product.length ? Number(product.length) : undefined),
+            breadth: data.breadth ?? (product.breadth ? Number(product.breadth) : undefined),
+            height: data.height ?? (product.height ? Number(product.height) : undefined),
+            volumetricWeight: volumetricWeight ?? (product.volumetricWeight ? Number(product.volumetricWeight) : undefined),
+            sku: data.sku ?? product.sku,
+          }, tx);
+
+          if (data.stock && data.stock.warehouseId) {
+            await this.productRepository.updateStock(
+              productId,
+              defaultVariant.id,
+              BigInt(data.stock.warehouseId),
+              data.stock.quantity ?? 0,
+              data.stock.lowStockThreshold ?? 10,
+              "PATCH collapsed product stock",
+              tx
+            );
+          }
+        }
+      }
+
+      return (await this.productRepository.findById(productId, tx)) as Product;
+    })) as Product;
+  }
 
   async deleteProduct(id: string) {
     const product = await this.productRepository.findById(BigInt(id));
@@ -775,9 +1045,42 @@ async updateProduct(
       ];
     }
 
+    let targetCategoryIds: bigint[] | undefined = undefined;
+
     if (params.categoryIds && params.categoryIds.length > 0) {
+      // If explicit categoryIds provided, also include all their descendants
+      const allIds = new Set<bigint>();
+      for (const idStr of params.categoryIds) {
+        try {
+          const ids = await this.categoryRepository.getAllDescendantIds(BigInt(idStr));
+          ids.forEach((id) => allIds.add(id));
+        } catch {
+          allIds.add(BigInt(idStr));
+        }
+      }
+      targetCategoryIds = Array.from(allIds);
+    } else if (params.categorySlug) {
+      // Resolve main category + sub-categories + sub-sub-categories via slug
+      const categoryWithDescendants =
+        await this.categoryRepository.getCategoryWithDescendants(
+          params.categorySlug
+        );
+      if (categoryWithDescendants) {
+        targetCategoryIds = categoryWithDescendants.descendantIds;
+      } else {
+        targetCategoryIds = [-1n];
+      }
+    } else if (params.categoryId) {
+      // Resolve main category + sub-categories + sub-sub-categories via ID
+      const ids = await this.categoryRepository.getAllDescendantIds(
+        BigInt(params.categoryId)
+      );
+      targetCategoryIds = ids;
+    }
+
+    if (targetCategoryIds && targetCategoryIds.length > 0) {
       where.categoryId = {
-        in: params.categoryIds.map((id) => BigInt(id)),
+        in: targetCategoryIds,
       };
     } else if (params.categoryId) {
       where.categoryId = BigInt(params.categoryId);
@@ -882,10 +1185,36 @@ async updateProduct(
  */
 async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
   const skip = (params.page - 1) * params.limit;
+
+  let targetCategoryIds: bigint[] | undefined = undefined;
+
+  if (params.categoryIds && params.categoryIds.length > 0) {
+    const allIds = new Set<bigint>();
+    for (const idStr of params.categoryIds) {
+      try {
+        const ids = await this.productRepository.getAllDescendantIdsAdmin(BigInt(idStr));
+        ids.forEach((id) => allIds.add(id));
+      } catch {
+        allIds.add(BigInt(idStr));
+      }
+    }
+    targetCategoryIds = Array.from(allIds);
+  } else if (params.categorySlug) {
+    const catWithDesc = await this.categoryRepository.getCategoryWithDescendantsAdmin(params.categorySlug);
+    if (catWithDesc) {
+      targetCategoryIds = catWithDesc.descendantIds;
+    } else {
+      targetCategoryIds = [-1n];
+    }
+  } else if (params.categoryId) {
+    const ids = await this.productRepository.getAllDescendantIdsAdmin(BigInt(params.categoryId));
+    targetCategoryIds = ids;
+  }
+
   const where: Prisma.ProductWhereInput = {
     // isActive intentionally omitted — show all products
-    ...(params.categoryIds?.length && {
-      categoryId: { in: params.categoryIds.map(BigInt) },
+    ...(targetCategoryIds?.length && {
+      categoryId: { in: targetCategoryIds },
     }),
     ...(params.search && {
       OR: [

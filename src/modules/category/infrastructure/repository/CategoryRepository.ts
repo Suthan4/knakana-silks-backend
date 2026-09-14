@@ -128,6 +128,16 @@ async findAllWithActiveProductCount(params: {
   }
 
   async findChildren(parentId: bigint): Promise<Category[]> {
+    const placements = await this.prisma.categoryPlacement.findMany({
+      where:   { parentId, child: { isActive: true } },
+      include: { child: true },
+      orderBy: { order: "asc" },
+    });
+
+    if (placements.length > 0) {
+      return placements.map((p) => p.child);
+    }
+
     return this.prisma.category.findMany({
       where:   { parentId, isActive: true },
       orderBy: { order: "asc" },
@@ -247,19 +257,47 @@ async findAllWithActiveProductCount(params: {
 
   /**
    * Recursively collect this category + all ACTIVE descendant IDs.
+   * Checks CategoryPlacement (primary) and Category.parentId (legacy).
    * Used for public product listing (customers only see active categories).
    */
-  async getAllDescendantIds(categoryId: bigint): Promise<bigint[]> {
+  async getAllDescendantIds(
+    categoryId: bigint,
+    visited: Set<string> = new Set<string>()
+  ): Promise<bigint[]> {
+    const key = categoryId.toString();
+    if (visited.has(key)) {
+      return [];
+    }
+    visited.add(key);
+
     const ids: bigint[] = [categoryId];
 
-    const children = await this.prisma.category.findMany({
-      where:  { parentId: categoryId, isActive: true },
+    // 1. Placement-based children (active only)
+    const placements = await this.prisma.categoryPlacement.findMany({
+      where: { parentId: categoryId, child: { isActive: true } },
+      select: { childId: true },
+    });
+
+    // 2. Direct parentId-based children (legacy active only)
+    const directChildren = await this.prisma.category.findMany({
+      where: { parentId: categoryId, isActive: true },
       select: { id: true },
     });
 
-    for (const child of children) {
-      const childIds = await this.getAllDescendantIds(child.id);
-      ids.push(...childIds);
+    const nextChildIds = new Set<string>();
+    for (const p of placements) {
+      nextChildIds.add(p.childId.toString());
+    }
+    for (const c of directChildren) {
+      nextChildIds.add(c.id.toString());
+    }
+
+    for (const childIdStr of nextChildIds) {
+      const childDescendantIds = await this.getAllDescendantIds(
+        BigInt(childIdStr),
+        visited
+      );
+      ids.push(...childDescendantIds);
     }
 
     return ids;
@@ -269,23 +307,50 @@ async findAllWithActiveProductCount(params: {
    * Same as above but WITHOUT the isActive filter.
    * Used for admin views so inactive categories are still reachable.
    */
-  async getAllDescendantIdsAdmin(categoryId: bigint): Promise<bigint[]> {
+  async getAllDescendantIdsAdmin(
+    categoryId: bigint,
+    visited: Set<string> = new Set<string>()
+  ): Promise<bigint[]> {
+    const key = categoryId.toString();
+    if (visited.has(key)) {
+      return [];
+    }
+    visited.add(key);
+
     const ids: bigint[] = [categoryId];
 
-    const children = await this.prisma.category.findMany({
-      where:  { parentId: categoryId }, // no isActive filter
+    // 1. Placement-based children (all)
+    const placements = await this.prisma.categoryPlacement.findMany({
+      where: { parentId: categoryId },
+      select: { childId: true },
+    });
+
+    // 2. Direct parentId-based children (all)
+    const directChildren = await this.prisma.category.findMany({
+      where: { parentId: categoryId },
       select: { id: true },
     });
 
-    for (const child of children) {
-      const childIds = await this.getAllDescendantIdsAdmin(child.id);
-      ids.push(...childIds);
+    const nextChildIds = new Set<string>();
+    for (const p of placements) {
+      nextChildIds.add(p.childId.toString());
+    }
+    for (const c of directChildren) {
+      nextChildIds.add(c.id.toString());
+    }
+
+    for (const childIdStr of nextChildIds) {
+      const childDescendantIds = await this.getAllDescendantIdsAdmin(
+        BigInt(childIdStr),
+        visited
+      );
+      ids.push(...childDescendantIds);
     }
 
     return ids;
   }
 
-  /** Public-facing: active categories only. */
+  /** Public-facing: active categories only (by slug). */
   async getCategoryWithDescendants(slug: string): Promise<{
     category:      Category;
     descendantIds: bigint[];
@@ -297,7 +362,19 @@ async findAllWithActiveProductCount(params: {
     return { category, descendantIds };
   }
 
-  /** Admin-facing: includes inactive categories. */
+  /** Public-facing: active categories only (by ID). */
+  async getCategoryWithDescendantsById(id: bigint): Promise<{
+    category:      Category;
+    descendantIds: bigint[];
+  } | null> {
+    const category = await this.findById(id);
+    if (!category) return null;
+
+    const descendantIds = await this.getAllDescendantIds(category.id);
+    return { category, descendantIds };
+  }
+
+  /** Admin-facing: includes inactive categories (by slug). */
   async getCategoryWithDescendantsAdmin(slug: string): Promise<{
     category:      Category;
     descendantIds: bigint[];
@@ -305,8 +382,27 @@ async findAllWithActiveProductCount(params: {
     const category = await this.prisma.category.findUnique({
       where:   { slug },
       include: {
-        parentPlacements:   {include: { parent: true } },
-        childPlacements: { orderBy: { order: "asc" } }, // no isActive filter
+        parentPlacements:   { include: { parent: true } },
+        childPlacements:    { orderBy: { order: "asc" } }, // no isActive filter
+      },
+    });
+
+    if (!category) return null;
+
+    const descendantIds = await this.getAllDescendantIdsAdmin(category.id);
+    return { category, descendantIds };
+  }
+
+  /** Admin-facing: includes inactive categories (by ID). */
+  async getCategoryWithDescendantsByIdAdmin(id: bigint): Promise<{
+    category:      Category;
+    descendantIds: bigint[];
+  } | null> {
+    const category = await this.prisma.category.findUnique({
+      where:   { id },
+      include: {
+        parentPlacements:   { include: { parent: true } },
+        childPlacements:    { orderBy: { order: "asc" } },
       },
     });
 

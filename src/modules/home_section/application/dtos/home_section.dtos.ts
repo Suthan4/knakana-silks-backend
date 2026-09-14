@@ -5,6 +5,7 @@ import { SectionType, MediaType, CTAStyle } from "@/generated/prisma/enums.js";
 export const SectionMediaDTOSchema = z.object({
   type: z.nativeEnum(MediaType),
   url: z.string().url("Invalid media URL"),
+  mobileUrl: z.string().url("Invalid mobile media URL").optional().nullable(),
   thumbnailUrl: z.string().url().optional(),
   altText: z.string().optional(),
   title: z.string().optional(),

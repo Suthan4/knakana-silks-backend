@@ -35,6 +35,7 @@ export class BannerRepository implements IBannerRepository {
     title: string;
     type: MediaType; // NEW
     url: string; // UPDATED
+    mobileUrl?: string | null; // NEW: Mobile view image
     key?: string; // NEW
     thumbnailUrl?: string; // NEW
     link?: string;
@@ -52,6 +53,7 @@ export class BannerRepository implements IBannerRepository {
         title: data.title,
         type: data.type,
         url: data.url,
+        mobileUrl: data.mobileUrl,
         key: data.key,
         thumbnailUrl: data.thumbnailUrl,
         link: data.link,
