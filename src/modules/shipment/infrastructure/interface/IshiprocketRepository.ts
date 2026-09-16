@@ -24,6 +24,7 @@ export interface IShiprocketRepository {
   // Label & Manifest
   generateLabel(shipmentIds: number[]): Promise<LabelResponse>;
   generateManifest(shipmentIds: number[]): Promise<ManifestResponse>;
+  printManifest(orderIds: number[]): Promise<ManifestResponse>;
 
   // Serviceability
   checkPincodeServiceability(
@@ -243,8 +244,11 @@ export interface LabelResponse {
 }
 
 export interface ManifestResponse {
-  manifest_url: string;
-  status: number;
+  manifest_url?: string;
+  status?: number;
+  // Present while Shiprocket is still queuing/building the manifest PDF
+  message?: string;
+  check_ids?: number[];
 }
 
 export interface ServiceabilityResponse {
