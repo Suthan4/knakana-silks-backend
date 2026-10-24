@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { container } from "tsyringe";
+import multer from "multer";
 import {
   authenticate,
   authorize,
@@ -7,17 +8,86 @@ import {
 } from "@/shared/middleware/auth.middleware.js";
 import { UserRole } from "@/generated/prisma/enums.js";
 import { ProductController } from "../controller/prodcut.controller.js";
-import { adminCatalogReadLimiter, adminCatalogWriteLimiter, publicCatalogLimiter } from "@/shared/middleware/rate-limit.middleware.js";
+import { BulkProductController } from "../controller/bulk-product.controller.js";
+import {
+  adminCatalogReadLimiter,
+  adminCatalogWriteLimiter,
+  publicCatalogLimiter,
+} from "@/shared/middleware/rate-limit.middleware.js";
 
 const router = Router();
 
 const getProductController = () => container.resolve(ProductController);
+const getBulkProductController = () => container.resolve(BulkProductController);
+
+// Configure Multer in-memory storage for bulk excel files (max 50MB)
+const uploadExcel = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const isExcel =
+      file.mimetype ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      file.originalname.toLowerCase().endsWith(".xlsx");
+    if (isExcel) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only .xlsx Excel files are supported"));
+    }
+  },
+});
+
+// ==========================================
+// 🚀 ADMIN ROUTES - BULK PRODUCT IMPORT (MUST BE BEFORE /products/:id)
+// ==========================================
+
+router.get(
+  "/products/bulk/categories-tree",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getBulkProductController().getCategoriesTree(req, res)
+);
+
+router.get(
+  "/products/bulk/template",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getBulkProductController().downloadTemplate(req, res)
+);
+
+router.post(
+  "/products/bulk/export",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getBulkProductController().exportProducts(req, res)
+);
+
+router.post(
+  "/products/bulk/validate",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  uploadExcel.single("file"),
+  (req, res) => getBulkProductController().validateBulk(req, res)
+);
+
+router.post(
+  "/products/bulk/import",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  uploadExcel.single("file"),
+  (req, res) => getBulkProductController().importBulk(req, res)
+);
 
 // ==========================================
 // PUBLIC ROUTES
 // ==========================================
 
-router.get("/products",publicCatalogLimiter, (req, res) =>
+router.get("/products", publicCatalogLimiter, (req, res) =>
   getProductController().getProducts(req, res)
 );
 
@@ -46,12 +116,11 @@ router.post(
 );
 
 router.get(
-  "/admin/products", 
+  "/admin/products",
   authenticate,
   adminCatalogReadLimiter,
   checkPermission("products", "read"),
-   (req, res) =>
-  getProductController().getAdminProducts(req, res)
+  (req, res) => getProductController().getAdminProducts(req, res)
 );
 
 router.put(
