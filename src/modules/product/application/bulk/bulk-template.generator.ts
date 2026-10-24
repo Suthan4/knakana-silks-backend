@@ -97,6 +97,124 @@ export class BulkTemplateGenerator {
       row.getCell(5).value = warehouses[i] ? `${warehouses[i].code} (${warehouses[i].name})` : "";
     }
 
+    // Add comprehensive reference tables to the hidden lookup sheet
+    // Section: Field Reference (Worksheet, Column Header, Internal Field, Description, Required, Product Type, Data Type, Valid Values, Example)
+    const fieldRefStartRow = maxRows + 3; // one empty row after existing data
+    const titleRow = sheet.getRow(fieldRefStartRow);
+    titleRow.getCell(1).value = "Workbook Field Reference";
+    titleRow.font = { name: "Segoe UI", size: 12, bold: true };
+    const headerRow = sheet.getRow(fieldRefStartRow + 1);
+    headerRow.values = [
+      "Worksheet",
+      "Column Header",
+      "Internal Field",
+      "Description",
+      "Required",
+      "Product Type",
+      "Data Type",
+      "Valid Values",
+      "Example",
+    ];
+    headerRow.font = { name: "Segoe UI", bold: true };
+    headerRow.eachCell((c) => {
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
+    });
+    // Define reference rows for each sheet
+    const referenceRows: any[] = [];
+    // Products sheet columns
+    const productCols = [
+      { header: "Product Group ID *", field: "productGroupId", desc: "Unique identifier linking rows across sheets", required: "Yes", type: "simple, variable", dataType: "string", valid: "Alphanumeric, e.g., PROD-001", example: "PROD-001" },
+      { header: "Product Name *", field: "name", desc: "Display name of the product", required: "Yes", type: "both", dataType: "string", valid: "-", example: "Kanchipuram Pure Silk Saree" },
+      { header: "Category Full Path *", field: "categoryPath", desc: "Full hierarchical category path", required: "Yes", type: "both", dataType: "string", valid: "Values from _LookupData!A column", example: "Clothing > Sarees > Silk Sarees" },
+      { header: "Product Type *", field: "productType", desc: "simple or variable", required: "Yes", type: "both", dataType: "enum", valid: "simple, variable", example: "simple" },
+      { header: "Description *", field: "description", desc: "Long description for product page", required: "Yes", type: "both", dataType: "string", valid: "-", example: "Handcrafted pure mulberry silk saree..." },
+      { header: "Parent / Base SKU", field: "sku", desc: "SKU for simple product or base SKU for variable", required: "No", type: "simple", dataType: "string", valid: "-", example: "KKS-KAN-001" },
+      { header: "Base Price (MRP) *", field: "basePrice", desc: "Maximum retail price", required: "Yes", type: "both", dataType: "number", valid: ">0", example: 12500 },
+      { header: "Selling Price *", field: "sellingPrice", desc: "Actual selling price (<= Base Price)", required: "Yes", type: "both", dataType: "number", valid: "<= Base Price", example: 9999 },
+      { header: "Stock Quantity (Simple)", field: "stockQuantity", desc: "Available stock for simple products", required: "No", type: "simple", dataType: "number", valid: ">=0", example: 15 },
+      { header: "Warehouse (Simple)", field: "warehouseCodeOrName", desc: "Warehouse for simple product stock", required: "No", type: "simple", dataType: "string", valid: "Values from _LookupData!E column", example: "WH01 (Main Warehouse)" },
+      { header: "Low Stock Alert", field: "lowStockThreshold", desc: "Threshold for low stock notification", required: "No", type: "both", dataType: "number", valid: ">=0", example: 5 },
+      { header: "Weight in kg *", field: "weight", desc: "Physical weight", required: "Yes", type: "both", dataType: "number", valid: ">0", example: 0.85 },
+      { header: "Length in cm *", field: "length", desc: "Product length", required: "Yes", type: "both", dataType: "number", valid: ">0", example: 40 },
+      { header: "Breadth in cm *", field: "breadth", desc: "Product breadth", required: "Yes", type: "both", dataType: "number", valid: ">0", example: 30 },
+      { header: "Height in cm *", field: "height", desc: "Product height", required: "Yes", type: "both", dataType: "number", valid: ">0", example: 5 },
+      { header: "HSN Code", field: "hsnCode", desc: "Tax code", required: "No", type: "both", dataType: "string", valid: "-", example: "5007" },
+      { header: "Artisan Name", field: "artisanName", desc: "Name of artisan", required: "No", type: "both", dataType: "string", valid: "-", example: "Master Weaver Ramanathan" },
+      { header: "Artisan Location", field: "artisanLocation", desc: "Location of artisan", required: "No", type: "both", dataType: "string", valid: "-", example: "Kanchipuram, Tamil Nadu" },
+      { header: "Artisan About", field: "artisanAbout", desc: "Brief bio", required: "No", type: "both", dataType: "string", valid: "-", example: "Third‑generation master weaver..." },
+      { header: "Allow Backorders", field: "allowOutOfStockOrders", desc: "Whether backorders are allowed", required: "No", type: "both", dataType: "enum", valid: "Yes, No", example: "No" },
+      { header: "Video Consultation", field: "hasVideoConsultation", desc: "Offer video consult", required: "No", type: "both", dataType: "enum", valid: "Yes, No", example: "Yes" },
+      { header: "Video Purchasing", field: "videoPurchasingEnabled", desc: "Enable purchase via video", required: "No", type: "both", dataType: "enum", valid: "Yes, No", example: "Yes" },
+      { header: "Video Note", field: "videoConsultationNote", desc: "Additional note for video", required: "No", type: "both", dataType: "string", valid: "-", example: "Live video showing of zari luster..." },
+      { header: "Active State", field: "isActive", desc: "Product visibility", required: "No", type: "both", dataType: "enum", valid: "Yes, No", example: "Yes" },
+    ];
+    productCols.forEach((c) => referenceRows.push(["Products", c.header, c.field, c.desc, c.required, c.type, c.dataType, c.valid, c.example]));
+    // Variants sheet columns
+    const variantCols = [
+      { header: "Product Group ID *", field: "productGroupId", desc: "Links to parent product", required: "Yes", type: "variable", dataType: "string", valid: "-", example: "PROD-002" },
+      { header: "Variant SKU *", field: "variantSku", desc: "Unique SKU for variant", required: "Yes", type: "variable", dataType: "string", valid: "-", example: "KKS-DHO-002-GLD-40" },
+      { header: "Size", field: "size", desc: "Size attribute", required: "No", type: "variable", dataType: "string", valid: "-", example: "40" },
+      { header: "Color", field: "color", desc: "Color attribute", required: "No", type: "variable", dataType: "string", valid: "-", example: "Gold Border" },
+      { header: "Fabric", field: "fabric", desc: "Fabric attribute", required: "No", type: "variable", dataType: "string", valid: "-", example: "Silk Cotton" },
+      { header: "Other Attributes (Key:Value, ...)", field: "attributes", desc: "Additional key:value pairs", required: "No", type: "variable", dataType: "string", valid: "-", example: "BorderWidth:2 inch" },
+      { header: "Base Price Override", field: "basePrice", desc: "Override base price for this variant", required: "No", type: "variable", dataType: "number", valid: ">=0", example: 3500 },
+      { header: "Selling Price Override", field: "sellingPrice", desc: "Override selling price", required: "No", type: "variable", dataType: "number", valid: "<= Base Price", example: 2800 },
+      { header: "Stock Quantity *", field: "stockQuantity", desc: "Stock for variant", required: "Yes", type: "variable", dataType: "number", valid: ">=0", example: 25 },
+      { header: "Warehouse *", field: "warehouseCodeOrName", desc: "Warehouse for variant stock", required: "Yes", type: "variable", dataType: "string", valid: "Values from _LookupData!E column", example: "WH01 (Main Warehouse)" },
+      { header: "Low Stock Alert", field: "lowStockThreshold", desc: "Low stock threshold", required: "No", type: "variable", dataType: "number", valid: ">=0", example: 5 },
+      { header: "Weight in kg (Override)", field: "weight", desc: "Override weight", required: "No", type: "variable", dataType: "number", valid: ">=0", example: "" },
+      { header: "Length in cm (Override)", field: "length", desc: "Override length", required: "No", type: "variable", dataType: "number", valid: ">=0", example: "" },
+      { header: "Breadth in cm (Override)", field: "breadth", desc: "Override breadth", required: "No", type: "variable", dataType: "number", valid: ">=0", example: "" },
+      { header: "Height in cm (Override)", field: "height", desc: "Override height", required: "No", type: "variable", dataType: "number", valid: ">=0", example: "" },
+    ];
+    variantCols.forEach((c) => referenceRows.push(["Variants", c.header, c.field, c.desc, c.required, c.type, c.dataType, c.valid, c.example]));
+    // SEO sheet columns
+    const seoCols = [
+      { header: "Product Group ID *", field: "productGroupId", desc: "Links to product", required: "Yes", type: "both", dataType: "string", valid: "-", example: "PROD-001" },
+      { header: "SEO Meta Title", field: "metaTitle", desc: "Meta title for SEO", required: "No", type: "both", dataType: "string", valid: "-", example: "Buy Pure Peacock Blue Kanchipuram Silk Saree" },
+      { header: "Meta Description",
+        field: "metaDesc",
+        desc: "Meta description",
+        required: "No",
+        type: "both",
+        dataType: "string",
+        valid: "-",
+        example: "Shop authentic Kanchipuram pure silk saree..." },
+      { header: "Custom URL Slug (Optional)", field: "slug", desc: "Custom slug", required: "No", type: "both", dataType: "string", valid: "-", example: "kanchipuram-pure-silk-saree" },
+      { header: "Schema Markup (JSON)", field: "schemaMarkup", desc: "Structured data JSON", required: "No", type: "both", dataType: "string", valid: "JSON", example: "{...}" },
+    ];
+    seoCols.forEach((c) => referenceRows.push(["SEO", c.header, c.field, c.desc, c.required, c.type, c.dataType, c.valid, c.example]));
+    // Media sheet columns
+    const mediaCols = [
+      { header: "Product Group ID *", field: "productGroupId", desc: "Links to product", required: "Yes", type: "both", dataType: "string", valid: "-", example: "PROD-001" },
+      { header: "Variant SKU (Optional)", field: "variantSku", desc: "If media is for a variant", required: "No", type: "both", dataType: "string", valid: "-", example: "KKS-DHO-002-GLD-40" },
+      { header: "Media Type *", field: "type", desc: "IMAGE or VIDEO", required: "Yes", type: "both", dataType: "enum", valid: "IMAGE, VIDEO", example: "IMAGE" },
+      { header: "Media URL *", field: "url", desc: "Public URL to media", required: "Yes", type: "both", dataType: "string", valid: "HTTPS URL", example: "https://.../image.jpg" },
+      { header: "Alt Text", field: "altText", desc: "Alt attribute for accessibility", required: "No", type: "both", dataType: "string", valid: "-", example: "Front view" },
+      { header: "Title", field: "title", desc: "Media title", required: "No", type: "both", dataType: "string", valid: "-", example: "Front View" },
+      { header: "Description", field: "description", desc: "Long description", required: "No", type: "both", dataType: "string", valid: "-", example: "Full body display..." },
+      { header: "Display Order", field: "order", desc: "Ordering index", required: "No", type: "both", dataType: "number", valid: ">=0", example: 0 },
+      { header: "Thumbnail URL (Video)", field: "thumbnailUrl", desc: "Thumbnail for video", required: "No", type: "both", dataType: "string", valid: "HTTPS URL", example: "" },
+    ];
+    mediaCols.forEach((c) => referenceRows.push(["Media", c.header, c.field, c.desc, c.required, c.type, c.dataType, c.valid, c.example]));
+    // Write reference rows starting after the header row
+    let refIdx = fieldRefStartRow + 2;
+    referenceRows.forEach((vals) => {
+      const r = sheet.getRow(refIdx++);
+      r.values = ["", ...vals]; // shift to column B for readability
+      this.applyBorders(r);
+    });
+    // Optionally adjust column widths for the reference section
+    sheet.getColumn(2).width = 30; // Worksheet
+    sheet.getColumn(3).width = 30; // Header
+    sheet.getColumn(4).width = 30; // Internal field
+    sheet.getColumn(5).width = 40; // Description
+    sheet.getColumn(6).width = 10; // Required
+    sheet.getColumn(7).width = 15; // Product Type
+    sheet.getColumn(8).width = 15; // Data Type
+    sheet.getColumn(9).width = 30; // Valid Values
+    sheet.getColumn(10).width = 30; // Example
+    // End of reference section
     return sheet;
   }
 
