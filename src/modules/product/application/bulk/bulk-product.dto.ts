@@ -113,6 +113,7 @@ export interface BulkParsedMedia {
   order?: number;
   isActive?: boolean;
   variantSku?: string;
+  productGroupId?: string;
 }
 
 export interface BulkParsedProduct {
@@ -154,6 +155,12 @@ export interface BulkParsedProduct {
   };
   media?: BulkParsedMedia[];
   variants?: BulkParsedVariant[];
+  // New fields for raw-text import
+  importNote?: string; // preserves any unrecognised original text
+  groupSuggestion?: {
+    type: "variable" | "simple" | "collection";
+    confidence: number; // 0..1
+  };
   isValid?: boolean;
   errors?: BulkValidationError[];
 }

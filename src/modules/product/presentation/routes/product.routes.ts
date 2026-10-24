@@ -9,6 +9,7 @@ import {
 import { UserRole } from "@/generated/prisma/enums.js";
 import { ProductController } from "../controller/prodcut.controller.js";
 import { BulkProductController } from "../controller/bulk-product.controller.js";
+import { BulkImportDraftController } from "../controller/bulk-import-draft.controller.js";
 import {
   adminCatalogReadLimiter,
   adminCatalogWriteLimiter,
@@ -19,6 +20,7 @@ const router = Router();
 
 const getProductController = () => container.resolve(ProductController);
 const getBulkProductController = () => container.resolve(BulkProductController);
+const getDraftController = () => container.resolve(BulkImportDraftController);
 
 // Configure Multer in-memory storage for bulk excel files (max 50MB)
 const uploadExcel = multer({
@@ -81,6 +83,116 @@ router.post(
   checkPermission("products", "create"),
   uploadExcel.single("file"),
   (req, res) => getBulkProductController().importBulk(req, res)
+);
+
+// ==========================================
+// 🆕 ADMIN ROUTES - BULK IMPORT DRAFTS
+// ==========================================
+
+router.post(
+  "/products/bulk/draft",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().createDraft(req, res)
+);
+
+router.get(
+  "/products/bulk/draft",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().listDrafts(req, res)
+);
+
+router.get(
+  "/products/bulk/draft/:id",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().getDraft(req, res)
+);
+
+router.patch(
+  "/products/bulk/draft/:id",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().updateDraft(req, res)
+);
+
+router.delete(
+  "/products/bulk/draft/:id",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().deleteDraft(req, res)
+);
+
+router.post(
+  "/products/bulk/draft/:id/parse",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  uploadExcel.single("file"),
+  (req, res) => getDraftController().parseDraft(req, res)
+);
+
+router.post(
+  "/products/bulk/draft/:id/match-drive",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().matchDrive(req, res)
+);
+
+router.post(
+  "/products/bulk/draft/:id/import",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().startDraftImport(req, res)
+);
+
+// Background import jobs
+router.post(
+  "/products/bulk/import-job",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().startImportJob(req, res)
+);
+
+router.get(
+  "/products/bulk/job/:jobId",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().getJobStatus(req, res)
+);
+
+router.post(
+  "/products/bulk/job/:jobId/retry",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().retryJob(req, res)
+);
+
+// Drive folder list
+router.get(
+  "/products/bulk/drive/folders",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().listDriveFolders(req, res)
+);
+
+// Drive proxy – streams file through the backend without exposing OAuth tokens
+router.get(
+  "/products/bulk/drive-proxy/:fileId",
+  authenticate,
+  (req, res) => getDraftController().driveProxy(req, res)
 );
 
 // ==========================================

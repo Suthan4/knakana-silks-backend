@@ -1,0 +1,242 @@
+import { Request, Response } from "express";
+import { injectable, inject } from "tsyringe";
+import { BulkImportDraftService } from "../../application/bulk/bulk-import-draft.service.js";
+import { BulkImportJobService } from "../../application/bulk/bulk-import-job.service.js";
+import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
+import {
+  CreateBulkImportDraftSchema,
+  UpdateBulkImportDraftSchema,
+  MatchDriveSchema,
+} from "../../application/bulk/dto/bulk-import-draft.dto.js";
+import { AppError } from "@/shared/utils/errors.js";
+
+@injectable()
+export class BulkImportDraftController {
+  constructor(
+    @inject(BulkImportDraftService)
+    private service: BulkImportDraftService,
+    @inject(BulkImportJobService)
+    private jobService: BulkImportJobService,
+    @inject(DriveService)
+    private driveService: DriveService
+  ) {}
+
+  // ── POST /api/products/bulk/draft ─────────────────────────────────────────
+
+  async createDraft(req: Request, res: Response): Promise<void> {
+    try {
+      const dto = CreateBulkImportDraftSchema.parse(req.body);
+      const userId = BigInt(req.user!.userId);
+      const draft = await this.service.createDraft(userId, dto);
+      res.status(201).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── GET /api/products/bulk/draft ──────────────────────────────────────────
+
+  async listDrafts(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = BigInt(req.user!.userId);
+      const drafts = await this.service.listDrafts(userId);
+      res.status(200).json({ success: true, data: drafts });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── GET /api/products/bulk/draft/:id ──────────────────────────────────────
+
+  async getDraft(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const userId = BigInt(req.user!.userId);
+      const draft = await this.service.getDraft(id, userId);
+      res.status(200).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── PATCH /api/products/bulk/draft/:id ────────────────────────────────────
+
+  async updateDraft(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const dto = UpdateBulkImportDraftSchema.parse(req.body);
+      const userId = BigInt(req.user!.userId);
+      const draft = await this.service.updateDraft(id, userId, dto);
+      res.status(200).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── DELETE /api/products/bulk/draft/:id ───────────────────────────────────
+
+  async deleteDraft(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const userId = BigInt(req.user!.userId);
+      await this.service.deleteDraft(id, userId);
+      res.status(204).send();
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/draft/:id/parse ───────────────────────────────
+
+  async parseDraft(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const userId = BigInt(req.user!.userId);
+
+      if (req.file) {
+        const draft = await this.service.parseAndValidate(id, userId, req.file.buffer);
+        res.status(200).json({ success: true, data: draft });
+        return;
+      }
+
+      const rawText = req.body?.rawText || req.body?.rawInput;
+      if (rawText !== undefined) {
+        const draft = await this.service.parseRawInput(id, userId, rawText);
+        res.status(200).json({ success: true, data: draft });
+        return;
+      }
+
+      // Default: parse existing draft's rawInput
+      const draft = await this.service.parseRawInput(id, userId);
+      res.status(200).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/draft/:id/match-drive ─────────────────────────
+
+  async matchDrive(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const dto = MatchDriveSchema.parse(req.body);
+      const userId = BigInt(req.user!.userId);
+      const draft = await this.service.matchDrive(id, userId, dto);
+      res.status(200).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/draft/:id/import ──────────────────────────────
+
+  async startDraftImport(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const userId = BigInt(req.user!.userId);
+      const job = await this.service.startImportJob(id, userId);
+      res.status(202).json({
+        success: true,
+        message: "Background import job initiated",
+        data: job,
+      });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/import-job ─────────────────────────────────────
+
+  async startImportJob(req: Request, res: Response): Promise<void> {
+    try {
+      const { products, draftId } = req.body;
+      const userId = req.user!.userId;
+      const job = await this.jobService.startJob({
+        userId,
+        draftId,
+        products,
+      });
+      res.status(202).json({
+        success: true,
+        message: "Bulk import job started",
+        data: job,
+      });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── GET /api/products/bulk/job/:jobId ─────────────────────────────────────
+
+  async getJobStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const jobId = String(req.params.jobId);
+      const userId = req.user!.userId;
+      const job = await this.jobService.getJob(jobId, userId);
+      res.status(200).json({ success: true, data: job });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/job/:jobId/retry ──────────────────────────────
+
+  async retryJob(req: Request, res: Response): Promise<void> {
+    try {
+      const jobId = String(req.params.jobId);
+      const userId = req.user!.userId;
+      const newJob = await this.jobService.retryJob(jobId, userId);
+      res.status(202).json({
+        success: true,
+        message: "Retry import job started",
+        data: newJob,
+      });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── GET /api/products/bulk/drive/folders ──────────────────────────────────
+
+  async listDriveFolders(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const folders = await this.driveService.listFolders(userId);
+      res.status(200).json({ success: true, data: folders });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── GET /api/products/bulk/drive-proxy/:fileId ────────────────────────────
+
+  async driveProxy(req: Request, res: Response): Promise<void> {
+    try {
+      const fileId = String(req.params.fileId);
+      const userId = req.user!.userId;
+      await this.driveService.streamFile(userId, fileId, res);
+    } catch (err: any) {
+      console.error("❌ Drive proxy streaming error:", err.message);
+      res.status(502).json({ success: false, message: "Failed to stream file from Google Drive" });
+    }
+  }
+}
+
+// ─── Error helper ─────────────────────────────────────────────────────────────
+
+function handleError(err: any, res: Response): void {
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({ success: false, message: err.message });
+    return;
+  }
+  if (err?.name === "ZodError") {
+    res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: err.errors,
+    });
+    return;
+  }
+  console.error("❌ BulkImportDraftController error:", err);
+  res.status(500).json({ success: false, message: err.message || "Internal server error" });
+}
