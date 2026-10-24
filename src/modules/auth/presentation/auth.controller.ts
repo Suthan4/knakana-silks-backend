@@ -1,8 +1,8 @@
-import { Response,Request } from "express";
+import { Response, Request } from "express";
 import { inject, injectable } from "tsyringe";
-
 import { z } from "zod";
 import { AuthService } from "../application/services/auth.service.js";
+import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
 
 // Validation schemas
 const registerSchema = z.object({
@@ -45,7 +45,10 @@ const changePasswordSchema = z.object({
 
 @injectable()
 export class AuthController {
-  constructor(@inject(AuthService) private authService: AuthService) {}
+  constructor(
+    @inject(AuthService) private authService: AuthService,
+    @inject(DriveService) private driveService: DriveService
+  ) {}
 
   async register(req: Request, res: Response) {
     try {
@@ -73,7 +76,7 @@ export class AuthController {
     }
   }
 
-    // NEW: Update Profile
+  // NEW: Update Profile
   async updateProfile(req: Request, res: Response) {
     try {
       const userId = BigInt(req.user!.userId);
@@ -111,7 +114,6 @@ export class AuthController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
-
 
   async login(req: Request, res: Response) {
     try {
@@ -237,6 +239,80 @@ export class AuthController {
       });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
+  // ── GET /api/auth/google ──────────────────────────────────────────────────
+  async redirectToGoogle(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId || (req.query.userId as string);
+      if (!userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: User ID required" });
+        return;
+      }
+
+      const host = req.get("host") || "";
+      const draftId = req.query.draftId ? String(req.query.draftId) : undefined;
+      const authUrl = this.driveService.getAuthUrl(String(userId), host, draftId);
+      res.redirect(authUrl);
+    } catch (error: any) {
+      const statusCode = error.statusCode || 400;
+      res.status(statusCode).json({ success: false, message: error.message });
+    }
+  }
+
+  // ── GET /api/auth/google/callback ─────────────────────────────────────────
+  async handleGoogleCallback(req: Request, res: Response): Promise<void> {
+    const host = req.get("host") || "";
+
+    try {
+      const { code, state, error, error_description } = req.query;
+
+      // Handle denied permissions or OAuth error returned by Google
+      if (error) {
+        const errorMsg =
+          error === "access_denied"
+            ? "Access denied: Permissions to Google Drive were not granted"
+            : `Google OAuth error: ${error_description || error}`;
+
+        res.status(400).json({
+          success: false,
+          message: errorMsg,
+          error: String(error),
+        });
+        return;
+      }
+
+      // Handle missing required parameters
+      if (!code || !state) {
+        res.status(400).json({
+          success: false,
+          message: "Missing required query parameters: code and state are required",
+        });
+        return;
+      }
+
+      // Extract user ID (and optional draftId) securely from state
+      const { userId, draftId } = this.driveService.parseState(String(state));
+
+      // Exchange authorization code for tokens, validate refresh token, and upsert
+      await this.driveService.saveTokenFromCode(userId, String(code), host);
+
+      // Environment-Aware Redirection to the designated bulk upload view
+      const queryParams: Record<string, string> = { drive_connected: "true" };
+      if (draftId) {
+        queryParams.draftId = draftId;
+      }
+
+      const redirectUrl = this.driveService.getFrontendBulkUploadUrl(host, queryParams);
+      res.redirect(redirectUrl);
+    } catch (error: any) {
+      console.error("❌ Google callback error:", error);
+      const statusCode = error.statusCode || 500;
+      res.status(statusCode).json({
+        success: false,
+        message: error.message || "Google Authentication failed",
+      });
     }
   }
 }
