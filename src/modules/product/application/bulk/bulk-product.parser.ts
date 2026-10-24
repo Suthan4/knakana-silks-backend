@@ -1,0 +1,383 @@
+import ExcelJS from "exceljs";
+import {
+  BulkProductRow,
+  BulkVariantRow,
+  BulkSeoRow,
+  BulkMediaRow,
+} from "./bulk-product.dto.js";
+import { MediaType } from "@/generated/prisma/enums.js";
+
+export interface ParsedWorkbookData {
+  products: BulkProductRow[];
+  variants: BulkVariantRow[];
+  seo: BulkSeoRow[];
+  media: BulkMediaRow[];
+}
+
+export class BulkProductParser {
+  /**
+   * Parses an Excel buffer into typed row collections for all sheets.
+   */
+  public static async parseWorkbook(buffer: Buffer): Promise<ParsedWorkbookData> {
+    const workbook = new ExcelJS.Workbook();
+    // ExcelJS accepts Uint8Array or ArrayBuffer or Buffer
+    await workbook.xlsx.load(buffer as any);
+
+    const productsSheet = this.findSheet(workbook, ["products", "product"]);
+    const variantsSheet = this.findSheet(workbook, ["variants", "variant"]);
+    const seoSheet = this.findSheet(workbook, ["seo", "metadata"]);
+    const mediaSheet = this.findSheet(workbook, ["media", "images", "image"]);
+
+    const products = productsSheet ? this.parseProductsSheet(productsSheet) : [];
+    const variants = variantsSheet ? this.parseVariantsSheet(variantsSheet) : [];
+    const seo = seoSheet ? this.parseSeoSheet(seoSheet) : [];
+    const media = mediaSheet ? this.parseMediaSheet(mediaSheet) : [];
+
+    return { products, variants, seo, media };
+  }
+
+  private static findSheet(
+    workbook: ExcelJS.Workbook,
+    candidates: string[]
+  ): ExcelJS.Worksheet | undefined {
+    for (const candidate of candidates) {
+      const match = workbook.worksheets.find(
+        (ws) => ws.name.trim().toLowerCase() === candidate.toLowerCase()
+      );
+      if (match) return match;
+    }
+    return undefined;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CELL VALUE EXTRACTORS
+  // ─────────────────────────────────────────────────────────────────────────────
+  public static getCellString(cell: ExcelJS.Cell): string {
+    const val = cell.value;
+    if (val === null || val === undefined) return "";
+    if (typeof val === "string") return val.trim();
+    if (typeof val === "number" || typeof val === "boolean") return String(val).trim();
+    if (typeof val === "object") {
+      // Rich text
+      if ("richText" in val && Array.isArray((val as any).richText)) {
+        return (val as any).richText.map((t: any) => t.text || "").join("").trim();
+      }
+      // Hyperlink
+      if ("text" in val) return String((val as any).text).trim();
+      // Formula result
+      if ("result" in val && val.result !== undefined && val.result !== null) {
+        return String(val.result).trim();
+      }
+    }
+    return String(val).trim();
+  }
+
+  public static getCellNumber(cell: ExcelJS.Cell): number | undefined {
+    const str = this.getCellString(cell).replace(/,/g, "");
+    if (!str) return undefined;
+    const num = parseFloat(str);
+    return isNaN(num) ? undefined : num;
+  }
+
+  public static getCellBoolean(cell: ExcelJS.Cell, defaultValue = false): boolean {
+    const str = this.getCellString(cell).toLowerCase();
+    if (!str) return defaultValue;
+    if (["yes", "true", "1", "y", "active", "enabled"].includes(str)) return true;
+    if (["no", "false", "0", "n", "inactive", "disabled"].includes(str)) return false;
+    return defaultValue;
+  }
+
+  private static buildHeaderMap(row: ExcelJS.Row): Map<string, number> {
+    const map = new Map<string, number>();
+    row.eachCell((cell, colNumber) => {
+      const text = this.getCellString(cell).toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (text) {
+        map.set(text, colNumber);
+      }
+    });
+    return map;
+  }
+
+  private static findCol(map: Map<string, number>, keys: string[]): number | undefined {
+    for (const key of keys) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (map.has(normalized)) return map.get(normalized);
+      // Partial match
+      for (const [mapKey, col] of map.entries()) {
+        if (mapKey.includes(normalized) || normalized.includes(mapKey)) {
+          return col;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARSE PRODUCTS SHEET
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static parseProductsSheet(sheet: ExcelJS.Worksheet): BulkProductRow[] {
+    const rows: BulkProductRow[] = [];
+    if (sheet.rowCount < 2) return rows;
+
+    const headerMap = this.buildHeaderMap(sheet.getRow(1));
+
+    const colGroupId = this.findCol(headerMap, ["productgroupid", "groupid"]);
+    const colName = this.findCol(headerMap, ["productname", "name", "title"]);
+    const colCategory = this.findCol(headerMap, ["categoryfullpath", "categorypath", "category"]);
+    const colType = this.findCol(headerMap, ["producttype", "type"]);
+    const colDesc = this.findCol(headerMap, ["description", "desc"]);
+    const colSku = this.findCol(headerMap, ["parentbasesku", "basesku", "parentsku", "sku"]);
+    const colBasePrice = this.findCol(headerMap, ["basepricemrp", "baseprice", "mrp", "actualprice"]);
+    const colSellingPrice = this.findCol(headerMap, ["sellingprice", "saleprice", "price"]);
+    const colStock = this.findCol(headerMap, ["stockquantitysimple", "stockquantity", "stock", "quantity"]);
+    const colWarehouse = this.findCol(headerMap, ["warehousesimple", "warehouse", "warehousecode"]);
+    const colThreshold = this.findCol(headerMap, ["lowstockalert", "lowstockthreshold", "threshold"]);
+    const colWeight = this.findCol(headerMap, ["weightinkg", "weight"]);
+    const colLength = this.findCol(headerMap, ["lengthincm", "length"]);
+    const colBreadth = this.findCol(headerMap, ["breadthincm", "breadth", "width"]);
+    const colHeight = this.findCol(headerMap, ["heightincm", "height"]);
+    const colHsn = this.findCol(headerMap, ["hsncode", "hsn"]);
+    const colArtisan = this.findCol(headerMap, ["artisanname", "artisan"]);
+    const colArtisanLoc = this.findCol(headerMap, ["artisanlocation"]);
+    const colArtisanAbout = this.findCol(headerMap, ["artisanabout"]);
+    const colBackorders = this.findCol(headerMap, ["allowbackorders", "allowoutofstockorders"]);
+    const colVideoConsult = this.findCol(headerMap, ["videoconsultation", "hasvideoconsultation"]);
+    const colVideoPurchase = this.findCol(headerMap, ["videopurchasing", "videopurchasingenabled"]);
+    const colVideoNote = this.findCol(headerMap, ["videonote", "videoconsultationnote"]);
+    const colActive = this.findCol(headerMap, ["activestate", "isactive", "active", "status"]);
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // Skip header
+
+      const productGroupId = colGroupId ? this.getCellString(row.getCell(colGroupId)) : "";
+      const name = colName ? this.getCellString(row.getCell(colName)) : "";
+
+      // Skip empty rows
+      if (!productGroupId && !name) return;
+
+      const rawType = colType ? this.getCellString(row.getCell(colType)).toLowerCase() : "simple";
+      const productType: "simple" | "variable" = rawType.includes("var") ? "variable" : "simple";
+
+      const basePrice = colBasePrice ? this.getCellNumber(row.getCell(colBasePrice)) ?? 0 : 0;
+      const sellingPrice = colSellingPrice ? this.getCellNumber(row.getCell(colSellingPrice)) ?? basePrice : basePrice;
+
+      rows.push({
+        rowNumber,
+        productGroupId,
+        name,
+        categoryPath: colCategory ? this.getCellString(row.getCell(colCategory)) : "",
+        productType,
+        description: colDesc ? this.getCellString(row.getCell(colDesc)) : "",
+        sku: colSku ? this.getCellString(row.getCell(colSku)) : undefined,
+        basePrice,
+        sellingPrice,
+        stockQuantity: colStock ? this.getCellNumber(row.getCell(colStock)) : undefined,
+        warehouseCodeOrName: colWarehouse ? this.getCellString(row.getCell(colWarehouse)) : undefined,
+        lowStockThreshold: colThreshold ? this.getCellNumber(row.getCell(colThreshold)) : 10,
+        weight: colWeight ? this.getCellNumber(row.getCell(colWeight)) : undefined,
+        length: colLength ? this.getCellNumber(row.getCell(colLength)) : undefined,
+        breadth: colBreadth ? this.getCellNumber(row.getCell(colBreadth)) : undefined,
+        height: colHeight ? this.getCellNumber(row.getCell(colHeight)) : undefined,
+        hsnCode: colHsn ? this.getCellString(row.getCell(colHsn)) : undefined,
+        artisanName: colArtisan ? this.getCellString(row.getCell(colArtisan)) : undefined,
+        artisanLocation: colArtisanLoc ? this.getCellString(row.getCell(colArtisanLoc)) : undefined,
+        artisanAbout: colArtisanAbout ? this.getCellString(row.getCell(colArtisanAbout)) : undefined,
+        allowOutOfStockOrders: colBackorders ? this.getCellBoolean(row.getCell(colBackorders), false) : false,
+        hasVideoConsultation: colVideoConsult ? this.getCellBoolean(row.getCell(colVideoConsult), false) : false,
+        videoPurchasingEnabled: colVideoPurchase ? this.getCellBoolean(row.getCell(colVideoPurchase), false) : false,
+        videoConsultationNote: colVideoNote ? this.getCellString(row.getCell(colVideoNote)) : undefined,
+        isActive: colActive ? this.getCellBoolean(row.getCell(colActive), true) : true,
+      });
+    });
+
+    return rows;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARSE VARIANTS SHEET
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static parseVariantsSheet(sheet: ExcelJS.Worksheet): BulkVariantRow[] {
+    const rows: BulkVariantRow[] = [];
+    if (sheet.rowCount < 2) return rows;
+
+    const headerMap = this.buildHeaderMap(sheet.getRow(1));
+
+    const colGroupId = this.findCol(headerMap, ["productgroupid", "groupid"]);
+    const colVariantSku = this.findCol(headerMap, ["variantsku", "sku"]);
+    const colSize = this.findCol(headerMap, ["size"]);
+    const colColor = this.findCol(headerMap, ["color"]);
+    const colFabric = this.findCol(headerMap, ["fabric"]);
+    const colAttributes = this.findCol(headerMap, ["otherattributes", "attributes", "dynamicattributes"]);
+    const colBasePrice = this.findCol(headerMap, ["basepriceoverride", "baseprice"]);
+    const colSellingPrice = this.findCol(headerMap, ["sellingpriceoverride", "sellingprice", "price"]);
+    const colStock = this.findCol(headerMap, ["stockquantity", "stock", "quantity"]);
+    const colWarehouse = this.findCol(headerMap, ["warehouse", "warehousecode"]);
+    const colThreshold = this.findCol(headerMap, ["lowstockalert", "lowstockthreshold"]);
+    const colWeight = this.findCol(headerMap, ["weightinkgoverride", "weight"]);
+    const colLength = this.findCol(headerMap, ["lengthincmoverride", "length"]);
+    const colBreadth = this.findCol(headerMap, ["breadthincmoverride", "breadth", "width"]);
+    const colHeight = this.findCol(headerMap, ["heightincmoverride", "height"]);
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const productGroupId = colGroupId ? this.getCellString(row.getCell(colGroupId)) : "";
+      const variantSku = colVariantSku ? this.getCellString(row.getCell(colVariantSku)) : "";
+      const size = colSize ? this.getCellString(row.getCell(colSize)) : "";
+      const color = colColor ? this.getCellString(row.getCell(colColor)) : "";
+      const fabric = colFabric ? this.getCellString(row.getCell(colFabric)) : "";
+
+      if (!productGroupId && !variantSku && !size && !color) return;
+
+      const rawAttributes = colAttributes ? this.getCellString(row.getCell(colAttributes)) : "";
+      const attributes = this.parseDynamicAttributes(rawAttributes, size, color, fabric);
+
+      rows.push({
+        rowNumber,
+        productGroupId,
+        variantSku: variantSku || undefined,
+        size: size || undefined,
+        color: color || undefined,
+        fabric: fabric || undefined,
+        attributes,
+        basePrice: colBasePrice ? this.getCellNumber(row.getCell(colBasePrice)) : undefined,
+        sellingPrice: colSellingPrice ? this.getCellNumber(row.getCell(colSellingPrice)) : undefined,
+        stockQuantity: colStock ? this.getCellNumber(row.getCell(colStock)) : 0,
+        warehouseCodeOrName: colWarehouse ? this.getCellString(row.getCell(colWarehouse)) : undefined,
+        lowStockThreshold: colThreshold ? this.getCellNumber(row.getCell(colThreshold)) : 10,
+        weight: colWeight ? this.getCellNumber(row.getCell(colWeight)) : undefined,
+        length: colLength ? this.getCellNumber(row.getCell(colLength)) : undefined,
+        breadth: colBreadth ? this.getCellNumber(row.getCell(colBreadth)) : undefined,
+        height: colHeight ? this.getCellNumber(row.getCell(colHeight)) : undefined,
+      });
+    });
+
+    return rows;
+  }
+
+  private static parseDynamicAttributes(
+    rawText: string,
+    size?: string,
+    color?: string,
+    fabric?: string
+  ): Record<string, string> {
+    const attrs: Record<string, string> = {};
+    if (size) attrs.Size = size;
+    if (color) attrs.Color = color;
+    if (fabric) attrs.Fabric = fabric;
+
+    if (!rawText) return attrs;
+
+    // Check if JSON
+    if (rawText.startsWith("{") && rawText.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(rawText);
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v !== undefined && v !== null) {
+            attrs[k.trim()] = String(v).trim();
+          }
+        }
+        return attrs;
+      } catch {
+        // Fall back to key:value parsing
+      }
+    }
+
+    // Split by comma or semicolon
+    const pairs = rawText.split(/[,;]/);
+    for (const pair of pairs) {
+      const sepIndex = pair.indexOf(":") !== -1 ? pair.indexOf(":") : pair.indexOf("=");
+      if (sepIndex !== -1) {
+        const key = pair.substring(0, sepIndex).trim();
+        const value = pair.substring(sepIndex + 1).trim();
+        if (key && value) {
+          attrs[key] = value;
+        }
+      }
+    }
+
+    return attrs;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARSE SEO SHEET
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static parseSeoSheet(sheet: ExcelJS.Worksheet): BulkSeoRow[] {
+    const rows: BulkSeoRow[] = [];
+    if (sheet.rowCount < 2) return rows;
+
+    const headerMap = this.buildHeaderMap(sheet.getRow(1));
+
+    const colGroupId = this.findCol(headerMap, ["productgroupid", "groupid"]);
+    const colMetaTitle = this.findCol(headerMap, ["seometatitle", "metatitle", "title"]);
+    const colMetaDesc = this.findCol(headerMap, ["metadescription", "metadesc", "description"]);
+    const colSlug = this.findCol(headerMap, ["customurlslug", "urlslug", "slug"]);
+    const colSchema = this.findCol(headerMap, ["schemamarkup", "schema"]);
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const productGroupId = colGroupId ? this.getCellString(row.getCell(colGroupId)) : "";
+      if (!productGroupId) return;
+
+      rows.push({
+        rowNumber,
+        productGroupId,
+        metaTitle: colMetaTitle ? this.getCellString(row.getCell(colMetaTitle)) : undefined,
+        metaDesc: colMetaDesc ? this.getCellString(row.getCell(colMetaDesc)) : undefined,
+        slug: colSlug ? this.getCellString(row.getCell(colSlug)) : undefined,
+        schemaMarkup: colSchema ? this.getCellString(row.getCell(colSchema)) : undefined,
+      });
+    });
+
+    return rows;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARSE MEDIA SHEET
+  // ─────────────────────────────────────────────────────────────────────────────
+  private static parseMediaSheet(sheet: ExcelJS.Worksheet): BulkMediaRow[] {
+    const rows: BulkMediaRow[] = [];
+    if (sheet.rowCount < 2) return rows;
+
+    const headerMap = this.buildHeaderMap(sheet.getRow(1));
+
+    const colGroupId = this.findCol(headerMap, ["productgroupid", "groupid"]);
+    const colVariantSku = this.findCol(headerMap, ["variantsku", "sku"]);
+    const colType = this.findCol(headerMap, ["mediatype", "type"]);
+    const colUrl = this.findCol(headerMap, ["mediaurl", "url", "imageurl"]);
+    const colAltText = this.findCol(headerMap, ["alttext", "alt"]);
+    const colTitle = this.findCol(headerMap, ["title"]);
+    const colDesc = this.findCol(headerMap, ["description", "desc"]);
+    const colOrder = this.findCol(headerMap, ["displayorder", "order"]);
+    const colThumb = this.findCol(headerMap, ["thumbnailurl", "thumbnail"]);
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const productGroupId = colGroupId ? this.getCellString(row.getCell(colGroupId)) : "";
+      const url = colUrl ? this.getCellString(row.getCell(colUrl)) : "";
+      if (!productGroupId && !url) return;
+
+      const rawType = colType ? this.getCellString(row.getCell(colType)).toUpperCase() : "IMAGE";
+      const type: MediaType = rawType === "VIDEO" ? MediaType.VIDEO : MediaType.IMAGE;
+
+      rows.push({
+        rowNumber,
+        productGroupId,
+        variantSku: colVariantSku ? this.getCellString(row.getCell(colVariantSku)) : undefined,
+        type,
+        url,
+        altText: colAltText ? this.getCellString(row.getCell(colAltText)) : undefined,
+        title: colTitle ? this.getCellString(row.getCell(colTitle)) : undefined,
+        description: colDesc ? this.getCellString(row.getCell(colDesc)) : undefined,
+        order: colOrder ? this.getCellNumber(row.getCell(colOrder)) ?? 0 : 0,
+        thumbnailUrl: colThumb ? this.getCellString(row.getCell(colThumb)) : undefined,
+        isActive: true,
+      });
+    });
+
+    return rows;
+  }
+}
+
