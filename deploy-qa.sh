@@ -20,7 +20,7 @@ npx prisma generate
 npx prisma migrate deploy
 
 echo "🏗 Building..."
-npm run build
+NODE_OPTIONS="--max-old-space-size=2560" npm run build
 
 echo "♻️ Reloading PM2..."
 pm2 reload api-qa --update-env
