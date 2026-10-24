@@ -19,8 +19,9 @@ const getRedisConfig = (): { url?: string; options: RedisOptions } => {
   const commonOptions: RedisOptions = {
     maxRetriesPerRequest: 1, // Fail fast on cache operations so DB fallback is instantaneous
     enableReadyCheck: true,
-    lazyConnect: false,
+    lazyConnect: process.env.NODE_ENV === "test",
     retryStrategy: (times: number) => {
+      if (process.env.NODE_ENV === "test" || times > 3) return null;
       // Exponential backoff with 2000ms max delay
       const delay = Math.min(times * 50, 2000);
       return delay;

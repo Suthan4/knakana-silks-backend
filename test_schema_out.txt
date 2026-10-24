@@ -1,0 +1,1254 @@
+﻿// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CARD          // Credit/Debit Cards
+  UPI           // UPI (Google Pay, PhonePe, etc.)
+  NETBANKING    // Net Banking
+  WALLET        // Wallets (Paytm, Mobikwik, etc.)
+  EMI           // EMI/Cardless EMI
+  COD           // Cash on Delivery
+  PAYLATER      // Buy Now Pay Later (Simpl, LazyPay, etc.)
+}
+
+enum ConsultationPlatform {
+  ZOOM
+  WHATSAPP
+}
+
+enum ConsultationStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  ORDER_CONFIRMATION
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  SHIPPING_UPDATE
+  DELIVERY_CONFIRMATION
+  RETURN_UPDATE
+  REFUND_UPDATE
+  PASSWORD_RESET
+  GENERAL
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum CouponScope {
+  ALL
+  CATEGORY
+  PRODUCT
+}
+
+enum CouponUserEligibility {
+  ALL
+  SPECIFIC_USERS
+  FIRST_TIME
+  NEW_USERS
+}
+
+enum CTAStyle {
+  PRIMARY
+  SECONDARY
+  OUTLINE
+  TEXT
+}
+
+enum SectionType {
+  HERO_SLIDER
+  NEW_ARRIVALS
+  FEATURED
+  COLLECTIONS
+  CATEGORIES
+  BEST_SELLERS
+  TRENDING
+  SEASONAL
+  CATEGORY_SPOTLIGHT
+  CUSTOM
+}
+
+
+// NEW: MediaType enum for supporting different file types
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  OTHER
+}
+
+enum ReturnReason {
+  DEFECTIVE
+  WRONG_ITEM
+  SIZE_ISSUE
+  COLOR_DIFFERENCE
+  QUALITY_ISSUE
+  NOT_AS_DESCRIBED
+  DAMAGED_IN_TRANSIT
+  CHANGED_MIND
+  OTHER
+}
+
+enum ReturnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  IN_TRANSIT
+  RECEIVED
+  INSPECTED
+  REFUND_INITIATED
+  REFUND_COMPLETED
+  CLOSED
+}
+
+enum RefundMethod {
+  ORIGINAL_PAYMENT
+  STORE_CREDIT
+  BANK_TRANSFER
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+  BOTH
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FULFILLED
+  CANCELLED
+}
+
+enum CourierPreference {
+  CHEAPEST
+  FASTEST
+  CUSTOM
+}
+
+
+model User {
+  id             BigInt           @id @default(autoincrement())
+  email          String           @unique
+  password       String
+  firstName      String
+  lastName       String
+  phone          String?
+  role           UserRole         @default(USER)
+  isActive       Boolean          @default(true)
+  emailVerified  Boolean          @default(false)
+  termsAccepted  Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  permissions    Permission[]
+  addresses      Address[]
+  cart           Cart?
+  wishlist       Wishlist?
+  orders         Order[]
+  reviews        Review[]
+  consultations  Consultation[]
+  notifications  Notification[]
+  searches       SearchHistory[]
+  viewedProducts ProductView[]
+  refreshTokens  RefreshToken[]
+  reviewHelpfulVotes  ReviewHelpfulVote[]
+  eligibleCoupons     Coupon[]    @relation("CouponEligibleUsers")
+  returns             Return[]
+  productRequests    ProductRequest[]
+  driveOAuth          DriveOAuth?
+  bulkImportDrafts   BulkImportDraft[]
+
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+// ---------- Google Drive OAuth ----------
+model DriveOAuth {
+  userId       BigInt   @id @unique
+  clientId     String
+  clientSecret String
+  refreshToken String
+  scopes       String
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+
+model Permission {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt
+  module    String
+  canCreate Boolean   @default(false)
+  canRead   Boolean   @default(true)
+  canUpdate Boolean   @default(false)
+  canDelete Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, module])
+  @@index([userId])
+  @@map("permissions")
+}
+
+model RefreshToken {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt
+  token     String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model Category {
+  id                  BigInt                @id @default(autoincrement())
+  name                String
+  slug                String                @unique
+  description         String?
+  parentId            BigInt?
+  metaTitle           String?
+  metaDesc            String?
+  image               String?
+  isActive            Boolean               @default(true)
+  isRoot              Boolean               @default(false)
+  order               Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+    // ðŸ†• NEW: Category-level video features
+  hasVideoConsultation   Boolean @default(false)
+  videoPurchasingEnabled Boolean @default(false)
+  videoConsultationNote  String? @db.Text
+
+  // Placements where THIS category is the child (i.e. where it's placed under a parent)
+  parentPlacements CategoryPlacement[] @relation("ChildCategory")
+    // Placements where THIS category is the parent (i.e. its children)
+  childPlacements  CategoryPlacement[] @relation("ParentCategory")
+
+  homeSections        HomeSection[]        @relation("SectionCategories")
+  coupons             Coupon[]             @relation("CouponCategories")
+  products            Product[]
+  consultationConfigs ConsultationConfig[]
+
+  @@index([slug])
+  @@index([isRoot])
+  @@map("categories")
+}
+
+model CategoryPlacement{
+  id BigInt @id @default(autoincrement())
+  parentId BigInt
+  childId  BigInt
+  order    Int    @default(0)
+  includeChildren Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Category @relation("ParentCategory", fields: [parentId], references: [id], onDelete: Cascade)
+  child    Category @relation("ChildCategory", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId])
+  @@index([parentId])
+  @@index([childId])
+  @@map("category_placements")
+}
+
+model Product {
+  id                  BigInt                @id @default(autoincrement())
+  name                String
+  slug                String                @unique
+  description         String                @db.Text
+  categoryId          BigInt
+  basePrice           Decimal               @db.Decimal(10, 2)
+  sellingPrice        Decimal               @db.Decimal(10, 2)
+  sku                 String                @unique
+  isActive            Boolean               @default(true)
+  hsnCode             String?
+  hasVariants         Boolean
+   // Artisan details
+  artisanName      String?
+  artisanAbout     String?    @db.Text
+  artisanLocation  String?
+
+  metaTitle           String?
+  metaDesc            String?
+  schemaMarkup        String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+   // ðŸ†• Shipping & Dimensions
+  weight           Decimal?   @db.Decimal(8, 3)  // Weight in kg
+  length           Decimal?   @db.Decimal(8, 2)  // Length in cm
+  breadth          Decimal?   @db.Decimal(8, 2)  // Breadth in cm
+  height           Decimal?   @db.Decimal(8, 2)  // Height in cm
+  volumetricWeight Decimal?   @db.Decimal(8, 3)  // (L Ã— B Ã— H) / 5000
+
+   // ðŸ†• NEW: Out-of-stock ordering
+  allowOutOfStockOrders Boolean  @default(false)
+
+   // ðŸ†• NEW: Video consultation/purchasing
+  hasVideoConsultation  Boolean  @default(false)
+  videoPurchasingEnabled Boolean @default(false)
+  videoConsultationNote  String?  @db.Text
+
+  category            Category             @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  homeSections        HomeSection[]        @relation("SectionProducts")
+  coupons             Coupon[]             @relation("CouponProducts")
+  specifications      Specification[]
+  variants            ProductVariant[]
+  media               ProductMedia[]       // UPDATED: Changed from images to media
+  stock               Stock[]
+  cartItems           CartItem[]
+  wishlistItems       WishlistItem[]
+  orderItems          OrderItem[]
+  reviews             Review[]
+  viewHistory         ProductView[]
+  consultationConfigs ConsultationConfig[]
+  returnItems         ReturnItem[]
+  productRequests     ProductRequest[]
+
+
+
+  @@index([slug])
+  @@index([categoryId])
+  @@index([sku])
+  @@index([hasVariants])
+  @@map("products")
+}
+
+model Specification {
+  id        BigInt    @id @default(autoincrement())
+  productId BigInt
+  key       String
+  value     String
+  createdAt DateTime  @default(now())
+
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("specifications")
+}
+
+model ProductVariant {
+  id         BigInt       @id @default(autoincrement())
+  productId  BigInt
+  
+  // ðŸ†• NEW: Dynamic variant attributes (flexible key-value pairs)
+  attributes Json?        // e.g., {"size": "L", "color": "Red", "material": "Cotton", "style": "Casual"}
+  
+  // EXISTING: Legacy fields (kept for backward compatibility)
+  size       String?
+  color      String?
+  fabric     String?
+  
+  // ðŸ†• NEW: Pricing (optional - falls back to product basePrice/sellingPrice)
+  basePrice     Decimal?     @db.Decimal(10, 2)
+  sellingPrice  Decimal?     @db.Decimal(10, 2)
+  
+  // EXISTING: Legacy price field (kept for backward compatibility, maps to sellingPrice)
+  price      Decimal      @db.Decimal(10, 2)
+  
+  // ðŸ†• NEW: Shipping dimensions (optional - falls back to product dimensions)
+  weight           Decimal?   @db.Decimal(8, 3)
+  length           Decimal?   @db.Decimal(8, 2)
+  breadth          Decimal?   @db.Decimal(8, 2)
+  height           Decimal?   @db.Decimal(8, 2)
+  volumetricWeight Decimal?   @db.Decimal(8, 3)
+  
+  // EXISTING: Unchanged fields
+  sku        String       @unique
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  // EXISTING: Unchanged relations
+  product    Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stock      Stock[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  returnItems ReturnItem[]
+  
+  // ðŸ†• NEW: Variant-specific media relation
+  media      ProductVariantMedia[]
+  productRequests ProductRequest[]
+
+
+  @@index([productId])
+  @@index([sku])
+  @@map("product_variants")
+}
+
+// ðŸ†• NEW MODEL: Variant-specific media (with fallback to product media)
+model ProductVariantMedia {
+  id          BigInt          @id @default(autoincrement())
+  variantId   BigInt
+  type        MediaType       @default(IMAGE)
+  url         String
+  key         String?
+  thumbnailUrl String?
+  altText     String?
+  title       String?
+  description String?         @db.Text
+  mimeType    String?
+  fileSize    BigInt?
+  duration    Int?
+  width       Int?
+  height      Int?
+  order       Int             @default(0)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  variant     ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId])
+  @@index([type])
+  @@index([isActive])
+  @@map("product_variant_media")
+}
+
+// UPDATED: Renamed from ProductImage to ProductMedia with enhanced media support
+model ProductMedia {
+  id          BigInt     @id @default(autoincrement())
+  productId   BigInt
+  type        MediaType  @default(IMAGE)          // NEW: Media type (IMAGE, VIDEO, DOCUMENT, OTHER)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key for deletion/management
+  thumbnailUrl String?                            // Optional thumbnail for videos
+  altText     String?
+  title       String?                             // NEW: Title for better SEO and accessibility
+  description String?    @db.Text                 // NEW: Description for media
+  mimeType    String?                             // NEW: MIME type (image/jpeg, video/mp4, etc.)
+  fileSize    BigInt?                             // NEW: File size in bytes
+  duration    Int?                                // NEW: Duration in seconds (for videos)
+  width       Int?                                // NEW: Width in pixels (for images/videos)
+  height      Int?                                // NEW: Height in pixels (for images/videos)
+  order       Int        @default(0)
+  isActive    Boolean    @default(true)           // NEW: Soft delete capability
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([type])                                 // NEW: Index for filtering by media type
+  @@index([isActive])                             // NEW: Index for active media
+  @@map("product_media")
+}
+
+model ProductRequest {
+  id                BigInt         @id @default(autoincrement())
+  userId            BigInt
+  productId         BigInt
+  variantId         BigInt?
+  quantity          Int            @default(1)
+  status            RequestStatus  @default(PENDING)
+  customerNote      String?        @db.Text
+  adminNote         String?        @db.Text
+  notifyWhenAvailable Boolean      @default(true)
+  estimatedAvailability DateTime?
+  requestNumber     String         @unique
+  
+  // If approved and fulfilled, link to actual order
+  orderId           BigInt?        @unique
+  
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  approvedAt        DateTime?
+  fulfilledAt       DateTime?
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product           Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant           ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  order             Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+  @@index([requestNumber])
+  @@map("product_requests")
+}
+
+model Warehouse {
+  id        BigInt   @id @default(autoincrement())
+  name      String
+  code      String   @unique
+
+  // ðŸ†• Complete Address
+  address         String
+  addressLine2    String?
+  city            String
+  state           String
+  pincode         String
+  country         String   @default("India")
+
+  // ðŸ†• Contact Information
+  contactPerson   String?
+  phone           String?
+  email           String?
+
+  // ðŸ†• Shiprocket Integration
+  isDefaultPickup Boolean  @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stock Stock[]
+
+  @@map("warehouses")
+}
+
+model Stock {
+  id                BigInt             @id @default(autoincrement())
+  productId         BigInt            
+  variantId         BigInt?            
+  warehouseId       BigInt            
+  quantity          Int                @default(0)
+  lowStockThreshold Int                @default(10)
+  updatedAt         DateTime           @updatedAt
+
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant           ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  warehouse         Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  adjustments       StockAdjustment[]
+
+  // Add composite unique constraint instead
+  // This ensures one product/variant can't have duplicate entries in the same warehouse
+  // prevents duplicate stock records for the same product/variant in the same warehouse
+  @@unique([productId, variantId, warehouseId]) 
+  @@index([productId])
+  @@index([variantId])
+  @@index([warehouseId])
+  @@map("stocks")
+}
+
+model StockAdjustment {
+  id        BigInt    @id @default(autoincrement())
+  stockId   BigInt
+  quantity  Int
+  reason    String
+  createdBy String?
+  createdAt DateTime  @default(now())
+
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId])
+  @@map("stock_adjustments")
+}
+
+model Cart {
+  id        BigInt      @id @default(autoincrement())
+  userId    BigInt      @unique
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        BigInt           @id @default(autoincrement())
+  cartId    BigInt
+  productId BigInt
+  variantId BigInt?
+  quantity  Int              @default(1)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId, variantId]) 
+  @@index([cartId])
+  @@index([cartId, productId])
+  @@map("cart_items")
+}
+
+model Wishlist {
+  id        BigInt          @id @default(autoincrement())
+  userId    BigInt          @unique
+  isPublic  Boolean         @default(false)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WishlistItem[]
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         BigInt    @id @default(autoincrement())
+  wishlistId BigInt
+  productId  BigInt
+  createdAt  DateTime  @default(now())
+
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+  @@index([wishlistId])
+  @@map("wishlist_items")
+}
+
+model Address {
+  id             BigInt    @id @default(autoincrement())
+  userId         BigInt
+  fullName       String
+  phone          String
+  addressLine1   String
+  addressLine2   String?
+  city           String
+  state          String
+  pincode        String
+  country        String        @default("India")
+  isDefault      Boolean       @default(false)
+  type           AddressType   @default(SHIPPING)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingOrders Order[]  @relation("ShippingAddress")
+  billingOrders  Order[]  @relation("BillingAddress")
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Order {
+  id                BigInt       @id @default(autoincrement())
+  userId            BigInt
+  orderNumber       String       @unique
+  status            OrderStatus  @default(PENDING)
+
+  // Financial fields
+  subtotal          Decimal      @db.Decimal(10, 2)
+  discount          Decimal      @db.Decimal(10, 2) @default(0)
+  shippingCost      Decimal      @db.Decimal(10, 2)
+  gstAmount         Decimal      @db.Decimal(10, 2) @default(0)  // âœ… NEW
+  total             Decimal      @db.Decimal(10, 2)
+
+  // Addresses
+  shippingAddressId BigInt
+  billingAddressId  BigInt
+  shippingAddressSnapshot   Json?        // ðŸ‘ˆ ADD THIS
+  billingAddressSnapshot    Json? 
+
+  // Coupon       
+  couponId          BigInt?
+
+  // Timestamps
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  shippingInfo      OrderShippingInfo?
+  user              User        @relation(fields: [userId], references: [id])
+  shippingAddress   Address     @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddress    Address     @relation("BillingAddress", fields: [billingAddressId], references: [id])
+  coupon            Coupon?     @relation(fields: [couponId], references: [id])
+  items             OrderItem[]
+  payment           Payment?
+  shipment          Shipment?
+  reviews           Review[]
+  returns           Return[]
+  productRequest     ProductRequest?
+  consultation       Consultation?
+
+
+
+  @@index([userId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([couponId])  // âœ… NEW
+  @@index([createdAt]) 
+  
+  @@map("orders")
+}
+model OrderShippingInfo {
+  id               BigInt   @id @default(autoincrement())
+  orderId          BigInt   @unique
+  
+  // Warehouse/Pickup Information
+  warehouseId      BigInt
+  warehouseName    String
+  warehouseCode    String
+  pickupAddress    String
+  pickupAddressLine2 String?
+  pickupCity       String
+  pickupState      String
+  pickupPincode    String
+  pickupCountry    String   @default("India")
+  pickupPhone      String?
+  pickupEmail      String?
+  pickupContactPerson String?
+  
+  // Shipping Dimensions & Weights
+  totalWeight      Decimal  @db.Decimal(8, 3)
+  volumetricWeight Decimal  @db.Decimal(8, 3)
+  chargeableWeight Decimal  @db.Decimal(8, 3)
+  length           Int
+  breadth          Int
+  height           Int
+
+    // âœ… Courier Selection (NEW)
+  courierPreference        CourierPreference?
+  selectedCourierCompanyId Int?
+  selectedCourierName      String?
+  selectedCourierCharge    Decimal? @db.Decimal(10, 2)
+  selectedCourierEtd       String?  
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([warehouseId])
+  @@map("order_shipping_info")
+}
+model OrderItem {
+  id        BigInt           @id @default(autoincrement())
+  orderId   BigInt
+  productId BigInt
+  variantId BigInt?
+  quantity  Int
+  price     Decimal          @db.Decimal(10, 2)
+  createdAt DateTime         @default(now())
+
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id])
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+  returnItem  ReturnItem?
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id                BigInt         @id @default(autoincrement())
+  orderId           BigInt         @unique
+  razorpayOrderId   String?        @unique
+  razorpayPaymentId String?        @unique
+  method            PaymentMethod
+  status            PaymentStatus  @default(PENDING)
+  amount            Decimal        @db.Decimal(10, 2)
+  refundAmount      Decimal        @db.Decimal(10, 2) @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  // Optional payment details
+  cardNetwork       String?       // "Visa", "Mastercard", "RuPay"
+  cardLast4         String?       // "1234"
+  cardType          String?       // "credit", "debit"
+  upiId             String?       // "user@paytm"
+  bankName          String?       // Bank name
+  walletName        String?       // Wallet name
+
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([razorpayOrderId])
+  @@map("payments")
+}
+
+model Shipment {
+  id                BigInt     @id @default(autoincrement())
+  orderId           BigInt     @unique
+
+  shiprocketOrderId String?    @unique
+  shiprocketShipmentId   String?  @unique  // âœ… shipment_id
+
+  awbCode             String?     // âœ… awb_code
+  courierCompanyId    Int?        // âœ… courier_company_id
+
+  trackingNumber    String?
+  courierName       String?
+  estimatedDelivery DateTime?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([trackingNumber])
+  @@index([awbCode])
+  @@map("shipments")
+}
+
+model Coupon {
+  id            BigInt        @id @default(autoincrement())
+  code          String        @unique
+  description   String?
+  discountType  DiscountType
+  discountValue Decimal       @db.Decimal(10, 2)
+  minOrderValue Decimal       @db.Decimal(10, 2) @default(0)
+  maxUsage      Int?
+  usageCount    Int           @default(0)
+  perUserLimit  Int?
+  validFrom     DateTime
+  validUntil    DateTime
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  scope         CouponScope   @default(ALL)
+  userEligibility CouponUserEligibility @default(ALL)
+  newUserDays     Int?
+  maxDiscountAmount Decimal?  @db.Decimal(10, 2)
+
+  orders        Order[]
+  categories    Category[]    @relation("CouponCategories")
+  products      Product[]     @relation("CouponProducts")
+  eligibleUsers User[]        @relation("CouponEligibleUsers")
+
+  @@index([code])
+  @@map("coupons")
+}
+
+model Review {
+  id                 BigInt @id @default(autoincrement())
+  userId             BigInt
+  productId          BigInt
+  orderId            BigInt?
+  rating             Int
+  comment            String?  @db.Text
+  images             String[] // UPDATED: Consider migrating to ReviewMedia table
+  isVerifiedPurchase Boolean  @default(false)
+  isApproved         Boolean  @default(false)
+  helpfulCount       Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order              Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  helpfulVotes       ReviewHelpfulVote[]
+  media              ReviewMedia[]        // NEW: Support for review media
+
+  @@index([productId, isApproved])
+  @@index([userId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+// NEW: ReviewMedia table for better media management in reviews
+model ReviewMedia {
+  id          BigInt     @id @default(autoincrement())
+  reviewId    BigInt
+  type        MediaType  @default(IMAGE)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for videos
+  mimeType    String?
+  fileSize    BigInt?
+  duration    Int?                                // For videos
+  width       Int?
+  height      Int?
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  review      Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([type])
+  @@map("review_media")
+}
+
+model ReviewHelpfulVote {
+  id        BigInt   @id @default(autoincrement())
+  reviewId  BigInt
+  userId    BigInt
+  createdAt DateTime @default(now())
+
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@map("review_helpful_votes")
+}
+
+model Return {
+  id                  BigInt       @id @default(autoincrement())
+  returnNumber        String       @unique
+  userId              BigInt
+  orderId             BigInt
+  reason              ReturnReason
+  reasonDetails       String       @db.Text
+  images              String[]     // UPDATED: Consider migrating to ReturnMedia table
+  status              ReturnStatus @default(PENDING)
+  refundAmount        Float
+  refundMethod        RefundMethod @default(ORIGINAL_PAYMENT)
+  bankDetails         Json?
+  adminNotes          String?      @db.Text
+  rejectionReason     String?      @db.Text
+  returnShipmentId    BigInt?      @unique
+  razorpayRefundId    String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  returnItems         ReturnItem[]
+  returnShipment      ReturnShipment? @relation(fields: [returnShipmentId], references: [id])
+  media               ReturnMedia[]   // NEW: Support for return media
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([status])
+  @@index([returnNumber])
+  @@map("returns")
+}
+
+// NEW: ReturnMedia table for better media management in returns
+model ReturnMedia {
+  id          BigInt     @id @default(autoincrement())
+  returnId    BigInt
+  type        MediaType  @default(IMAGE)
+  url         String                              // Cloudflare R2 URL
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for videos
+  mimeType    String?
+  fileSize    BigInt?
+  duration    Int?                                // For videos
+  width       Int?
+  height      Int?
+  order       Int        @default(0)
+  description String?    @db.Text                 // Description of the issue shown
+  createdAt   DateTime   @default(now())
+
+  return      Return    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@index([type])
+  @@map("return_media")
+}
+
+model ReturnItem {
+  id           BigInt   @id @default(autoincrement())  
+  returnId     BigInt
+  orderItemId  BigInt   @unique
+  productId    BigInt
+  variantId    BigInt?
+  quantity     Int
+  price        Float
+  createdAt    DateTime @default(now())
+
+  return       Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant      ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([returnId])
+  @@map("return_items")
+}
+
+model ReturnShipment {
+  id                BigInt   @id @default(autoincrement())
+  shiprocketOrderId String   @unique
+  awb               String   @unique
+  courierName       String
+  pickupDate        DateTime
+  trackingUrl       String?
+  status            String
+  currentLocation   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  return            Return?
+
+  @@index([awb])
+  @@map("return_shipments")
+}
+
+
+
+model ConsultationConfig {
+  id         BigInt     @id @default(autoincrement())
+  categoryId BigInt?
+  productId  BigInt?
+  isActive   Boolean    @default(true)
+
+  // ðŸ†• NEW: Enhanced video features
+  enableVideoConsultation    Boolean @default(true)
+  enableVideoPurchasing      Boolean @default(false)
+  consultationDuration       Int?    @default(30)
+  consultationNote           String? @db.Text
+  videoPurchasingInstructions String? @db.Text
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  product    Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@index([productId])
+  @@map("consultation_configs")
+}
+
+model Consultation {
+  id              BigInt                @id @default(autoincrement())
+  userId          BigInt
+  productId       BigInt?
+  categoryId      BigInt?
+  platform        ConsultationPlatform
+  preferredDate   DateTime
+  preferredTime   String
+  status          ConsultationStatus    @default(REQUESTED)
+  meetingLink     String?
+
+   // ðŸ†• NEW: Video purchasing fields
+  isPurchaseConsultation Boolean          @default(false)
+  purchaseCompleted      Boolean          @default(false)
+  orderId                BigInt?          @unique
+  consultationNotes      String?          @db.Text
+
+  approvedBy      String?
+  rejectionReason String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  completedAt     DateTime?
+
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order           Order?               @relation(fields: [orderId], references: [id], onDelete: SetNull)  // ðŸ†• NEW
+
+
+  @@index([userId])
+  @@index([status])
+  @@index([isPurchaseConsultation])     // ðŸ†• NEW
+  @@map("consultations")
+}
+
+model Notification {
+  id        BigInt            @id @default(autoincrement())
+  userId    BigInt
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean           @default(false)
+  metadata  String?
+  createdAt DateTime          @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model SearchHistory {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt?
+  query     String
+  createdAt DateTime  @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("search_history")
+}
+
+model ProductView {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt
+  productId BigInt
+  viewedAt  DateTime  @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([productId])
+  @@map("product_views")
+}
+
+// UPDATED: Enhanced Banner model with media support
+model Banner {
+  id          BigInt     @id @default(autoincrement())
+  title       String
+  type        MediaType  @default(IMAGE)          // NEW: Support for image/video banners
+  url         String                              // Media URL (Desktop view)
+  mobileUrl   String?                             // Mobile Media URL (Mobile view)
+  key         String?                             // R2 object key
+  thumbnailUrl String?                            // Thumbnail for video banners
+  link        String?                             // Click-through URL
+  text        String?                             // Banner text overlay
+  mimeType    String?                             // NEW: MIME type
+  fileSize    BigInt?                             // NEW: File size
+  duration    Int?                                // NEW: Duration for video banners
+  width       Int?                                // NEW: Width
+  height      Int?                                // NEW: Height
+  isActive    Boolean    @default(true)
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([isActive, order])
+  @@index([type])
+  @@map("banners")
+}
+
+// Main HomeSection Model
+model HomeSection {
+  id             BigInt      @id @default(autoincrement())
+  type           SectionType
+  title          String                    
+  subtitle       String?
+  description    String?
+  customTypeName String?
+  
+  // Layout & Styling
+  backgroundColor String?
+  textColor       String?
+  layout          String?     @default("grid")
+  columns         Int?        @default(4)
+  
+  // Display Settings
+  isActive       Boolean     @default(true)
+  order          Int         @default(0)   
+  limit          Int         @default(8)
+  showTitle      Boolean     @default(true)
+  showSubtitle   Boolean     @default(true)
+  
+  // Timestamps
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  products       Product[]      @relation("SectionProducts")
+  categories     Category[]     @relation("SectionCategories")
+  media          SectionMedia[]
+  ctaButtons     SectionCTA[]
+
+  @@index([isActive, order])
+  @@map("home_sections")
+}
+
+// Media Model - Multiple Images/Videos
+model SectionMedia {
+  id              BigInt      @id @default(autoincrement())
+  sectionId       BigInt
+  section         HomeSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  type            MediaType
+  url             String
+  mobileUrl       String?                         // Mobile Media URL (for banner and aesthetic-fullscreen)
+  thumbnailUrl    String?
+  altText         String?
+  title           String?
+  order           Int         @default(0)
+  
+  // Hero Slider Overlays
+  overlayTitle    String?
+  overlaySubtitle String?
+  overlayPosition String?     @default("center")
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([sectionId, order])
+  @@map("section_media")
+}
+
+// CTA Buttons Model
+model SectionCTA {
+  id          BigInt      @id @default(autoincrement())
+  sectionId   BigInt
+  section     HomeSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  text        String
+  url         String
+  style       CTAStyle    @default(PRIMARY)
+  icon        String?
+  order       Int         @default(0)
+  openNewTab  Boolean     @default(false)
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([sectionId, order])
+  @@map("section_ctas")
+}
+
+REPLACED
+
+model SeoMeta {
+  id           BigInt    @id @default(autoincrement())
+  pageType     String
+  pageId       String?
+  metaTitle    String
+  metaDesc     String
+  ogTitle      String?
+  ogDesc       String?
+  ogImage      String?
+  twitterCard  String?
+  canonical    String?
+  schemaMarkup String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([pageType, pageId])
+  @@index([pageType])
+  @@map("seo_meta")
+}

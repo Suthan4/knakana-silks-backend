@@ -14,8 +14,8 @@
     "allowSyntheticDefaultImports": true,
 
     "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
+    "declaration": false,
+    "declarationMap": false,
 
     "strict": true,
     "moduleDetection": "force",

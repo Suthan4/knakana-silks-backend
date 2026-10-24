@@ -379,5 +379,221 @@ export class BulkProductParser {
 
     return rows;
   }
+
+  /**
+   * Parses raw text (JSON, CSV, or TSV) into typed row collections.
+   */
+  public static parseRawText(rawText: string): ParsedWorkbookData {
+    const trimmed = rawText.trim();
+    if (!trimmed) {
+      return { products: [], variants: [], seo: [], media: [] };
+    }
+
+    // 1. JSON parsing
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          const products: BulkProductRow[] = [];
+          const variants: BulkVariantRow[] = [];
+          const seo: BulkSeoRow[] = [];
+          const media: BulkMediaRow[] = [];
+
+          parsed.forEach((item: any, idx: number) => {
+            const rowNumber = idx + 2;
+            const groupId = String(item.productGroupId || item.groupId || item.id || `PROD-${idx + 1}`);
+            products.push({
+              rowNumber,
+              productGroupId: groupId,
+              productType: item.productType || (item.variants?.length ? "variable" : "simple"),
+              name: item.name || "Untitled Product",
+              categoryPath: item.categoryPath || item.category || "",
+              description: item.description || "",
+              basePrice: Number(item.basePrice || item.price || 0),
+              sellingPrice: Number(item.sellingPrice || item.basePrice || item.price || 0),
+              sku: item.sku || undefined,
+              warehouseCodeOrName: item.warehouseCode || item.warehouseCodeOrName || item.stock?.warehouseCode || undefined,
+              stockQuantity: item.stockQuantity !== undefined ? Number(item.stockQuantity) : (item.stock?.quantity ?? 0),
+              lowStockThreshold: item.lowStockThreshold ?? item.stock?.lowStockThreshold ?? 10,
+              hsnCode: item.hsnCode,
+              artisanName: item.artisanName,
+              artisanAbout: item.artisanAbout,
+              artisanLocation: item.artisanLocation,
+              weight: item.weight ? Number(item.weight) : 500,
+              length: item.length ? Number(item.length) : 10,
+              breadth: item.breadth ? Number(item.breadth) : 10,
+              height: item.height ? Number(item.height) : 5,
+              allowOutOfStockOrders: Boolean(item.allowOutOfStockOrders),
+              hasVideoConsultation: Boolean(item.hasVideoConsultation),
+              videoPurchasingEnabled: Boolean(item.videoPurchasingEnabled),
+              videoConsultationNote: item.videoConsultationNote,
+              isActive: item.isActive !== false,
+            });
+
+            if (item.variants && Array.isArray(item.variants)) {
+              item.variants.forEach((v: any, vIdx: number) => {
+                variants.push({
+                  rowNumber: vIdx + 2,
+                  productGroupId: groupId,
+                  variantSku: v.sku || `${groupId}-VAR-${vIdx + 1}`,
+                  size: v.size,
+                  color: v.color,
+                  fabric: v.fabric,
+                  attributes: v.attributes || {},
+                  basePrice: v.basePrice !== undefined ? Number(v.basePrice) : undefined,
+                  sellingPrice: v.sellingPrice !== undefined ? Number(v.sellingPrice) : undefined,
+                  warehouseCodeOrName: v.warehouseCode || v.warehouseCodeOrName || v.stock?.warehouseCode || undefined,
+                  stockQuantity: v.stockQuantity !== undefined ? Number(v.stockQuantity) : (v.stock?.quantity ?? 0),
+                  lowStockThreshold: v.lowStockThreshold ?? v.stock?.lowStockThreshold ?? 10,
+                });
+              });
+            }
+
+            if (item.media && Array.isArray(item.media)) {
+              item.media.forEach((m: any, mIdx: number) => {
+                media.push({
+                  rowNumber: mIdx + 2,
+                  productGroupId: groupId,
+                  variantSku: m.variantSku,
+                  url: typeof m === "string" ? m : (m.url || ""),
+                  type: (m.type === "VIDEO" ? MediaType.VIDEO : MediaType.IMAGE),
+                  altText: m.altText,
+                  order: m.order ?? mIdx,
+                });
+              });
+            }
+
+            if (item.seo) {
+              seo.push({
+                rowNumber,
+                productGroupId: groupId,
+                metaTitle: item.seo.metaTitle,
+                metaDesc: item.seo.metaDesc,
+                slug: item.seo.slug,
+                schemaMarkup: item.seo.schemaMarkup,
+              });
+            }
+          });
+
+          return { products, variants, seo, media };
+        } else if (parsed && typeof parsed === "object") {
+          return {
+            products: Array.isArray(parsed.products) ? parsed.products : [],
+            variants: Array.isArray(parsed.variants) ? parsed.variants : [],
+            seo: Array.isArray(parsed.seo) ? parsed.seo : [],
+            media: Array.isArray(parsed.media) ? parsed.media : [],
+          };
+        }
+      } catch {
+        // Fall back to delimited parser
+      }
+    }
+
+    // 2. CSV / TSV parsing
+    return this.parseDelimitedText(trimmed);
+  }
+
+  private static parseDelimitedText(text: string): ParsedWorkbookData {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      return { products: [], variants: [], seo: [], media: [] };
+    }
+
+    // Determine delimiter: tab vs comma
+    const delimiter = lines[0].includes("\t") ? "\t" : ",";
+    const parseLine = (line: string): string[] => {
+      if (delimiter === "\t") return line.split("\t").map((s) => s.trim());
+      // Basic CSV token parser
+      const regex = /(?:,|\n|^)("(?:(?:"")*[^"]*)*"|[^",\n]*|(?:\n|$))/g;
+      const result: string[] = [];
+      let match;
+      while ((match = regex.exec(line)) !== null) {
+        let val = match[1];
+        if (val === undefined) break;
+        if (val.startsWith('"') && val.endsWith('"')) {
+          val = val.slice(1, -1).replace(/""/g, '"');
+        }
+        result.push(val.trim());
+        if (regex.lastIndex >= line.length) break;
+      }
+      return result;
+    };
+
+    const header = parseLine(lines[0]).map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    const colMap = new Map<string, number>();
+    header.forEach((h, idx) => colMap.set(h, idx));
+
+    const getCol = (cols: string[]): number | undefined => {
+      for (const c of cols) {
+        const idx = colMap.get(c.toLowerCase().replace(/[^a-z0-9]/g, ""));
+        if (idx !== undefined) return idx;
+      }
+      return undefined;
+    };
+
+    const colGroupId = getCol(["productgroupid", "groupid", "id"]);
+    const colType = getCol(["producttype", "type"]);
+    const colName = getCol(["name", "title", "productname"]);
+    const colCat = getCol(["categorypath", "category", "cat"]);
+    const colBasePrice = getCol(["baseprice", "price", "mrp"]);
+    const colSellingPrice = getCol(["sellingprice", "saleprice"]);
+    const colSku = getCol(["sku", "productsku"]);
+    const colStock = getCol(["stockquantity", "stock", "quantity", "qty"]);
+    const colWarehouse = getCol(["warehousecode", "warehouse"]);
+    const colDesc = getCol(["description", "desc"]);
+    const colImages = getCol(["images", "image", "imageurl", "photo", "photos"]);
+
+    const products: BulkProductRow[] = [];
+    const media: BulkMediaRow[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const parts = parseLine(lines[i]);
+      if (parts.length === 0 || !parts.some(Boolean)) continue;
+
+      const rowNumber = i + 1;
+      const productGroupId = (colGroupId !== undefined ? parts[colGroupId] : "") || `PROD-${i}`;
+      const name = (colName !== undefined ? parts[colName] : "") || `Product ${i}`;
+      const basePrice = Number((colBasePrice !== undefined ? parts[colBasePrice] : "0").replace(/[^0-9.]/g, "")) || 0;
+      const sellingPrice = Number((colSellingPrice !== undefined ? parts[colSellingPrice] : "").replace(/[^0-9.]/g, "")) || basePrice;
+
+      products.push({
+        rowNumber,
+        productGroupId,
+        productType: (colType !== undefined && parts[colType]?.toLowerCase() === "variable") ? "variable" : "simple",
+        name,
+        categoryPath: colCat !== undefined ? parts[colCat] : "",
+        description: colDesc !== undefined ? parts[colDesc] : "",
+        basePrice,
+        sellingPrice,
+        sku: colSku !== undefined ? parts[colSku] : undefined,
+        warehouseCodeOrName: colWarehouse !== undefined ? parts[colWarehouse] : undefined,
+        stockQuantity: colStock !== undefined ? Number(parts[colStock]) || 0 : 0,
+        lowStockThreshold: 10,
+        weight: 500,
+        length: 10,
+        breadth: 10,
+        height: 5,
+        isActive: true,
+      });
+
+      // Parse image references if provided
+      if (colImages !== undefined && parts[colImages]) {
+        const imageRefs = parts[colImages].split(/[;,|]/).map((s) => s.trim()).filter(Boolean);
+        imageRefs.forEach((ref, mIdx) => {
+          media.push({
+            rowNumber,
+            productGroupId,
+            type: MediaType.IMAGE,
+            url: ref,
+            altText: `${name} Image ${mIdx + 1}`,
+            order: mIdx,
+            isActive: true,
+          });
+        });
+      }
+    }
+
+    return { products, variants: [], seo: [], media };
+  }
 }
 
