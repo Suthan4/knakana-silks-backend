@@ -1,8 +1,10 @@
+import crypto from "crypto";
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { injectable, inject } from "tsyringe";
 import { PrismaClient } from "@/generated/prisma/client.js";
 import { Response } from "express";
+import { AppError } from "@/shared/utils/errors.js";
 
 /**
  * Google Drive service for bulk import and image matching.
@@ -11,6 +13,287 @@ import { Response } from "express";
 @injectable()
 export class DriveService {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
+
+  /**
+   * Helper to determine correct OAuth redirect URI dynamically based on environment/request host.
+   */
+  getRedirectUri(host: string): string {
+    const normalizedHost = (host || "").trim().toLowerCase();
+
+    // QA environment
+    if (
+      normalizedHost.includes("qa.admin.kankanasilks.com") ||
+      normalizedHost.includes("qa.api.kankanasilks.com") ||
+      normalizedHost.startsWith("qa.")
+    ) {
+      return (
+        process.env.GOOGLE_REDIRECT_URI_QA ||
+        "https://qa.api.kankanasilks.com/api/auth/google/callback"
+      );
+    }
+
+    // Production environment
+    if (
+      normalizedHost.includes("admin.kankanasilks.com") ||
+      normalizedHost.includes("api.kankanasilks.com") ||
+      normalizedHost.includes("kankanasilks.com")
+    ) {
+      return (
+        process.env.GOOGLE_REDIRECT_URI_PROD ||
+        "https://api.kankanasilks.com/api/auth/google/callback"
+      );
+    }
+
+    // Local development
+    if (
+      normalizedHost.includes("localhost") ||
+      normalizedHost.includes("127.0.0.1")
+    ) {
+      const port = process.env.PORT || "3000";
+      const cleanHost = normalizedHost.includes(":")
+        ? normalizedHost
+        : `${normalizedHost}:${port}`;
+      return `http://${cleanHost}/api/auth/google/callback`;
+    }
+
+    // Fallback to configured redirect URI or default local redirect URI
+    return (
+      process.env.GOOGLE_REDIRECT_URI ||
+      "http://localhost:3000/api/auth/google/callback"
+    );
+  }
+
+  /**
+   * Helper to determine correct frontend URL at designated bulk upload view.
+   */
+  getFrontendBulkUploadUrl(
+    host: string,
+    queryParams?: Record<string, string>
+  ): string {
+    const normalizedHost = (host || "").trim().toLowerCase();
+    let baseUrl: string;
+
+    if (
+      normalizedHost.includes("qa.admin.kankanasilks.com") ||
+      normalizedHost.includes("qa.api.kankanasilks.com") ||
+      normalizedHost.startsWith("qa.")
+    ) {
+      baseUrl =
+        process.env.QA_FRONTEND_URL || "https://qa.admin.kankanasilks.com";
+    } else if (
+      normalizedHost.includes("admin.kankanasilks.com") ||
+      normalizedHost.includes("api.kankanasilks.com") ||
+      normalizedHost.includes("kankanasilks.com")
+    ) {
+      baseUrl =
+        process.env.PROD_FRONTEND_URL || "https://admin.kankanasilks.com";
+    } else {
+      baseUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    }
+
+    const cleanBase = baseUrl.replace(/\/+$/, "");
+    const url = new URL(`${cleanBase}/admin/products/bulk-upload`);
+
+    if (queryParams) {
+      for (const [key, value] of Object.entries(queryParams)) {
+        if (value !== undefined && value !== null) {
+          url.searchParams.set(key, value);
+        }
+      }
+    }
+
+    return url.toString();
+  }
+
+  /**
+   * Securely generates the OAuth state parameter signed with HMAC SHA-256.
+   */
+  generateState(userId: string, draftId?: string): string {
+    const secret =
+      process.env.COOKIE_SECRET ||
+      process.env.JWT_ACCESS_SECRET ||
+      "kangana-google-drive-oauth-secret";
+    const timestamp = Date.now();
+    const draftPart = draftId ? `:${draftId}` : "";
+    const data = `${userId}:${timestamp}${draftPart}`;
+    const hmac = crypto.createHmac("sha256", secret).update(data).digest("hex");
+
+    const stateObj: any = {
+      userId: String(userId),
+      timestamp,
+      sig: hmac,
+    };
+    if (draftId) {
+      stateObj.draftId = String(draftId);
+    }
+
+    return Buffer.from(JSON.stringify(stateObj)).toString("base64url");
+  }
+
+  /**
+   * Validates and extracts user ID (and optional draftId) from the OAuth state parameter.
+   */
+  parseState(state: string): { userId: string; draftId?: string } {
+    if (!state) {
+      throw new AppError(400, "Missing OAuth state parameter");
+    }
+
+    const secret =
+      process.env.COOKIE_SECRET ||
+      process.env.JWT_ACCESS_SECRET ||
+      "kangana-google-drive-oauth-secret";
+
+    try {
+      const decodedStr = Buffer.from(state, "base64url").toString("utf-8");
+      if (decodedStr.startsWith("{")) {
+        const payload = JSON.parse(decodedStr);
+        if (payload.userId && payload.timestamp && payload.sig) {
+          const draftPart = payload.draftId ? `:${payload.draftId}` : "";
+          const data = `${payload.userId}:${payload.timestamp}${draftPart}`;
+          const expectedSig = crypto
+            .createHmac("sha256", secret)
+            .update(data)
+            .digest("hex");
+
+          const sigBuf = Buffer.from(payload.sig);
+          const expBuf = Buffer.from(expectedSig);
+          if (
+            sigBuf.length === expBuf.length &&
+            crypto.timingSafeEqual(sigBuf, expBuf)
+          ) {
+            // Validate expiration (15 minutes)
+            const MAX_AGE_MS = 15 * 60 * 1000;
+            if (Date.now() - payload.timestamp < MAX_AGE_MS) {
+              return {
+                userId: String(payload.userId),
+                draftId: payload.draftId ? String(payload.draftId) : undefined,
+              };
+            }
+            throw new AppError(
+              400,
+              "OAuth session expired. Please try connecting Google Drive again."
+            );
+          }
+          throw new AppError(400, "Invalid OAuth state signature");
+        }
+
+        if (payload.userId) {
+          return {
+            userId: String(payload.userId),
+            draftId: payload.draftId ? String(payload.draftId) : undefined,
+          };
+        }
+      }
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+    }
+
+    // Support raw numeric userId string for backwards compatibility and direct testing
+    if (/^\d+$/.test(state.trim())) {
+      return { userId: state.trim() };
+    }
+
+    throw new AppError(400, "Invalid or corrupted OAuth state parameter");
+  }
+
+  /**
+   * Generate Google OAuth URL dynamically based on request host and user ID.
+   * Enforces offline access and consent prompt to ensure a refresh token is always returned.
+   */
+  getAuthUrl(userId: string, host: string, draftId?: string): string {
+    const redirectUri = this.getRedirectUri(host);
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new AppError(
+        500,
+        "Google OAuth credentials (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET) are not configured"
+      );
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      clientId,
+      clientSecret,
+      redirectUri
+    );
+
+    const state = this.generateState(userId, draftId);
+
+    return oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent",
+      scope: ["https://www.googleapis.com/auth/drive.readonly"],
+      state,
+    });
+  }
+
+  /**
+   * Exchange code for tokens, validate presence of refresh token, and upsert to database.
+   */
+  async saveTokenFromCode(
+    userId: string,
+    code: string,
+    host: string
+  ): Promise<void> {
+    const redirectUri = this.getRedirectUri(host);
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new AppError(
+        500,
+        "Google OAuth credentials (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET) are not configured"
+      );
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      clientId,
+      clientSecret,
+      redirectUri
+    );
+
+    let tokens;
+    try {
+      const response = await oauth2Client.getToken(code);
+      tokens = response.tokens;
+    } catch (error: any) {
+      throw new AppError(
+        400,
+        `Failed to exchange authorization code for tokens: ${error.message || "Unknown error"}`
+      );
+    }
+
+    const refreshToken = tokens.refresh_token;
+    if (!refreshToken) {
+      throw new AppError(
+        400,
+        "No refresh token received from Google OAuth. Consent with offline access is required."
+      );
+    }
+
+    const scopes =
+      tokens.scope || "https://www.googleapis.com/auth/drive.readonly";
+
+    await this.prisma.driveOAuth.upsert({
+      where: { userId: BigInt(userId) },
+      update: {
+        refreshToken,
+        clientId,
+        clientSecret,
+        scopes,
+        status: "ACTIVE",
+      },
+      create: {
+        userId: BigInt(userId),
+        refreshToken,
+        clientId,
+        clientSecret,
+        scopes,
+        status: "ACTIVE",
+      },
+    });
+  }
 
   /** Build an OAuth2 client for the given user ID. */
   async getOAuthClient(userId: string): Promise<OAuth2Client> {

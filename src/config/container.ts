@@ -23,6 +23,7 @@ import { registerStockModule } from "@/modules/stock/container.js";
 import { registerReviewModule } from "@/modules/review/container.js";
 import { S3UploadService } from "./s3-upload.js";
 import { CacheService } from "@/cache/cache.service.js";
+import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
 // import { registerUploadModule } from "@/modules/upload/container.js";
 
 export function setupContainer() {
@@ -30,30 +31,34 @@ export function setupContainer() {
   container.registerInstance(PrismaClient, getPrismaClient);
 
   //  ✅ Register Cache Service
-  container.registerSingleton(CacheService)
+  container.registerSingleton(CacheService);
 
   //  ✅ Register S3 service
   container.registerSingleton("S3UploadService", S3UploadService);
 
+  //  ✅ Register Google Drive integration service
+  container.registerSingleton(DriveService);
+  container.register("DriveService", { useToken: DriveService });
+
   registerAuthModule();
-  registerShipmentModule()
+  registerShipmentModule();
   registerWarehouseModule();
   registerCategoryModule();
   registerProductModule();
   registerAddressModule();
   registerCartModule();
   registerWishlistModule();
-  registerBannerModule()
-  registerReviewModule()
-  registerHomeSectionModule()
-  registerCouponModule()
-  registerStockModule()
-  registerOrderModule()
-  registerReturnModule()
-  registerPaymentModule()
-  registerEmailModule()
-  registerProductRequestModule()
-  registerConsultationModule()
-  registerSearchModule()
+  registerBannerModule();
+  registerReviewModule();
+  registerHomeSectionModule();
+  registerCouponModule();
+  registerStockModule();
+  registerOrderModule();
+  registerReturnModule();
+  registerPaymentModule();
+  registerEmailModule();
+  registerProductRequestModule();
+  registerConsultationModule();
+  registerSearchModule();
   console.log("🎉 All modules registered successfully");
 }

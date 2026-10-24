@@ -24,6 +24,7 @@ export function registerProductModule() {
   container.registerSingleton(ProductService);
   container.registerSingleton(BulkProductService);
   container.registerSingleton(DriveService);
+  container.register("DriveService", { useToken: DriveService });
   container.registerSingleton(DriveImageMatcherService);
   container.registerSingleton(BulkImportJobService);
   container.registerSingleton(BulkImportDraftService);
