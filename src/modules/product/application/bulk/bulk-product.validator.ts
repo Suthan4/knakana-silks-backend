@@ -55,10 +55,17 @@ export class BulkProductValidator {
       warehouseList[0];
 
     // Build category lookup maps
+    const categoryById = new Map<string, CategoryCacheInfo>();
     const categoryByPath = new Map<string, CategoryCacheInfo>();
     const categoryByName = new Map<string, CategoryCacheInfo[]>();
     for (const cat of categoryList) {
-      categoryByPath.set(cat.path.toLowerCase().trim(), cat);
+      categoryById.set(String(cat.id).toLowerCase().trim(), cat);
+      const cleanDirect = cat.path.toLowerCase().trim();
+      categoryByPath.set(cleanDirect, cat);
+      // Also normalize arrows/slashes
+      const normPath = cleanDirect.replace(/\s*(?:→|->|\/|\||>)\s*/g, " > ");
+      categoryByPath.set(normPath, cat);
+
       const nameKey = cat.name.toLowerCase().trim();
       const existing = categoryByName.get(nameKey) || [];
       existing.push(cat);
@@ -66,9 +73,11 @@ export class BulkProductValidator {
     }
 
     // Build warehouse lookup maps
+    const warehouseById = new Map<string, WarehouseCacheInfo>();
     const warehouseByCode = new Map<string, WarehouseCacheInfo>();
     const warehouseByName = new Map<string, WarehouseCacheInfo>();
     for (const wh of warehouseList) {
+      warehouseById.set(String(wh.id).toLowerCase().trim(), wh);
       warehouseByCode.set(wh.code.toLowerCase().trim(), wh);
       warehouseByName.set(wh.name.toLowerCase().trim(), wh);
     }
@@ -116,25 +125,20 @@ export class BulkProductValidator {
         });
       }
 
-      // Category Path Resolution
+      // Category Resolution (by categoryId or categoryPath)
       let resolvedCategory: CategoryCacheInfo | undefined;
-      if (!p.categoryPath || p.categoryPath.trim().length === 0) {
-        pErrors.push({
-          sheet: "Products",
-          row: p.rowNumber,
-          productGroupId: p.productGroupId,
-          field: "Category Full Path",
-          message: "Category Full Path is required.",
-          fix: "Select a valid category path from the dropdown (e.g. Sarees > Silk Sarees).",
-          severity: "error",
-        });
-      } else {
-        const cleanPath = p.categoryPath.toLowerCase().trim();
-        resolvedCategory = categoryByPath.get(cleanPath);
+      if (p.categoryId) {
+        resolvedCategory = categoryById.get(String(p.categoryId).toLowerCase().trim());
+      }
+
+      if (!resolvedCategory && p.categoryPath && p.categoryPath.trim().length > 0) {
+        const rawPath = p.categoryPath.toLowerCase().trim();
+        const normPath = rawPath.replace(/\s*(?:→|->|\/|\||>)\s*/g, " > ");
+        resolvedCategory = categoryByPath.get(normPath) || categoryByPath.get(rawPath);
 
         // Try matching by name if full path didn't match directly
         if (!resolvedCategory) {
-          const matchingByName = categoryByName.get(cleanPath);
+          const matchingByName = categoryByName.get(rawPath);
           if (matchingByName && matchingByName.length === 1) {
             resolvedCategory = matchingByName[0];
           } else if (matchingByName && matchingByName.length > 1) {
@@ -147,30 +151,34 @@ export class BulkProductValidator {
               fix: `Use the full category path instead: ${matchingByName.map((c) => c.path).join(" OR ")}`,
               severity: "error",
             });
-          } else {
-            pErrors.push({
-              sheet: "Products",
-              row: p.rowNumber,
-              productGroupId: p.productGroupId,
-              field: "Category Full Path",
-              message: `Category "${p.categoryPath}" does not exist in the catalog.`,
-              fix: "Select an existing category path from the template dropdown.",
-              severity: "error",
-            });
           }
         }
+      }
 
-        if (resolvedCategory && !resolvedCategory.isActive) {
-          pErrors.push({
-            sheet: "Products",
-            row: p.rowNumber,
-            productGroupId: p.productGroupId,
-            field: "Category Full Path",
-            message: `Category "${resolvedCategory.name}" is currently inactive.`,
-            fix: "Select an active category or activate this category in Category Management.",
-            severity: "error",
-          });
-        }
+      if (!resolvedCategory) {
+        pErrors.push({
+          sheet: "Products",
+          row: p.rowNumber,
+          productGroupId: p.productGroupId,
+          field: "Category Full Path",
+          message: p.categoryId
+            ? `Category ID "${p.categoryId}" does not exist in the catalog.`
+            : p.categoryPath
+            ? `Category "${p.categoryPath}" does not exist in the catalog.`
+            : "Category is required.",
+          fix: "Select an existing category from the dropdown or hierarchical selector.",
+          severity: "error",
+        });
+      } else if (!resolvedCategory.isActive) {
+        pErrors.push({
+          sheet: "Products",
+          row: p.rowNumber,
+          productGroupId: p.productGroupId,
+          field: "Category Full Path",
+          message: `Category "${resolvedCategory.name}" is currently inactive.`,
+          fix: "Select an active category or activate this category in Category Management.",
+          severity: "error",
+        });
       }
 
       // Pricing Validation
@@ -263,13 +271,16 @@ export class BulkProductValidator {
       let stockInfo: BulkParsedProduct["stock"] = undefined;
       if (p.productType === "simple") {
         let wh: WarehouseCacheInfo | undefined;
-        if (p.warehouseCodeOrName) {
+        if (p.warehouseId) {
+          wh = warehouseById.get(String(p.warehouseId).toLowerCase().trim());
+        }
+        if (!wh && p.warehouseCodeOrName) {
           const whKey = p.warehouseCodeOrName.toLowerCase().trim();
           // Extract code inside parentheses if present e.g. "WH01 (Main)"
           const codeMatch = p.warehouseCodeOrName.match(/^([A-Za-z0-9_-]+)/);
           const extractedCode = codeMatch ? codeMatch[1].toLowerCase() : whKey;
 
-          wh = warehouseByCode.get(extractedCode) || warehouseByName.get(whKey) || warehouseByCode.get(whKey);
+          wh = warehouseById.get(whKey) || warehouseByCode.get(extractedCode) || warehouseByName.get(whKey) || warehouseByCode.get(whKey);
           if (!wh) {
             pErrors.push({
               sheet: "Products",
@@ -291,9 +302,9 @@ export class BulkProductValidator {
               severity: "error",
             });
           }
-        } else if (defaultWarehouse) {
+        } else if (!wh && defaultWarehouse) {
           wh = defaultWarehouse;
-        } else {
+        } else if (!wh) {
           pErrors.push({
             sheet: "Products",
             row: p.rowNumber,
@@ -331,11 +342,12 @@ export class BulkProductValidator {
       errors.push(...pErrors);
 
       const parsedProduct: BulkParsedProduct = {
+        id: p.id,
         rowNumber: p.rowNumber,
         productGroupId: p.productGroupId,
         name: p.name,
         categoryPath: resolvedCategory ? resolvedCategory.path : p.categoryPath,
-        categoryId: resolvedCategory?.id,
+        categoryId: resolvedCategory ? resolvedCategory.id : p.categoryId,
         categoryName: resolvedCategory?.name,
         productType: p.productType,
         description: p.description || p.name,
@@ -343,6 +355,14 @@ export class BulkProductValidator {
         basePrice: p.basePrice,
         sellingPrice: p.sellingPrice,
         stock: stockInfo,
+        metaTitle: p.metaTitle?.trim(),
+        metaDesc: p.metaDesc?.trim(),
+        seo: (p.metaTitle || p.metaDesc)
+          ? {
+              metaTitle: p.metaTitle?.trim(),
+              metaDesc: p.metaDesc?.trim(),
+            }
+          : undefined,
         hsnCode: p.hsnCode?.trim(),
         artisanName: p.artisanName?.trim(),
         artisanLocation: p.artisanLocation?.trim(),
@@ -356,8 +376,10 @@ export class BulkProductValidator {
         videoPurchasingEnabled: p.videoPurchasingEnabled ?? false,
         videoConsultationNote: p.videoConsultationNote?.trim(),
         isActive: p.isActive ?? true,
+        specifications: p.specifications,
         variants: [],
         media: [],
+        allImages: [],
         errors: [...pErrors],
         isValid: pErrors.filter((e) => e.severity === "error").length === 0,
       };
@@ -420,8 +442,14 @@ export class BulkProductValidator {
 
       // Duplicate Variant Attribute Combinations for same product group
       const attrs = v.attributes || {};
-      const attrKeyString = Object.entries(attrs)
-        .map(([k, val]) => `${k.toLowerCase().trim()}=${val.toLowerCase().trim()}`)
+      let attrEntries: [string, any][] = [];
+      if (Array.isArray(v.attributes)) {
+        attrEntries = v.attributes.map((a: any) => [String(a.name || a.key || ""), a.value]);
+      } else if (v.attributes && typeof v.attributes === "object") {
+        attrEntries = Object.entries(v.attributes);
+      }
+      const attrKeyString = attrEntries
+        .map(([k, val]) => `${String(k).toLowerCase().trim()}=${String(val ?? "").toLowerCase().trim()}`)
         .sort()
         .join("|");
 
@@ -494,11 +522,14 @@ export class BulkProductValidator {
 
       // Warehouse & Stock for Variant
       let vWarehouse: WarehouseCacheInfo | undefined;
-      if (v.warehouseCodeOrName) {
+      if (v.warehouseId) {
+        vWarehouse = warehouseById.get(String(v.warehouseId).toLowerCase().trim());
+      }
+      if (!vWarehouse && v.warehouseCodeOrName) {
         const whKey = v.warehouseCodeOrName.toLowerCase().trim();
         const codeMatch = v.warehouseCodeOrName.match(/^([A-Za-z0-9_-]+)/);
         const extractedCode = codeMatch ? codeMatch[1].toLowerCase() : whKey;
-        vWarehouse = warehouseByCode.get(extractedCode) || warehouseByName.get(whKey) || warehouseByCode.get(whKey);
+        vWarehouse = warehouseById.get(whKey) || warehouseByCode.get(extractedCode) || warehouseByName.get(whKey) || warehouseByCode.get(whKey);
         if (!vWarehouse) {
           vErrors.push({
             sheet: "Variants",
@@ -510,9 +541,9 @@ export class BulkProductValidator {
             severity: "error",
           });
         }
-      } else if (defaultWarehouse) {
+      } else if (!vWarehouse && defaultWarehouse) {
         vWarehouse = defaultWarehouse;
-      } else {
+      } else if (!vWarehouse) {
         vErrors.push({
           sheet: "Variants",
           row: v.rowNumber,
@@ -540,14 +571,17 @@ export class BulkProductValidator {
       errors.push(...vErrors);
 
       const parsedVariant: BulkParsedVariant = {
+        id: v.id,
         rowNumber: v.rowNumber,
-        sku: v.variantSku?.trim(),
+        sku: (v.sku || v.variantSku)?.trim(),
+        title: v.title?.trim(),
         size: v.size?.trim(),
         color: v.color?.trim(),
         fabric: v.fabric?.trim(),
         attributes: v.attributes,
         basePrice: v.basePrice,
         sellingPrice: v.sellingPrice,
+        price: v.price ?? v.sellingPrice,
         stock: vWarehouse
           ? {
               warehouseId: vWarehouse.id,
@@ -560,6 +594,7 @@ export class BulkProductValidator {
         length: v.length,
         breadth: v.breadth,
         height: v.height,
+        media: [],
         errors: vErrors.map((e) => e.message),
       };
 
@@ -659,6 +694,8 @@ export class BulkProductValidator {
         slug: s.slug ? SlugUtil.generateSlug(s.slug) : undefined,
         schemaMarkup: s.schemaMarkup?.trim(),
       };
+      if (s.metaTitle) parentProduct.metaTitle = s.metaTitle.trim();
+      if (s.metaDesc) parentProduct.metaDesc = s.metaDesc.trim();
 
       if (sErrors.some((e) => e.severity === "error")) {
         parentProduct.isValid = false;
@@ -687,20 +724,35 @@ export class BulkProductValidator {
         continue;
       }
 
-      if (!m.url || !m.url.startsWith("http")) {
+      if (!m.url || m.url.trim().length === 0) {
         mErrors.push({
           sheet: "Media",
           row: m.rowNumber,
           productGroupId: m.productGroupId,
           field: "Media URL",
-          message: `Invalid media URL "${m.url}". URLs must begin with http:// or https://.`,
-          fix: "Provide a valid accessible HTTPS URL (e.g. from Cloudflare R2 or CDN).",
+          message: `Media URL or file reference is required.`,
+          fix: "Provide a valid accessible HTTPS URL or Google Drive file reference.",
           severity: "error",
         });
+      } else if (m.url.startsWith("http://") || m.url.startsWith("https://")) {
+        try {
+          new URL(m.url);
+        } catch {
+          mErrors.push({
+            sheet: "Media",
+            row: m.rowNumber,
+            productGroupId: m.productGroupId,
+            field: "Media URL",
+            message: `Invalid media URL: "${m.url}".`,
+            fix: "Provide a valid accessible HTTPS URL.",
+            severity: "error",
+          });
+        }
       }
 
+      let matchingVariant: BulkParsedVariant | undefined;
       if (m.variantSku) {
-        const matchingVariant = parentProduct.variants?.find(
+        matchingVariant = parentProduct.variants?.find(
           (v) => v.sku?.toLowerCase() === m.variantSku?.toLowerCase()
         );
         if (!matchingVariant) {
@@ -722,23 +774,62 @@ export class BulkProductValidator {
         rowNumber: m.rowNumber,
         type: m.type,
         url: m.url.trim(),
+        key: m.key?.trim(),
         thumbnailUrl: m.thumbnailUrl?.trim(),
-        altText: m.altText?.trim() || parentProduct.name,
+        altText: m.altText?.trim() || (matchingVariant ? `${parentProduct.name} - ${matchingVariant.sku || 'Variant'}` : parentProduct.name),
         title: m.title?.trim(),
         description: m.description?.trim(),
+        mimeType: m.mimeType,
+        fileSize: m.fileSize,
+        duration: m.duration,
+        width: m.width,
+        height: m.height,
         order: m.order ?? 0,
         isActive: m.isActive !== false,
         variantSku: m.variantSku?.trim(),
+        productGroupId: parentProduct.productGroupId,
+        source: m.variantSku ? "variant" : "product",
       };
 
-      if (!parentProduct.media) parentProduct.media = [];
-      parentProduct.media.push(parsedMedia);
+      if (matchingVariant) {
+        if (!matchingVariant.media) matchingVariant.media = [];
+        matchingVariant.media.push(parsedMedia);
+      } else {
+        if (!parentProduct.media) parentProduct.media = [];
+        parentProduct.media.push(parsedMedia);
+      }
 
       if (mErrors.some((e) => e.severity === "error")) {
         parentProduct.isValid = false;
         if (!parentProduct.errors) parentProduct.errors = [];
         parentProduct.errors.push(...mErrors);
       }
+    }
+
+    // Assemble allImages and sort media for each product
+    for (const p of productMap.values()) {
+      if (p.media) {
+        p.media.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      } else {
+        p.media = [];
+      }
+
+      const variantMediaList: BulkParsedMedia[] = [];
+      if (p.variants) {
+        for (const v of p.variants) {
+          if (v.media) {
+            v.media.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            variantMediaList.push(...v.media);
+          } else {
+            v.media = [];
+          }
+        }
+      }
+
+      // Display all available product images together in a single preview
+      p.allImages = [...p.media, ...variantMediaList].sort(
+        (a, b) => (a.order ?? 0) - (b.order ?? 0)
+      );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -780,37 +871,55 @@ export class BulkProductValidator {
 
       for (const p of productMap.values()) {
         if (p.sku && conflictSkuMap.has(p.sku.toLowerCase())) {
-          const err: BulkValidationError = {
-            sheet: "Products",
-            row: p.rowNumber,
-            productGroupId: p.productGroupId,
-            field: "Parent / Base SKU",
-            message: `SKU "${p.sku}" already exists in database (${conflictSkuMap.get(p.sku.toLowerCase())}).`,
-            fix: "Change this SKU to a unique value or leave blank to auto-generate.",
-            severity: "error",
-          };
-          errors.push(err);
-          if (!p.errors) p.errors = [];
-          p.errors.push(err);
-          p.isValid = false;
+          // If editing an existing product and the SKU matches this product, allow it
+          const existingProduct = existingProductsWithSku.find(
+            (ep) => ep.sku.toLowerCase() === p.sku!.toLowerCase()
+          );
+          if (p.id && existingProduct && existingProduct.id.toString() === String(p.id)) {
+            // Self match - valid update
+          } else {
+            const err: BulkValidationError = {
+              sheet: "Products",
+              row: p.rowNumber,
+              productGroupId: p.productGroupId,
+              field: "Parent / Base SKU",
+              message: `SKU "${p.sku}" already exists in database (${conflictSkuMap.get(p.sku.toLowerCase())}).`,
+              fix: "Change this SKU to a unique value or leave blank to auto-generate.",
+              severity: "error",
+            };
+            errors.push(err);
+            if (!p.errors) p.errors = [];
+            p.errors.push(err);
+            p.isValid = false;
+          }
         }
 
         if (p.variants) {
           for (const v of p.variants) {
             if (v.sku && conflictSkuMap.has(v.sku.toLowerCase())) {
-              const err: BulkValidationError = {
-                sheet: "Variants",
-                row: v.rowNumber,
-                productGroupId: p.productGroupId,
-                field: "Variant SKU",
-                message: `Variant SKU "${v.sku}" already exists in database (${conflictSkuMap.get(v.sku.toLowerCase())}).`,
-                fix: "Change this variant SKU or leave blank to auto-generate.",
-                severity: "error",
-              };
-              errors.push(err);
-              if (!p.errors) p.errors = [];
-              p.errors.push(err);
-              p.isValid = false;
+              const existingVar = existingVariantsWithSku.find(
+                (ev) => ev.sku.toLowerCase() === v.sku!.toLowerCase()
+              );
+              if (
+                (p.id && existingVar && (existingVar as any).productId?.toString() === String(p.id)) ||
+                (v.id && existingVar && existingVar.id.toString() === String(v.id))
+              ) {
+                // Self match - valid update
+              } else {
+                const err: BulkValidationError = {
+                  sheet: "Variants",
+                  row: v.rowNumber,
+                  productGroupId: p.productGroupId,
+                  field: "Variant SKU",
+                  message: `Variant SKU "${v.sku}" already exists in database (${conflictSkuMap.get(v.sku.toLowerCase())}).`,
+                  fix: "Change this variant SKU or leave blank to auto-generate.",
+                  severity: "error",
+                };
+                errors.push(err);
+                if (!p.errors) p.errors = [];
+                p.errors.push(err);
+                p.isValid = false;
+              }
             }
           }
         }
@@ -836,7 +945,7 @@ export class BulkProductValidator {
       } else {
         simpleProducts++;
       }
-      totalMedia += p.media?.length || 0;
+      totalMedia += p.allImages?.length || (p.media?.length || 0);
     }
 
     return {

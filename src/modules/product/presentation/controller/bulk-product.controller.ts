@@ -31,6 +31,27 @@ export class BulkProductController {
   }
 
   /**
+   * GET /api/products/bulk/warehouses
+   * Returns active warehouses for bulk product inventory assignment.
+   */
+  async getWarehouses(req: Request, res: Response): Promise<void> {
+    try {
+      const warehouses = await this.bulkProductService.getWarehouseLookupList();
+      res.status(200).json({
+        success: true,
+        message: "Warehouses retrieved successfully",
+        data: warehouses,
+      });
+    } catch (error: any) {
+      console.error("❌ Error loading warehouses:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Failed to load warehouses",
+      });
+    }
+  }
+
+  /**
    * GET /api/products/bulk/template
    * Downloads a customized .xlsx template with selected categories in dropdowns.
    */

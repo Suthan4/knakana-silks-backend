@@ -15,7 +15,8 @@ import {
   BulkSeoRow,
   BulkMediaRow,
 } from "../bulk/bulk-product.dto.js";
-import { CreateProductDTO } from "../product.dto.js";
+import { CreateProductDTO, UpdateProductDTO } from "../product.dto.js";
+import { MediaType } from "@/generated/prisma/enums.js";
 import { ValidationError } from "@/shared/utils/errors.js";
 
 export interface HierarchicalCategoryNode {
@@ -259,10 +260,12 @@ export class BulkProductService {
     let rowNum = 2;
     for (const p of products) {
       productRows.push({
+        id: p.id,
         rowNumber: p.rowNumber || rowNum,
         productGroupId: p.productGroupId,
         name: p.name,
         categoryPath: p.categoryPath,
+        categoryId: p.categoryId,
         productType: p.productType,
         description: p.description,
         sku: p.sku,
@@ -270,7 +273,10 @@ export class BulkProductService {
         sellingPrice: p.sellingPrice,
         stockQuantity: p.stock?.quantity,
         warehouseCodeOrName: p.stock?.warehouseCode,
+        warehouseId: p.stock?.warehouseId,
         lowStockThreshold: p.stock?.lowStockThreshold,
+        metaTitle: p.metaTitle || p.seo?.metaTitle,
+        metaDesc: p.metaDesc || p.seo?.metaDesc,
         weight: p.weight,
         length: p.length,
         breadth: p.breadth,
@@ -283,59 +289,96 @@ export class BulkProductService {
         hasVideoConsultation: p.hasVideoConsultation,
         videoPurchasingEnabled: p.videoPurchasingEnabled,
         videoConsultationNote: p.videoConsultationNote,
+        specifications: p.specifications,
         isActive: p.isActive,
       });
 
       if (p.variants) {
         for (const v of p.variants) {
           variantRows.push({
+            id: v.id,
             rowNumber: v.rowNumber || rowNum,
             productGroupId: p.productGroupId,
             variantSku: v.sku,
+            sku: v.sku,
+            title: v.title,
             size: v.size,
             color: v.color,
             fabric: v.fabric,
             attributes: v.attributes,
             basePrice: v.basePrice,
             sellingPrice: v.sellingPrice,
+            price: v.price ?? v.sellingPrice,
             stockQuantity: v.stock?.quantity,
             warehouseCodeOrName: v.stock?.warehouseCode,
+            warehouseId: v.stock?.warehouseId,
             lowStockThreshold: v.stock?.lowStockThreshold,
             weight: v.weight,
             length: v.length,
             breadth: v.breadth,
             height: v.height,
           });
+
+          if (v.media) {
+            v.media.forEach((vm, vmIdx) => {
+              mediaRows.push({
+                rowNumber: vm.rowNumber || rowNum,
+                productGroupId: p.productGroupId,
+                variantSku: v.sku,
+                type: vm.type,
+                url: vm.url,
+                key: vm.key,
+                thumbnailUrl: vm.thumbnailUrl,
+                altText: vm.altText,
+                title: vm.title,
+                description: vm.description,
+                mimeType: vm.mimeType,
+                fileSize: vm.fileSize,
+                duration: vm.duration,
+                width: vm.width,
+                height: vm.height,
+                order: vm.order !== undefined ? vm.order : vmIdx,
+                isActive: vm.isActive !== false,
+              });
+            });
+          }
         }
       }
 
-      if (p.seo) {
+      if (p.metaTitle || p.metaDesc || p.seo) {
         seoRows.push({
           rowNumber: rowNum,
           productGroupId: p.productGroupId,
-          metaTitle: p.seo.metaTitle,
-          metaDesc: p.seo.metaDesc,
-          slug: p.seo.slug,
-          schemaMarkup: p.seo.schemaMarkup,
+          metaTitle: p.metaTitle || p.seo?.metaTitle,
+          metaDesc: p.metaDesc || p.seo?.metaDesc,
+          slug: p.seo?.slug,
+          schemaMarkup: p.seo?.schemaMarkup,
         });
       }
 
-      if (p.media) {
-        for (const m of p.media) {
+      const pMedia = p.media || (p.allImages ? p.allImages.filter((m) => !m.variantSku || m.source === "product") : []);
+      if (pMedia && pMedia.length > 0) {
+        pMedia.forEach((m, mIdx) => {
           mediaRows.push({
             rowNumber: m.rowNumber || rowNum,
             productGroupId: p.productGroupId,
             variantSku: m.variantSku,
             type: m.type,
             url: m.url,
+            key: m.key,
+            thumbnailUrl: m.thumbnailUrl,
             altText: m.altText,
             title: m.title,
             description: m.description,
-            order: m.order,
-            thumbnailUrl: m.thumbnailUrl,
-            isActive: m.isActive,
+            mimeType: m.mimeType,
+            fileSize: m.fileSize,
+            duration: m.duration,
+            width: m.width,
+            height: m.height,
+            order: m.order !== undefined ? m.order : mIdx,
+            isActive: m.isActive !== false,
           });
-        }
+        });
       }
 
       rowNum++;
@@ -403,115 +446,187 @@ export class BulkProductService {
         continue;
       }
 
-      // Convert to CreateProductDTO
+      // Convert to CreateProductDTO or UpdateProductDTO matching manual product behavior
       try {
-        const dto: CreateProductDTO = {
-          name: validatedProduct.name,
-          description: validatedProduct.description,
-          categoryId: validatedProduct.categoryId!,
-          basePrice: validatedProduct.basePrice,
-          sellingPrice: validatedProduct.sellingPrice,
-          sku: validatedProduct.sku,
-          isActive: validatedProduct.isActive ?? true,
-          hasVariants: validatedProduct.productType === "variable",
-          hsnCode: validatedProduct.hsnCode,
-          artisanName: validatedProduct.artisanName,
-          artisanAbout: validatedProduct.artisanAbout,
-          artisanLocation: validatedProduct.artisanLocation,
-          weight: validatedProduct.weight,
-          length: validatedProduct.length,
-          breadth: validatedProduct.breadth,
-          height: validatedProduct.height,
-          allowOutOfStockOrders: validatedProduct.allowOutOfStockOrders ?? false,
-          hasVideoConsultation: validatedProduct.hasVideoConsultation ?? false,
-          videoPurchasingEnabled: validatedProduct.videoPurchasingEnabled ?? false,
-          videoConsultationNote: validatedProduct.videoConsultationNote,
-          metaTitle: validatedProduct.seo?.metaTitle,
-          metaDesc: validatedProduct.seo?.metaDesc,
-          schemaMarkup: validatedProduct.seo?.schemaMarkup,
+        // Product-level media (media not tied to a specific variant, sorted by order ascending)
+        const productMedia = (validatedProduct.media || [])
+          .filter((m) => !m.variantSku || m.source === "product")
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .map((m, idx) => ({
+            type: m.type || MediaType.IMAGE,
+            url: m.url,
+            key: m.key,
+            altText: m.altText,
+            title: m.title,
+            description: m.description,
+            order: m.order !== undefined ? m.order : idx,
+            thumbnailUrl: m.thumbnailUrl,
+            mimeType: m.mimeType,
+            fileSize: m.fileSize,
+            duration: m.duration,
+            width: m.width,
+            height: m.height,
+            isActive: m.isActive !== false,
+          }));
 
-          // Product-level media (media not tied to a specific variant)
-          media: validatedProduct.media
-            ?.filter((m) => !m.variantSku)
-            .map((m) => ({
-              type: m.type,
-              url: m.url,
-              altText: m.altText,
-              title: m.title,
-              description: m.description,
-              order: m.order ?? 0,
-              thumbnailUrl: m.thumbnailUrl,
-              isActive: m.isActive !== false,
-            })),
+        // Simple product stock
+        const simpleStock =
+          validatedProduct.productType === "simple" && validatedProduct.stock
+            ? {
+                warehouseId: validatedProduct.stock.warehouseId,
+                quantity: validatedProduct.stock.quantity,
+                lowStockThreshold: validatedProduct.stock.lowStockThreshold ?? 10,
+              }
+            : undefined;
 
-          // Simple product stock
-          stock:
-            validatedProduct.productType === "simple" && validatedProduct.stock
-              ? {
-                  warehouseId: validatedProduct.stock.warehouseId,
-                  quantity: validatedProduct.stock.quantity,
-                  lowStockThreshold: validatedProduct.stock.lowStockThreshold ?? 10,
+        // Variable product variants
+        const variantDtos =
+          validatedProduct.productType === "variable" && validatedProduct.variants
+            ? validatedProduct.variants.map((v) => {
+                // Variant-specific media (from variant object or matched by variantSku)
+                const variantMediaSources =
+                  v.media && v.media.length > 0
+                    ? v.media
+                    : validatedProduct.media?.filter(
+                        (m) => m.variantSku && m.variantSku.toLowerCase() === v.sku?.toLowerCase()
+                      ) || [];
+
+                const variantMedia = variantMediaSources
+                  .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                  .map((m, idx) => ({
+                    type: m.type || MediaType.IMAGE,
+                    url: m.url,
+                    key: m.key,
+                    altText: m.altText,
+                    title: m.title,
+                    description: m.description,
+                    order: m.order !== undefined ? m.order : idx,
+                    thumbnailUrl: m.thumbnailUrl,
+                    mimeType: m.mimeType,
+                    fileSize: m.fileSize,
+                    duration: m.duration,
+                    width: m.width,
+                    height: m.height,
+                    isActive: m.isActive !== false,
+                  }));
+
+                let formattedAttributes = v.attributes;
+                if (Array.isArray(v.attributes)) {
+                  formattedAttributes = Object.fromEntries(
+                    v.attributes.map((a: any) => [a.name || a.key, a.value])
+                  );
                 }
-              : undefined,
 
-          // Variable product variants
-          variants:
-            validatedProduct.productType === "variable" && validatedProduct.variants
-              ? validatedProduct.variants.map((v) => {
-                  // Variant-specific media
-                  const variantMedia = validatedProduct.media
-                    ?.filter((m) => m.variantSku && m.variantSku.toLowerCase() === v.sku?.toLowerCase())
-                    .map((m) => ({
-                      type: m.type,
-                      url: m.url,
-                      altText: m.altText,
-                      title: m.title,
-                      description: m.description,
-                      order: m.order ?? 0,
-                      thumbnailUrl: m.thumbnailUrl,
-                      isActive: m.isActive !== false,
-                    }));
+                return {
+                  id: v.id,
+                  sku: v.sku,
+                  attributes: formattedAttributes,
+                  size: v.size,
+                  color: v.color,
+                  fabric: v.fabric,
+                  basePrice: v.basePrice,
+                  sellingPrice: v.sellingPrice,
+                  price: v.sellingPrice ?? validatedProduct.sellingPrice,
+                  weight: v.weight,
+                  length: v.length,
+                  breadth: v.breadth,
+                  height: v.height,
+                  media: variantMedia && variantMedia.length > 0 ? variantMedia : undefined,
+                  stock: v.stock
+                    ? {
+                        warehouseId: v.stock.warehouseId,
+                        quantity: v.stock.quantity,
+                        lowStockThreshold: v.stock.lowStockThreshold ?? 10,
+                      }
+                    : undefined,
+                };
+              })
+            : undefined;
 
-                  return {
-                    sku: v.sku,
-                    attributes: v.attributes,
-                    size: v.size,
-                    color: v.color,
-                    fabric: v.fabric,
-                    basePrice: v.basePrice,
-                    sellingPrice: v.sellingPrice,
-                    price: v.sellingPrice ?? validatedProduct.sellingPrice,
-                    weight: v.weight,
-                    length: v.length,
-                    breadth: v.breadth,
-                    height: v.height,
-                    media: variantMedia && variantMedia.length > 0 ? variantMedia : undefined,
-                    stock: v.stock
-                      ? {
-                          warehouseId: v.stock.warehouseId,
-                          quantity: v.stock.quantity,
-                          lowStockThreshold: v.stock.lowStockThreshold ?? 10,
-                        }
-                      : undefined,
-                  };
-                })
-              : undefined,
-        };
+        let productResult: any;
 
-        // Call ProductService.createProduct which executes within an atomic $transaction
-        const createdProduct = await this.productService.createProduct(dto);
+        if (validatedProduct.id) {
+          // Follow existing manual Edit Product implementation
+          const updateDto: UpdateProductDTO = {
+            name: validatedProduct.name,
+            description: validatedProduct.description,
+            categoryId: validatedProduct.categoryId,
+            basePrice: validatedProduct.basePrice,
+            sellingPrice: validatedProduct.sellingPrice,
+            sku: validatedProduct.sku,
+            isActive: validatedProduct.isActive ?? true,
+            hasVariants: validatedProduct.productType === "variable",
+            hsnCode: validatedProduct.hsnCode,
+            artisanName: validatedProduct.artisanName,
+            artisanAbout: validatedProduct.artisanAbout,
+            artisanLocation: validatedProduct.artisanLocation,
+            weight: validatedProduct.weight,
+            length: validatedProduct.length,
+            breadth: validatedProduct.breadth,
+            height: validatedProduct.height,
+            allowOutOfStockOrders: validatedProduct.allowOutOfStockOrders ?? false,
+            hasVideoConsultation: validatedProduct.hasVideoConsultation ?? false,
+            videoPurchasingEnabled: validatedProduct.videoPurchasingEnabled ?? false,
+            videoConsultationNote: validatedProduct.videoConsultationNote,
+            metaTitle: validatedProduct.metaTitle ?? validatedProduct.seo?.metaTitle,
+            metaDesc: validatedProduct.metaDesc ?? validatedProduct.seo?.metaDesc,
+            schemaMarkup: validatedProduct.seo?.schemaMarkup,
+            specifications: validatedProduct.specifications,
+            media: productMedia,
+            stock: simpleStock,
+            variants: variantDtos,
+          };
 
-        if (createdProduct) {
+          productResult = await this.productService.updateProduct(
+            String(validatedProduct.id),
+            updateDto
+          );
+        } else {
+          // Follow existing manual Create Product implementation
+          const createDto: CreateProductDTO = {
+            name: validatedProduct.name,
+            description: validatedProduct.description,
+            categoryId: validatedProduct.categoryId!,
+            basePrice: validatedProduct.basePrice,
+            sellingPrice: validatedProduct.sellingPrice,
+            sku: validatedProduct.sku,
+            isActive: validatedProduct.isActive ?? true,
+            hasVariants: validatedProduct.productType === "variable",
+            hsnCode: validatedProduct.hsnCode,
+            artisanName: validatedProduct.artisanName,
+            artisanAbout: validatedProduct.artisanAbout,
+            artisanLocation: validatedProduct.artisanLocation,
+            weight: validatedProduct.weight,
+            length: validatedProduct.length,
+            breadth: validatedProduct.breadth,
+            height: validatedProduct.height,
+            allowOutOfStockOrders: validatedProduct.allowOutOfStockOrders ?? false,
+            hasVideoConsultation: validatedProduct.hasVideoConsultation ?? false,
+            videoPurchasingEnabled: validatedProduct.videoPurchasingEnabled ?? false,
+            videoConsultationNote: validatedProduct.videoConsultationNote,
+            metaTitle: validatedProduct.metaTitle ?? validatedProduct.seo?.metaTitle,
+            metaDesc: validatedProduct.metaDesc ?? validatedProduct.seo?.metaDesc,
+            schemaMarkup: validatedProduct.seo?.schemaMarkup,
+            specifications: validatedProduct.specifications,
+            media: productMedia,
+            stock: simpleStock,
+            variants: variantDtos,
+          };
+
+          productResult = await this.productService.createProduct(createDto);
+        }
+
+        if (productResult) {
           results.push({
             productGroupId: validatedProduct.productGroupId,
             name: validatedProduct.name,
-            sku: createdProduct.sku,
-            productId: createdProduct.id.toString(),
+            sku: productResult.sku,
+            productId: productResult.id.toString(),
             status: "success",
           });
           successful++;
         } else {
-          throw new Error("Product creation returned null.");
+          throw new Error("Product processing returned null.");
         }
       } catch (err: any) {
         console.error(`❌ Failed to import product group "${validatedProduct.productGroupId}":`, err);

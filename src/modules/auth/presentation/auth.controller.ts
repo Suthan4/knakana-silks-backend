@@ -242,6 +242,41 @@ export class AuthController {
     }
   }
 
+  // ── GET /api/auth/drive/status ────────────────────────────────────────────
+  /**
+   * Returns whether the authenticated admin has a connected Google Drive token.
+   * Used by the frontend to show connected/disconnected state without making
+   * a full folder-listing call.
+   */
+  async getDriveStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, message: "Unauthorized" });
+        return;
+      }
+
+      const connected = await this.driveService.isConnected(userId);
+      const host = req.get("host") || "";
+      const draftId = req.query.draftId ? String(req.query.draftId) : undefined;
+
+      res.json({
+        success: true,
+        data: {
+          connected,
+          // Provide the connect URL so the frontend can open it in a new tab or redirect
+          connectUrl: connected
+            ? null
+            : `/api/auth/google?token=${encodeURIComponent(
+                req.headers.authorization?.replace("Bearer ", "") || ""
+              )}${draftId ? `&draftId=${draftId}` : ""}`,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
   // ── GET /api/auth/google ──────────────────────────────────────────────────
   async redirectToGoogle(req: Request, res: Response): Promise<void> {
     try {

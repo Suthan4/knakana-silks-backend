@@ -502,6 +502,119 @@ describe("Bulk Product Upload Test Suite", () => {
         "Should flag non-existent category"
       );
     });
+
+    it("should resolve category directly by categoryId and support arrow delimiter", async () => {
+      const prisma = createMockPrisma();
+
+      const validation = await BulkProductValidator.validate({
+        prisma,
+        products: [
+          {
+            rowNumber: 2,
+            productGroupId: "PROD-CAT-ID",
+            name: "Category ID Product",
+            categoryId: "3", // Category ID for Silk Sarees
+            categoryPath: "", // Empty path should be resolved from ID
+            productType: "simple",
+            description: "Testing category ID resolution",
+            basePrice: 5000,
+            sellingPrice: 4500,
+            stockQuantity: 10,
+          },
+          {
+            rowNumber: 3,
+            productGroupId: "PROD-ARROW",
+            name: "Arrow Delimiter Product",
+            categoryPath: "Clothing → Sarees → Silk Sarees", // Arrow separator
+            productType: "simple",
+            description: "Testing arrow delimiter",
+            basePrice: 6000,
+            sellingPrice: 5500,
+            stockQuantity: 8,
+          },
+        ],
+        variants: [],
+        seo: [],
+        media: [],
+        categoryList: mockCategories,
+        warehouseList: mockWarehouses,
+      });
+
+      assert.equal(validation.valid, true);
+      assert.equal(validation.products[0].categoryId, "3");
+      assert.equal(validation.products[0].categoryPath, "Clothing > Sarees > Silk Sarees");
+      assert.equal(validation.products[1].categoryId, "3");
+      assert.equal(validation.products[1].categoryPath, "Clothing > Sarees > Silk Sarees");
+    });
+
+    it("should flow top-level SEO fields and stock structures through parser and validator", async () => {
+      const prisma = createMockPrisma();
+
+      const rawJson = JSON.stringify([
+        {
+          name: "Kanchipuram Silk Saree - Jade Green",
+          productGroupId: "NAVO-001",
+          productType: "simple",
+          categoryId: "3",
+          categoryPath: "Clothing > Sarees > Silk Sarees",
+          description: "Pure Kanchipuram Silk saree in Jade Green.",
+          basePrice: 54999,
+          sellingPrice: 49999,
+          weight: 0.8,
+          metaTitle: "Jade Green Kanchipuram Silk Saree | Kankana Silks",
+          metaDesc: "Shop a beautiful jade green Kanchipuram silk saree.",
+          stock: {
+            warehouseId: "101",
+            quantity: 12,
+            lowStockThreshold: 5,
+          },
+          variants: [],
+          media: [
+            {
+              url: "NAVO2845-NAVO2863.jpg",
+              altText: "Jade Green Pure Kanchipuram Silk Saree",
+              order: 0,
+            },
+            {
+              url: "NAVO2845-detail.jpg",
+              altText: "Pallu Detail",
+              order: 1,
+            },
+          ],
+        },
+      ]);
+
+      const parsed = BulkProductParser.parseRawText(rawJson);
+      assert.equal(parsed.products.length, 1);
+      assert.equal(parsed.products[0].metaTitle, "Jade Green Kanchipuram Silk Saree | Kankana Silks");
+      assert.equal(parsed.products[0].metaDesc, "Shop a beautiful jade green Kanchipuram silk saree.");
+      assert.equal(parsed.products[0].categoryId, "3");
+      assert.equal(parsed.products[0].warehouseId, "101");
+      assert.equal(parsed.media.length, 2);
+      assert.equal(parsed.media[0].order, 0);
+      assert.equal(parsed.media[1].order, 1);
+
+      const validation = await BulkProductValidator.validate({
+        prisma,
+        products: parsed.products,
+        variants: parsed.variants,
+        seo: parsed.seo,
+        media: parsed.media,
+        categoryList: mockCategories,
+        warehouseList: mockWarehouses,
+      });
+
+      assert.equal(validation.valid, true);
+      const validated = validation.products[0];
+      assert.equal(validated.categoryId, "3");
+      assert.equal(validated.metaTitle, "Jade Green Kanchipuram Silk Saree | Kankana Silks");
+      assert.equal(validated.metaDesc, "Shop a beautiful jade green Kanchipuram silk saree.");
+      assert.equal(validated.stock?.warehouseId, "101");
+      assert.equal(validated.stock?.quantity, 12);
+      assert.equal(validated.media?.length, 2);
+      assert.equal(validated.media?.[0].order, 0);
+      assert.equal(validated.media?.[1].order, 1);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

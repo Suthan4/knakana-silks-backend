@@ -19,7 +19,12 @@ export type DraftStatus = z.infer<typeof DraftStatusEnum>;
 // ─── Create Draft ─────────────────────────────────────────────────────────────
 
 export const CreateBulkImportDraftSchema = z.object({
-  rawInput: z.string().min(1, "rawInput is required"),
+  rawInput: z.string().optional().default(""),
+  parsedData: z.any().optional(),
+  products: z.array(z.any()).optional(),
+  imageMatches: z.any().optional(),
+  confirmedAssignments: z.record(z.string(), z.string()).optional(),
+  status: DraftStatusEnum.optional(),
 });
 
 export type CreateBulkImportDraftDto = z.infer<typeof CreateBulkImportDraftSchema>;
@@ -29,11 +34,12 @@ export type CreateBulkImportDraftDto = z.infer<typeof CreateBulkImportDraftSchem
 export const UpdateBulkImportDraftSchema = z.object({
   rawInput: z.string().optional(),
   parsedData: z.any().optional(),
+  products: z.array(z.any()).optional(),
   imageMatches: z.any().optional(),
   /** Admin-confirmed assignments: mediaIndex → driveFileId */
   confirmedAssignments: z.record(z.string(), z.string()).optional(),
   status: DraftStatusEnum.optional(),
-}).strict();
+});
 
 export type UpdateBulkImportDraftDto = z.infer<typeof UpdateBulkImportDraftSchema>;
 
@@ -61,3 +67,18 @@ export interface BulkImportDraftResponse {
   updatedAt: string;
 }
 
+/**
+ * Sanitizes an arbitrary object/array so it can safely be stored in a Prisma Json column.
+ * - Converts all BigInt values to strings.
+ * - Removes keys with `undefined` values (which Prisma Json columns reject).
+ * - Converts undefined or null root values to null.
+ */
+export function cleanPrismaJson<T = any>(val: any): T | null {
+  if (val === undefined || val === null) return null;
+  return JSON.parse(
+    JSON.stringify(val, (_key, value) => {
+      if (typeof value === "bigint") return value.toString();
+      return value;
+    })
+  );
+}

@@ -53,6 +53,14 @@ router.put("/auth/change-password", authenticate, (req, res) =>
 );
 
 // ============ Google Drive OAuth Routes ============
+
+// Drive connection status — tells the frontend whether Drive is connected
+router.get(
+  "/auth/drive/status",
+  authenticate,
+  (req, res) => getAuthController().getDriveStatus(req, res)
+);
+
 router.get(
   "/auth/google",
   (req, res, next) => {

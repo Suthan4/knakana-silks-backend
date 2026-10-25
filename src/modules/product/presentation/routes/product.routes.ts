@@ -52,6 +52,14 @@ router.get(
 );
 
 router.get(
+  "/products/bulk/warehouses",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getBulkProductController().getWarehouses(req, res)
+);
+
+router.get(
   "/products/bulk/template",
   authenticate,
   adminCatalogReadLimiter,
@@ -139,6 +147,14 @@ router.post(
 );
 
 router.post(
+  "/products/bulk/draft/:id/parse-drive",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().parseDriveFile(req, res)
+);
+
+router.post(
   "/products/bulk/draft/:id/match-drive",
   authenticate,
   adminCatalogWriteLimiter,
@@ -186,6 +202,15 @@ router.get(
   adminCatalogReadLimiter,
   checkPermission("products", "create"),
   (req, res) => getDraftController().listDriveFolders(req, res)
+);
+
+// Drive JSON file list (for product import)
+router.get(
+  "/products/bulk/drive/json-files",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().listDriveJsonFiles(req, res)
 );
 
 // Drive proxy – streams file through the backend without exposing OAuth tokens

@@ -25,8 +25,12 @@ export class BulkImportDraftController {
 
   async createDraft(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
       const dto = CreateBulkImportDraftSchema.parse(req.body);
-      const userId = BigInt(req.user!.userId);
+      const userId = BigInt(req.user.userId);
       const draft = await this.service.createDraft(userId, dto);
       res.status(201).json({ success: true, data: draft });
     } catch (err: any) {
@@ -38,7 +42,11 @@ export class BulkImportDraftController {
 
   async listDrafts(req: Request, res: Response): Promise<void> {
     try {
-      const userId = BigInt(req.user!.userId);
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
+      const userId = BigInt(req.user.userId);
       const drafts = await this.service.listDrafts(userId);
       res.status(200).json({ success: true, data: drafts });
     } catch (err: any) {
@@ -50,8 +58,12 @@ export class BulkImportDraftController {
 
   async getDraft(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
       const id = String(req.params.id);
-      const userId = BigInt(req.user!.userId);
+      const userId = BigInt(req.user.userId);
       const draft = await this.service.getDraft(id, userId);
       res.status(200).json({ success: true, data: draft });
     } catch (err: any) {
@@ -63,9 +75,13 @@ export class BulkImportDraftController {
 
   async updateDraft(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
       const id = String(req.params.id);
       const dto = UpdateBulkImportDraftSchema.parse(req.body);
-      const userId = BigInt(req.user!.userId);
+      const userId = BigInt(req.user.userId);
       const draft = await this.service.updateDraft(id, userId, dto);
       res.status(200).json({ success: true, data: draft });
     } catch (err: any) {
@@ -77,8 +93,12 @@ export class BulkImportDraftController {
 
   async deleteDraft(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
       const id = String(req.params.id);
-      const userId = BigInt(req.user!.userId);
+      const userId = BigInt(req.user.userId);
       await this.service.deleteDraft(id, userId);
       res.status(204).send();
     } catch (err: any) {
@@ -90,8 +110,12 @@ export class BulkImportDraftController {
 
   async parseDraft(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
       const id = String(req.params.id);
-      const userId = BigInt(req.user!.userId);
+      const userId = BigInt(req.user.userId);
 
       if (req.file) {
         const draft = await this.service.parseAndValidate(id, userId, req.file.buffer);
@@ -108,6 +132,34 @@ export class BulkImportDraftController {
 
       // Default: parse existing draft's rawInput
       const draft = await this.service.parseRawInput(id, userId);
+      res.status(200).json({ success: true, data: draft });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
+  // ── POST /api/products/bulk/draft/:id/parse-drive ──────────────────────────
+
+  async parseDriveFile(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
+      const id = String(req.params.id);
+      const userId = BigInt(req.user.userId);
+      const { driveFileId } = req.body;
+
+      if (!driveFileId || typeof driveFileId !== "string" || !driveFileId.trim()) {
+        res.status(400).json({ success: false, message: "driveFileId is required" });
+        return;
+      }
+
+      // Fetch file text from Google Drive (enforces 10MB limit and auth validation)
+      const rawText = await this.driveService.readFileAsText(req.user.userId, driveFileId.trim());
+
+      // Parse and validate using the same pipeline as local file upload
+      const draft = await this.service.parseRawInput(id, userId, rawText);
       res.status(200).json({ success: true, data: draft });
     } catch (err: any) {
       handleError(err, res);
@@ -208,6 +260,18 @@ export class BulkImportDraftController {
     }
   }
 
+  // ── GET /api/products/bulk/drive/json-files ───────────────────────────────
+
+  async listDriveJsonFiles(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const files = await this.driveService.listJsonFiles(userId);
+      res.status(200).json({ success: true, data: files });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
   // ── GET /api/products/bulk/drive-proxy/:fileId ────────────────────────────
 
   async driveProxy(req: Request, res: Response): Promise<void> {
@@ -229,12 +293,20 @@ function handleError(err: any, res: Response): void {
     res.status(err.statusCode).json({ success: false, message: err.message });
     return;
   }
-  if (err?.name === "ZodError") {
+  if (err?.name === "ZodError" || err?.issues) {
+    const issues = err.issues || err.errors || [];
+    const formatted = issues
+      .map((i: any) => `${i.path?.join(".") || "field"}: ${i.message}`)
+      .join(", ");
     res.status(400).json({
       success: false,
-      message: "Validation failed",
-      errors: err.errors,
+      message: formatted ? `Validation failed: ${formatted}` : "Validation failed",
+      errors: issues,
     });
+    return;
+  }
+  if (err?.code === "P2025") {
+    res.status(404).json({ success: false, message: "Draft record not found" });
     return;
   }
   console.error("❌ BulkImportDraftController error:", err);

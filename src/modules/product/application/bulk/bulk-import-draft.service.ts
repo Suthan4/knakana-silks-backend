@@ -47,7 +47,12 @@ export class BulkImportDraftService {
   ): Promise<BulkImportDraftResponse> {
     const draft = await this.repo.create(userId, dto);
 
-    // If rawInput was supplied, try parsing & validating it right away
+    // If caller provided structured parsedData or products directly, keep it
+    if (dto.parsedData || dto.products) {
+      return serialise(draft);
+    }
+
+    // If rawInput was supplied without parsedData, try parsing & validating it right away
     if (dto.rawInput && dto.rawInput.trim().length > 0) {
       try {
         return await this.parseRawInput(draft.id, userId, dto.rawInput);
@@ -99,10 +104,20 @@ export class BulkImportDraftService {
       ...(dto.confirmedAssignments ?? {}),
     };
 
-    let updatedParsedData = dto.parsedData !== undefined ? dto.parsedData : existing.parsedData;
+    let updatedParsedData =
+      dto.parsedData !== undefined
+        ? dto.parsedData
+        : dto.products !== undefined
+        ? { products: dto.products }
+        : existing.parsedData;
 
-    // If rawInput changed and parsedData was not explicitly supplied, re-parse raw input
-    if (dto.rawInput && dto.rawInput !== existing.rawInput && dto.parsedData === undefined) {
+    // If rawInput changed and parsedData/products was not explicitly supplied, re-parse raw input
+    if (
+      dto.rawInput &&
+      dto.rawInput !== existing.rawInput &&
+      dto.parsedData === undefined &&
+      dto.products === undefined
+    ) {
       try {
         const parsedRows = BulkProductParser.parseRawText(dto.rawInput);
         const { flatList: categoryList } = await this.bulkProductService.getCategoryHierarchy();
@@ -124,6 +139,7 @@ export class BulkImportDraftService {
 
     const draft = await this.repo.update(id, {
       ...dto,
+      rawInput: dto.rawInput !== undefined ? dto.rawInput : existing.rawInput,
       parsedData: updatedParsedData,
       confirmedAssignments: mergedConfirmed,
       status: dto.status || (updatedParsedData?.valid ? "READY_FOR_IMPORT" : "DRAFT"),
