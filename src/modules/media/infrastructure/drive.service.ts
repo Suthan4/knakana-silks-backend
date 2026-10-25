@@ -295,6 +295,27 @@ export class DriveService {
     });
   }
 
+  /**
+   * Returns true if the given user has a valid (non-revoked) Google Drive OAuth
+   * token stored in the database, or if the global fallback env token is present.
+   */
+  async isConnected(userId: string): Promise<boolean> {
+    try {
+      const record = await this.prisma.driveOAuth.findUnique({
+        where: { userId: BigInt(userId) },
+        select: { refreshToken: true, status: true },
+      });
+      if (record && record.refreshToken && record.status === "ACTIVE") {
+        return true;
+      }
+    } catch {
+      // DB unavailable – fall through to env check
+    }
+
+    // Fallback: shared env-level refresh token
+    return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REFRESH_TOKEN);
+  }
+
   /** Build an OAuth2 client for the given user ID. */
   async getOAuthClient(userId: string): Promise<OAuth2Client> {
     try {
@@ -416,5 +437,60 @@ export class DriveService {
   /** Generate a temporary signed/proxied URL for a file. */
   async getSignedUrl(userId: string, fileId: string): Promise<string> {
     return `/api/products/bulk/drive-proxy/${fileId}`;
+  }
+
+  /**
+   * Downloads a Drive file and returns its full text content.
+   * Enforces a 10 MB size limit to prevent memory exhaustion.
+   */
+  async readFileAsText(userId: string, fileId: string): Promise<string> {
+    const auth = await this.getOAuthClient(userId);
+    const drive = google.drive({ version: "v3", auth });
+
+    // Check file metadata first to enforce size limit
+    const meta: any = await drive.files.get({
+      fileId,
+      fields: "id, name, mimeType, size",
+    });
+
+    const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (meta.data?.size && Number(meta.data.size) > MAX_BYTES) {
+      throw new AppError(
+        413,
+        `File "${meta.data.name ?? fileId}" is too large (${Math.round(Number(meta.data.size) / 1024 / 1024)} MB). Maximum allowed size is 10 MB. Please split it into smaller files.`
+      );
+    }
+
+    const resp: any = await drive.files.get(
+      { fileId, alt: "media" },
+      { responseType: "text" }
+    );
+
+    return resp.data as string;
+  }
+
+  /**
+   * Lists JSON / plain-text files accessible in the user's Google Drive,
+   * ordered by most-recently modified first.
+   */
+  async listJsonFiles(
+    userId: string
+  ): Promise<Array<{ id: string; name: string; mimeType: string; size?: string }>> {
+    const auth = await this.getOAuthClient(userId);
+    const drive = google.drive({ version: "v3", auth });
+
+    const res: any = await drive.files.list({
+      q: "(mimeType='application/json' or mimeType='text/plain' or name contains '.json') and trashed = false",
+      fields: "files(id, name, mimeType, size)",
+      pageSize: 200,
+      orderBy: "modifiedTime desc",
+    });
+
+    return (res.data?.files ?? []).map((f: any) => ({
+      id: f.id ?? "",
+      name: f.name ?? "Untitled",
+      mimeType: f.mimeType ?? "application/json",
+      ...(f.size !== undefined ? { size: f.size } : {}),
+    }));
   }
 }

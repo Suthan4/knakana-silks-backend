@@ -393,84 +393,150 @@ export class BulkProductParser {
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) {
+        const rawItems: any[] = Array.isArray(parsed)
+          ? parsed
+          : parsed && Array.isArray(parsed.products)
+          ? parsed.products
+          : (parsed && typeof parsed === "object" && (parsed.name || parsed.productGroupId || parsed.sku) ? [parsed] : []);
+
+        if (rawItems.length > 0) {
           const products: BulkProductRow[] = [];
           const variants: BulkVariantRow[] = [];
           const seo: BulkSeoRow[] = [];
           const media: BulkMediaRow[] = [];
 
-          parsed.forEach((item: any, idx: number) => {
+          rawItems.forEach((item: any, idx: number) => {
             const rowNumber = idx + 2;
             const groupId = String(item.productGroupId || item.groupId || item.id || `PROD-${idx + 1}`);
+            const metaTitle = item.metaTitle || item.meta_title || item.seo?.metaTitle || undefined;
+            const metaDesc = item.metaDesc || item.meta_desc || item.metaDescription || item.seo?.metaDesc || undefined;
+
             products.push({
+              id: item.id ? String(item.id) : (item.productId ? String(item.productId) : undefined),
               rowNumber,
               productGroupId: groupId,
               productType: item.productType || (item.variants?.length ? "variable" : "simple"),
               name: item.name || "Untitled Product",
               categoryPath: item.categoryPath || item.category || "",
+              categoryId: item.categoryId ? String(item.categoryId) : undefined,
               description: item.description || "",
               basePrice: Number(item.basePrice || item.price || 0),
               sellingPrice: Number(item.sellingPrice || item.basePrice || item.price || 0),
               sku: item.sku || undefined,
               warehouseCodeOrName: item.warehouseCode || item.warehouseCodeOrName || item.stock?.warehouseCode || undefined,
+              warehouseId: item.warehouseId || item.stock?.warehouseId || undefined,
               stockQuantity: item.stockQuantity !== undefined ? Number(item.stockQuantity) : (item.stock?.quantity ?? 0),
               lowStockThreshold: item.lowStockThreshold ?? item.stock?.lowStockThreshold ?? 10,
+              metaTitle,
+              metaDesc,
               hsnCode: item.hsnCode,
               artisanName: item.artisanName,
               artisanAbout: item.artisanAbout,
               artisanLocation: item.artisanLocation,
-              weight: item.weight ? Number(item.weight) : 500,
-              length: item.length ? Number(item.length) : 10,
-              breadth: item.breadth ? Number(item.breadth) : 10,
-              height: item.height ? Number(item.height) : 5,
+              weight: item.weight !== undefined ? Number(item.weight) : 0.5,
+              length: item.length !== undefined ? Number(item.length) : 10,
+              breadth: item.breadth !== undefined ? Number(item.breadth) : 10,
+              height: item.height !== undefined ? Number(item.height) : 5,
               allowOutOfStockOrders: Boolean(item.allowOutOfStockOrders),
               hasVideoConsultation: Boolean(item.hasVideoConsultation),
               videoPurchasingEnabled: Boolean(item.videoPurchasingEnabled),
               videoConsultationNote: item.videoConsultationNote,
+              specifications: Array.isArray(item.specifications) ? item.specifications : undefined,
               isActive: item.isActive !== false,
             });
 
             if (item.variants && Array.isArray(item.variants)) {
               item.variants.forEach((v: any, vIdx: number) => {
+                const variantSku = v.sku || v.variantSku || `${groupId}-VAR-${vIdx + 1}`;
+                const variantMediaRows: BulkMediaRow[] = [];
+                const vMedia = v.media || v.images;
+
+                if (vMedia && Array.isArray(vMedia)) {
+                  vMedia.forEach((vm: any, vmIdx: number) => {
+                    const row: BulkMediaRow = {
+                      rowNumber: vmIdx + 2,
+                      productGroupId: groupId,
+                      variantSku,
+                      url: typeof vm === "string" ? vm : (vm.url || vm.imageUrl || vm.image || ""),
+                      key: typeof vm === "object" ? vm.key : undefined,
+                      type: (typeof vm === "object" && vm.type === "VIDEO") ? MediaType.VIDEO : MediaType.IMAGE,
+                      altText: typeof vm === "object" ? vm.altText : undefined,
+                      title: typeof vm === "object" ? vm.title : undefined,
+                      description: typeof vm === "object" ? vm.description : undefined,
+                      thumbnailUrl: typeof vm === "object" ? vm.thumbnailUrl : undefined,
+                      mimeType: typeof vm === "object" ? vm.mimeType : undefined,
+                      fileSize: typeof vm === "object" && vm.fileSize !== undefined ? Number(vm.fileSize) : undefined,
+                      duration: typeof vm === "object" && vm.duration !== undefined ? Number(vm.duration) : undefined,
+                      width: typeof vm === "object" && vm.width !== undefined ? Number(vm.width) : undefined,
+                      height: typeof vm === "object" && vm.height !== undefined ? Number(vm.height) : undefined,
+                      order: typeof vm === "object" && vm.order !== undefined ? Number(vm.order) : vmIdx,
+                      isActive: typeof vm === "object" ? vm.isActive !== false : true,
+                    };
+                    media.push(row);
+                    variantMediaRows.push(row);
+                  });
+                }
+
                 variants.push({
+                  id: v.id ? String(v.id) : undefined,
                   rowNumber: vIdx + 2,
                   productGroupId: groupId,
-                  variantSku: v.sku || `${groupId}-VAR-${vIdx + 1}`,
+                  variantSku,
+                  sku: variantSku,
+                  title: v.title,
                   size: v.size,
                   color: v.color,
                   fabric: v.fabric,
                   attributes: v.attributes || {},
                   basePrice: v.basePrice !== undefined ? Number(v.basePrice) : undefined,
-                  sellingPrice: v.sellingPrice !== undefined ? Number(v.sellingPrice) : undefined,
+                  sellingPrice: v.sellingPrice !== undefined ? Number(v.sellingPrice) : (v.price !== undefined ? Number(v.price) : undefined),
+                  price: v.price !== undefined ? Number(v.price) : (v.sellingPrice !== undefined ? Number(v.sellingPrice) : undefined),
                   warehouseCodeOrName: v.warehouseCode || v.warehouseCodeOrName || v.stock?.warehouseCode || undefined,
+                  warehouseId: v.warehouseId || v.stock?.warehouseId || undefined,
                   stockQuantity: v.stockQuantity !== undefined ? Number(v.stockQuantity) : (v.stock?.quantity ?? 0),
                   lowStockThreshold: v.lowStockThreshold ?? v.stock?.lowStockThreshold ?? 10,
+                  weight: v.weight !== undefined ? Number(v.weight) : undefined,
+                  length: v.length !== undefined ? Number(v.length) : undefined,
+                  breadth: v.breadth !== undefined ? Number(v.breadth) : undefined,
+                  height: v.height !== undefined ? Number(v.height) : undefined,
+                  media: variantMediaRows.length > 0 ? variantMediaRows : undefined,
                 });
               });
             }
 
-            if (item.media && Array.isArray(item.media)) {
-              item.media.forEach((m: any, mIdx: number) => {
+            const itemMedia = item.media || item.images;
+            if (itemMedia && Array.isArray(itemMedia)) {
+              itemMedia.forEach((m: any, mIdx: number) => {
                 media.push({
                   rowNumber: mIdx + 2,
                   productGroupId: groupId,
                   variantSku: m.variantSku,
-                  url: typeof m === "string" ? m : (m.url || ""),
-                  type: (m.type === "VIDEO" ? MediaType.VIDEO : MediaType.IMAGE),
-                  altText: m.altText,
-                  order: m.order ?? mIdx,
+                  url: typeof m === "string" ? m : (m.url || m.imageUrl || m.image || ""),
+                  key: typeof m === "object" ? m.key : undefined,
+                  type: (typeof m === "object" && m.type === "VIDEO") ? MediaType.VIDEO : MediaType.IMAGE,
+                  altText: typeof m === "object" ? m.altText : undefined,
+                  title: typeof m === "object" ? m.title : undefined,
+                  description: typeof m === "object" ? m.description : undefined,
+                  thumbnailUrl: typeof m === "object" ? m.thumbnailUrl : undefined,
+                  mimeType: typeof m === "object" ? m.mimeType : undefined,
+                  fileSize: typeof m === "object" && m.fileSize !== undefined ? Number(m.fileSize) : undefined,
+                  duration: typeof m === "object" && m.duration !== undefined ? Number(m.duration) : undefined,
+                  width: typeof m === "object" && m.width !== undefined ? Number(m.width) : undefined,
+                  height: typeof m === "object" && m.height !== undefined ? Number(m.height) : undefined,
+                  order: typeof m === "object" && m.order !== undefined ? Number(m.order) : mIdx,
+                  isActive: typeof m === "object" ? m.isActive !== false : true,
                 });
               });
             }
 
-            if (item.seo) {
+            if (metaTitle || metaDesc || item.seo) {
               seo.push({
                 rowNumber,
                 productGroupId: groupId,
-                metaTitle: item.seo.metaTitle,
-                metaDesc: item.seo.metaDesc,
-                slug: item.seo.slug,
-                schemaMarkup: item.seo.schemaMarkup,
+                metaTitle,
+                metaDesc,
+                slug: item.seo?.slug || item.slug,
+                schemaMarkup: item.seo?.schemaMarkup || item.schemaMarkup,
               });
             }
           });

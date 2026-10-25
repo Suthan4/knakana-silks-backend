@@ -1,9 +1,10 @@
 import { injectable, inject } from "tsyringe";
 import { PrismaClient } from "@/generated/prisma/client.js";
 import { DraftStatus as PrismaDraftStatus } from "@/generated/prisma/enums.js";
-import type {
+import {
   CreateBulkImportDraftDto,
   UpdateBulkImportDraftDto,
+  cleanPrismaJson,
 } from "../../application/bulk/dto/bulk-import-draft.dto.js";
 
 export interface DraftRecord {
@@ -37,14 +38,25 @@ export class BulkImportDraftRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
 
   async create(userId: bigint, dto: CreateBulkImportDraftDto): Promise<DraftRecord> {
+    const rawParsed =
+      dto.parsedData !== undefined
+        ? dto.parsedData
+        : dto.products
+        ? { products: dto.products }
+        : undefined;
+
+    const parsedData = cleanPrismaJson(rawParsed);
+    const imageMatches = cleanPrismaJson(dto.imageMatches);
+    const confirmedAssignments = cleanPrismaJson(dto.confirmedAssignments);
+
     const created = await this.prisma.bulkImportDraft.create({
       data: {
         userId,
-        rawInput: dto.rawInput,
-        parsedData: undefined,
-        imageMatches: undefined,
-        confirmedAssignments: undefined,
-        status: PrismaDraftStatus.DRAFT,
+        rawInput: dto.rawInput ?? "",
+        parsedData: parsedData !== null ? parsedData : undefined,
+        imageMatches: imageMatches !== null ? imageMatches : undefined,
+        confirmedAssignments: confirmedAssignments !== null ? confirmedAssignments : undefined,
+        status: toPrismaDraftStatus(dto.status),
       },
     });
 
@@ -85,14 +97,33 @@ export class BulkImportDraftRepository {
     id: string,
     data: Partial<UpdateBulkImportDraftDto & { status: string }>
   ): Promise<DraftRecord> {
+    const rawParsed =
+      data.parsedData !== undefined
+        ? data.parsedData
+        : data.products
+        ? { products: data.products }
+        : undefined;
+
+    const parsedData = rawParsed !== undefined ? cleanPrismaJson(rawParsed) : undefined;
+    const imageMatches =
+      data.imageMatches !== undefined ? cleanPrismaJson(data.imageMatches) : undefined;
+    const confirmedAssignments =
+      data.confirmedAssignments !== undefined
+        ? cleanPrismaJson(data.confirmedAssignments)
+        : undefined;
+
     const updated = await this.prisma.bulkImportDraft.update({
       where: { id: BigInt(id) },
       data: {
         ...(data.rawInput !== undefined && { rawInput: data.rawInput }),
-        ...(data.parsedData !== undefined && { parsedData: data.parsedData }),
-        ...(data.imageMatches !== undefined && { imageMatches: data.imageMatches }),
+        ...(rawParsed !== undefined && {
+          parsedData: parsedData !== null ? parsedData : undefined,
+        }),
+        ...(data.imageMatches !== undefined && {
+          imageMatches: imageMatches !== null ? imageMatches : undefined,
+        }),
         ...(data.confirmedAssignments !== undefined && {
-          confirmedAssignments: data.confirmedAssignments,
+          confirmedAssignments: confirmedAssignments !== null ? confirmedAssignments : undefined,
         }),
         ...(data.status !== undefined && {
           status: toPrismaDraftStatus(data.status),
