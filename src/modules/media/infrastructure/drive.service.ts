@@ -350,7 +350,8 @@ export class DriveService {
   }
 
   /**
-   * List folders in Google Drive for folder selection
+   * List folders in Google Drive for folder selection.
+   * Includes shared drives and "Shared with me" folders.
    */
   async listFolders(userId: string): Promise<Array<{ id: string; name: string }>> {
     const auth = await this.getOAuthClient(userId);
@@ -360,6 +361,8 @@ export class DriveService {
       fields: "files(id, name)",
       pageSize: 100,
       orderBy: "name",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     return (
@@ -371,40 +374,63 @@ export class DriveService {
   }
 
   /**
-   * Returns a list of files inside a folder.
+   * Returns a recursive list of image/video files inside a folder and all its subfolders.
+   * Supports shared drives and "Shared with me" folders.
+   * Returns thumbnailLink for fast preview without downloading the full file.
    */
   async listFolderFiles(
     userId: string,
     folderId: string
-  ): Promise<Array<{ id: string; name: string; mimeType: string }>> {
+  ): Promise<Array<{ id: string; name: string; mimeType: string; thumbnailLink?: string }>> {
     const auth = await this.getOAuthClient(userId);
     const drive = google.drive({ version: "v3", auth });
 
-    const allFiles: Array<{ id: string; name: string; mimeType: string }> = [];
-    let pageToken: string | undefined = undefined;
+    const allFiles: Array<{ id: string; name: string; mimeType: string; thumbnailLink?: string }> = [];
 
-    do {
-      const driveListRes: any = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: "nextPageToken, files(id, name, mimeType)",
-        pageSize: 1000,
-        pageToken,
-      });
+    // BFS queue of folder IDs to traverse
+    const folderQueue: string[] = [folderId];
+    const visitedFolderIds = new Set<string>();
 
-      if (driveListRes.data?.files) {
-        for (const f of driveListRes.data.files) {
-          if (f.id && f.name) {
-            allFiles.push({
-              id: f.id,
-              name: f.name,
-              mimeType: f.mimeType || "application/octet-stream",
-            });
+    while (folderQueue.length > 0) {
+      const currentFolderId = folderQueue.shift()!;
+      if (visitedFolderIds.has(currentFolderId)) continue;
+      visitedFolderIds.add(currentFolderId);
+
+      let pageToken: string | undefined = undefined;
+
+      do {
+        const driveListRes: any = await drive.files.list({
+          q: `'${currentFolderId}' in parents and trashed = false`,
+          fields: "nextPageToken, files(id, name, mimeType, thumbnailLink)",
+          pageSize: 1000,
+          pageToken,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+
+        if (driveListRes.data?.files) {
+          for (const f of driveListRes.data.files) {
+            if (!f.id || !f.name) continue;
+
+            if (f.mimeType === "application/vnd.google-apps.folder") {
+              // Queue subfolders for recursive traversal
+              if (!visitedFolderIds.has(f.id)) {
+                folderQueue.push(f.id);
+              }
+            } else {
+              allFiles.push({
+                id: f.id,
+                name: f.name,
+                mimeType: f.mimeType || "application/octet-stream",
+                thumbnailLink: f.thumbnailLink || undefined,
+              });
+            }
           }
         }
-      }
 
-      pageToken = driveListRes.data?.nextPageToken || undefined;
-    } while (pageToken);
+        pageToken = driveListRes.data?.nextPageToken || undefined;
+      } while (pageToken);
+    }
 
     return allFiles;
   }
@@ -419,10 +445,11 @@ export class DriveService {
     const meta: any = await drive.files.get({
       fileId,
       fields: "id, name, mimeType, size",
+      supportsAllDrives: true,
     });
 
     const stream: any = await drive.files.get(
-      { fileId, alt: "media" },
+      { fileId, alt: "media", supportsAllDrives: true } as any,
       { responseType: "stream" }
     );
 

@@ -237,18 +237,24 @@ export class BulkImportDraftService {
     // Collect all media references from parsed products and variants
     const parsedData = existing.parsedData as any;
     const allMedia: any[] = [];
-    if (Array.isArray(parsedData.products)) {
-      for (const p of parsedData.products) {
-        if (Array.isArray(p.media)) {
-          p.media.forEach((m: any) => allMedia.push({ ...m, productGroupId: p.productGroupId }));
-        }
-        if (Array.isArray(p.variants)) {
-          for (const v of p.variants) {
-            if (Array.isArray(v.media)) {
-              v.media.forEach((m: any) =>
-                allMedia.push({ ...m, productGroupId: p.productGroupId, variantSku: v.sku })
-              );
-            }
+
+    // Support both { products: [...] } and flat array [...] formats
+    const productList: any[] = Array.isArray(parsedData)
+      ? parsedData
+      : Array.isArray(parsedData?.products)
+      ? parsedData.products
+      : [];
+
+    for (const p of productList) {
+      if (Array.isArray(p.media)) {
+        p.media.forEach((m: any) => allMedia.push({ ...m, productGroupId: p.productGroupId }));
+      }
+      if (Array.isArray(p.variants)) {
+        for (const v of p.variants) {
+          if (Array.isArray(v.media)) {
+            v.media.forEach((m: any) =>
+              allMedia.push({ ...m, productGroupId: p.productGroupId, variantSku: v.sku })
+            );
           }
         }
       }
@@ -282,11 +288,14 @@ export class BulkImportDraftService {
     if (!existing) throw new NotFoundError("Draft not found");
     assertOwner(existing.userId, userId);
 
-    if (!existing.parsedData || !Array.isArray(existing.parsedData.products)) {
+    // Support both { products: [...] } and flat array [...] formats
+    const pd = existing.parsedData as any;
+    const productList: any[] = Array.isArray(pd) ? pd : Array.isArray(pd?.products) ? pd.products : [];
+    if (!existing.parsedData || productList.length === 0) {
       throw new ValidationError("Draft has no products to import");
     }
 
-    const products = existing.parsedData.products;
+    const products = productList;
     if (products.length === 0) {
       throw new ValidationError("No products in draft to import");
     }
