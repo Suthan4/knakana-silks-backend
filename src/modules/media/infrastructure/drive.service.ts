@@ -494,6 +494,61 @@ export class DriveService {
   }
 
   /**
+   * Download a matched Drive image for the background bulk-import worker.
+   * Check metadata before allocating memory and apply the same 60 MB raw-file
+   * ceiling as the upload API.
+   */
+  async downloadFileForImport(
+    userId: string,
+    fileId: string
+  ): Promise<{ buffer: Buffer; name: string; mimeType: string; size: number }> {
+    const auth = await this.getOAuthClient(userId);
+    const drive = google.drive({ version: "v3", auth });
+    const maxBytes = 60 * 1024 * 1024;
+
+    const metadata: any = await drive.files.get({
+      fileId,
+      fields: "id, name, mimeType, size",
+      supportsAllDrives: true,
+    });
+    const name = String(metadata.data?.name || fileId);
+    const mimeType = String(metadata.data?.mimeType || "application/octet-stream");
+    const declaredSize = Number(metadata.data?.size || 0);
+
+    if (!mimeType.startsWith("image/")) {
+      throw new AppError(422, `Drive file "${name}" is not an image (${mimeType}).`);
+    }
+    if (declaredSize > maxBytes) {
+      throw new AppError(
+        413,
+        `Image "${name}" is ${(declaredSize / 1024 / 1024).toFixed(1)} MB; the per-image limit is 60 MB.`
+      );
+    }
+
+    const response: any = await drive.files.get(
+      { fileId, alt: "media", supportsAllDrives: true } as any,
+      { responseType: "arraybuffer" }
+    );
+    const data = response?.data;
+    const buffer = Buffer.isBuffer(data)
+      ? data
+      : data instanceof ArrayBuffer
+        ? Buffer.from(data)
+        : ArrayBuffer.isView(data)
+          ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+          : Buffer.from(data ?? []);
+
+    if (!buffer.length) {
+      throw new AppError(502, `Google Drive returned an empty image for "${name}".`);
+    }
+    if (buffer.length > maxBytes) {
+      throw new AppError(413, `Image "${name}" exceeds the 60 MB upload limit after download.`);
+    }
+
+    return { buffer, name, mimeType, size: buffer.length };
+  }
+
+  /**
    * Stream file from Drive directly to HTTP response.
    */
   async streamFile(userId: string, fileId: string, res: Response): Promise<void> {
