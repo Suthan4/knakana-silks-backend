@@ -148,9 +148,17 @@ function findNonPermanentImageReferences(product: BulkParsedProduct): string[] {
 
   for (const collection of collections) {
     for (const media of collection.media) {
-      if (media.type !== "IMAGE" || !(media.url || "").trim()) continue;
-      if (!isPermanentStorageUrl(media.url) || isTemporaryDriveMediaUrl(media.url)) {
-        bad.push(`${collection.label}: ${media.title || media.altText || media.url}`);
+      if (media.type !== "IMAGE") continue;
+      const url = (media.url || "").trim();
+      const hasTemporaryThumbnail = isTemporaryDriveMediaUrl(media.thumbnailUrl);
+      if (!url) {
+        if (hasTemporaryThumbnail || media.sourceDriveFileId) {
+          bad.push(`${collection.label}: ${media.title || media.altText || media.sourceDriveFileId || "image without a stored URL"}`);
+        }
+        continue;
+      }
+      if (!isPermanentStorageUrl(url) || isTemporaryDriveMediaUrl(url)) {
+        bad.push(`${collection.label}: ${media.title || media.altText || url}`);
       }
     }
   }
