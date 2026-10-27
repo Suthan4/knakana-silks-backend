@@ -122,8 +122,14 @@ function findDriveEntryTargets(
           if (mediaMatchesDriveEntry(media, entry)) targets.push(media);
         }
       }
+      // Some drafts store variant photos in product.media with variantSku set.
+      for (const media of product.media || []) {
+        if ((media.variantSku || "").trim().toLocaleLowerCase("en-US") !== variantSku) continue;
+        if (mediaMatchesDriveEntry(media, entry)) targets.push(media);
+      }
     } else {
       for (const media of product.media || []) {
+        if (media.variantSku || media.source === "variant") continue;
         if (mediaMatchesDriveEntry(media, entry)) targets.push(media);
       }
     }
