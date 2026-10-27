@@ -56,6 +56,25 @@ describe("Bulk Import Drafts & Drive Matching Test Suite", () => {
       assert.equal(res.missing.length, 0);
     });
 
+    it("should match camera references where letter O is used instead of digit zero", async () => {
+      const cameraDriveService: any = {
+        listFolderFiles: async () => [
+          { id: "nav-photo-1", name: "NAV02845.JPG", mimeType: "image/jpeg" },
+        ],
+      };
+      const matcher = new DriveImageMatcherService(cameraDriveService);
+      const mediaList: any[] = [
+        { url: "NAVO2845", type: MediaType.IMAGE, order: 0 },
+      ];
+
+      const res = await matcher.match("user-1", "shared-folder", mediaList);
+
+      assert.equal(res.matched.length, 1);
+      assert.equal(res.matched[0].file.id, "nav-photo-1");
+      assert.equal(res.matched[0].file.name, "NAV02845.JPG");
+      assert.equal(res.missing.length, 0);
+    });
+
     it("should flag missing files when reference does not exist in Drive folder", async () => {
       const matcher = new DriveImageMatcherService(mockDriveService);
       const mediaList: any[] = [
