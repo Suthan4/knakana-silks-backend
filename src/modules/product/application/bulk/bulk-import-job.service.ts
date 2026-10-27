@@ -350,17 +350,230 @@ export class BulkImportJobService {
   /**
    * Background processor
    */
-  private async executeJob(jobId: string, products: BulkParsedProduct[]): Promise<void> {
+  private async executeJob(
+    jobId: string,
+    inputProducts: BulkParsedProduct[],
+    imageMatches?: ImageMatchResult,
+    driveUserId?: string
+  ): Promise<void> {
     const rawJob = this.memoryStore.get(jobId);
     if (!rawJob) return;
 
+    let products = inputProducts.map((product) => ({
+      ...product,
+      media: product.media ? [...product.media] : [],
+      variants: (product.variants || []).map((variant) => ({
+        ...variant,
+        media: variant.media ? [...variant.media] : [],
+      })),
+    }));
+
     rawJob.status = "processing";
+    rawJob.stage = imageMatches?.matched?.length && driveUserId
+      ? "preparing_images"
+      : "importing_products";
+    await this.saveJob(rawJob);
+
+    const entriesById = new Map<string, MatchedEntry>();
+    for (const entry of imageMatches?.matched || []) {
+      if (entry.file?.id) entriesById.set(entry.file.id, entry);
+    }
+    const allMatchedEntries = [...entriesById.values()];
+    const entriesToUpload: MatchedEntry[] = [];
+    const mappingFailures: Array<{ entry: MatchedEntry; error: string }> = [];
+
+    if (driveUserId) {
+      for (const entry of allMatchedEntries) {
+        const targets = findDriveEntryTargets(products, entry);
+        if (targets.length === 0) {
+          mappingFailures.push({
+            entry,
+            error: "The matched Drive file could not be linked to a product image reference. Check the product media URL/title and run matching again.",
+          });
+          continue;
+        }
+        // A previously uploaded product image is permanent; retain it on retries.
+        if (targets.some((media) => !isPermanentStorageUrl(media.url))) {
+          entriesToUpload.push(entry);
+        }
+      }
+    }
+
+    rawJob.imagesTotal = entriesToUpload.length + mappingFailures.length;
+    rawJob.imagesProcessed = 0;
+    rawJob.imagesUploaded = 0;
+    rawJob.imagesFailed = 0;
+    rawJob.imageResults = [];
+    rawJob.currentFile = undefined;
+
+    for (const failure of mappingFailures) {
+      rawJob.imagesProcessed++;
+      rawJob.imagesFailed++;
+      rawJob.imageResults.push({
+        fileId: failure.entry.file.id,
+        name: failure.entry.file.name || failure.entry.reference,
+        status: "failed",
+        error: failure.error,
+      });
+    }
+
+    const uploadedByDriveId = new Map<string, UploadedDriveImage>();
+    const batchSize = 3;
+
+    if (entriesToUpload.length > 0 || mappingFailures.length > 0) {
+      rawJob.stage = "uploading_images";
+      rawJob.progress = rawJob.imagesTotal > 0
+        ? Math.round((40 * rawJob.imagesProcessed) / rawJob.imagesTotal)
+        : 0;
+      if (mappingFailures.length) rawJob.error = mappingFailures.length + " image(s) could not be mapped to product media.";
+      await this.saveJob(rawJob);
+    }
+
+    for (let offset = 0; offset < entriesToUpload.length; offset += batchSize) {
+      const batch = entriesToUpload.slice(offset, offset + batchSize);
+      rawJob.currentFile = batch.map((entry) => entry.file.name).join(", ");
+      await this.saveJob(rawJob);
+
+      // Download each small batch from the user's connected Drive account.
+      const downloads = await Promise.all(
+        batch.map(async (entry) => {
+          try {
+            const file = await this.driveService.downloadFileForImport(driveUserId!, entry.file.id);
+            return { entry, file, error: undefined as string | undefined };
+          } catch (error) {
+            return {
+              entry,
+              file: undefined,
+              error: error instanceof Error ? error.message : String(error || "Google Drive download failed"),
+            };
+          }
+        })
+      );
+
+      const validDownloads = downloads.filter(
+        (item): item is { entry: MatchedEntry; file: { buffer: Buffer; name: string; mimeType: string; size: number }; error: undefined } =>
+          Boolean(item.file)
+      );
+
+      for (const failed of downloads.filter((item) => !item.file)) {
+        rawJob.imagesProcessed++;
+        rawJob.imagesFailed++;
+        rawJob.imageResults.push({
+          fileId: failed.entry.file.id,
+          name: failed.entry.file.name || failed.entry.reference,
+          status: "failed",
+          error: failed.error || "Could not download the original image from Google Drive.",
+        });
+      }
+
+      if (validDownloads.length > 0) {
+        const files = validDownloads.map(({ file }) => ({
+          fieldname: "files",
+          originalname: file.name,
+          encoding: "7bit",
+          mimetype: file.mimeType,
+          buffer: file.buffer,
+          size: file.size,
+          destination: "",
+          filename: file.name,
+          path: "",
+        } as unknown as Express.Multer.File));
+
+        // This is the backend multi-file upload/optimization path, not 146
+        // separate browser POST /upload requests.
+        const uploadResults = await this.s3UploadService.uploadFilesWithResults(files, "products");
+
+        for (let index = 0; index < validDownloads.length; index++) {
+          const item = validDownloads[index];
+          const upload = uploadResults[index];
+
+          rawJob.imagesProcessed++;
+          if (upload?.success && upload.result?.url && upload.result.key) {
+            uploadedByDriveId.set(item.entry.file.id, {
+              url: upload.result.url,
+              key: upload.result.key,
+            });
+            rawJob.imagesUploaded++;
+            rawJob.imageResults.push({
+              fileId: item.entry.file.id,
+              name: item.file.name,
+              status: "success",
+              url: upload.result.url,
+              key: upload.result.key,
+            });
+          } else {
+            rawJob.imagesFailed++;
+            rawJob.imageResults.push({
+              fileId: item.entry.file.id,
+              name: item.file.name,
+              status: "failed",
+              error: upload?.error || "S3 image optimizer/upload did not return a storage URL.",
+            });
+          }
+        }
+      }
+
+      products = applyUploadedDriveImages(products, allMatchedEntries, uploadedByDriveId);
+
+      // Persist successful image URLs after each batch. A retry only needs to
+      // process images that are still references; successful S3 uploads survive.
+      if (rawJob.draftId && uploadedByDriveId.size > 0) {
+        await this.draftRepo.update(rawJob.draftId, {
+          rawInput: JSON.stringify(products, null, 2),
+          parsedData: products,
+          status: "READY_FOR_IMPORT",
+        });
+      }
+
+      rawJob.progress = rawJob.imagesTotal > 0
+        ? Math.round((40 * rawJob.imagesProcessed) / rawJob.imagesTotal)
+        : 0;
+      await this.saveJob(rawJob);
+    }
+
+    if (rawJob.imagesFailed > 0) {
+      rawJob.status = "failed";
+      rawJob.stage = "images_failed";
+      rawJob.completedAt = new Date().toISOString();
+      rawJob.currentFile = undefined;
+      const firstFailures = rawJob.imageResults
+        .filter((result) => result.status === "failed")
+        .slice(0, 5)
+        .map((result) => result.name + ": " + (result.error || "Unknown image error"));
+      rawJob.error = rawJob.imagesFailed + " of " + rawJob.imagesTotal +
+        " image(s) failed. Product import was not started. " + firstFailures.join(" | ");
+      if (rawJob.draftId && uploadedByDriveId.size > 0) {
+        await this.draftRepo.update(rawJob.draftId, {
+          rawInput: JSON.stringify(products, null, 2),
+          parsedData: products,
+          status: "DRAFT",
+        });
+      } else if (rawJob.draftId) {
+        await this.draftRepo.update(rawJob.draftId, { status: "DRAFT" });
+      }
+      await this.saveJob(rawJob);
+      return;
+    }
+
+    if (rawJob.draftId && uploadedByDriveId.size > 0) {
+      await this.draftRepo.update(rawJob.draftId, {
+        rawInput: JSON.stringify(products, null, 2),
+        parsedData: products,
+        status: "READY_FOR_IMPORT",
+      });
+    }
+
+    rawJob.stage = "importing_products";
+    rawJob.currentFile = undefined;
+    const imageProgressBase = rawJob.imagesTotal > 0 ? 40 : 0;
+    rawJob.progress = imageProgressBase;
     await this.saveJob(rawJob);
 
     for (let i = 0; i < products.length; i++) {
       const product = products[i];
+      rawJob.currentFile = product.name;
+      await this.saveJob(rawJob);
       try {
-        // Import single product transactionally
         const res = await this.bulkProductService.importProducts([product]);
         const itemRes = res.results?.[0];
 
@@ -390,34 +603,32 @@ export class BulkImportJobService {
           name: product.name,
           sku: product.sku,
           status: "failed",
-          error: err.message || "Unknown error during product import",
+          error: err?.message || "Unknown error during product import",
         });
       }
 
       rawJob.processed++;
-      rawJob.progress = Math.round((rawJob.processed / rawJob.total) * 100);
-
-      // Periodically persist progress
+      rawJob.progress = imageProgressBase + Math.round(
+        ((100 - imageProgressBase) * rawJob.processed) / rawJob.total
+      );
       await this.saveJob(rawJob);
     }
 
-    // Finalize job
     rawJob.completedAt = new Date().toISOString();
     rawJob.progress = 100;
-    rawJob.status = rawJob.failed === 0 ? "completed" : (rawJob.successful > 0 ? "completed" : "failed");
-
+    rawJob.currentFile = undefined;
+    rawJob.stage = rawJob.failed === 0 || rawJob.successful > 0 ? "completed" : "failed";
+    rawJob.status = rawJob.failed === 0 || rawJob.successful > 0 ? "completed" : "failed";
     await this.saveJob(rawJob);
 
-    // If linked to draft, update draft status
     if (rawJob.draftId) {
       try {
-        const finalDraftStatus =
-          rawJob.successful > 0 ? PrismaDraftStatus.COMPLETED : PrismaDraftStatus.FAILED;
-        await this.draftRepo.update(rawJob.draftId, {
-          status: finalDraftStatus,
-        });
+        const finalDraftStatus = rawJob.successful > 0
+          ? PrismaDraftStatus.COMPLETED
+          : PrismaDraftStatus.FAILED;
+        await this.draftRepo.update(rawJob.draftId, { status: finalDraftStatus });
       } catch (err: any) {
-        console.warn(`Failed to update draft ${rawJob.draftId} on job finish:`, err.message);
+        console.warn("Failed to update draft " + rawJob.draftId + " on job finish:", err.message);
       }
     }
   }
