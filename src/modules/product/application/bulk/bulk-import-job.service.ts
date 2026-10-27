@@ -465,6 +465,12 @@ export class BulkImportJobService {
           error: failed.error || "Could not download the original image from Google Drive.",
         });
       }
+      if (downloads.some((item) => !item.file)) {
+        rawJob.progress = rawJob.imagesTotal > 0
+          ? Math.round((40 * rawJob.imagesProcessed) / rawJob.imagesTotal)
+          : 0;
+        await this.saveJob(rawJob);
+      }
 
       if (validDownloads.length > 0) {
         const files = validDownloads.map(({ file }) => ({
@@ -480,37 +486,46 @@ export class BulkImportJobService {
         } as unknown as Express.Multer.File));
 
         // This is the backend multi-file upload/optimization path, not 146
-        // separate browser POST /upload requests.
-        const uploadResults = await this.s3UploadService.uploadFilesWithResults(files, "products");
+        // separate browser POST /upload requests. Each completion is persisted
+        // immediately so the admin can see progress while other images run.
+        await this.s3UploadService.uploadFilesWithResults(
+          files,
+          "products",
+          async (index, upload) => {
+            const item = validDownloads[index];
+            if (!item) return;
 
-        for (let index = 0; index < validDownloads.length; index++) {
-          const item = validDownloads[index];
-          const upload = uploadResults[index];
+            rawJob.imagesProcessed++;
+            if (upload.success && upload.result?.url && upload.result.key) {
+              uploadedByDriveId.set(item.entry.file.id, {
+                url: upload.result.url,
+                key: upload.result.key,
+              });
+              rawJob.imagesUploaded++;
+              rawJob.imageResults.push({
+                fileId: item.entry.file.id,
+                name: item.file.name,
+                status: "success",
+                url: upload.result.url,
+                key: upload.result.key,
+              });
+            } else {
+              rawJob.imagesFailed++;
+              rawJob.imageResults.push({
+                fileId: item.entry.file.id,
+                name: item.file.name,
+                status: "failed",
+                error: upload.error || "S3 image optimizer/upload did not return a storage URL.",
+              });
+            }
 
-          rawJob.imagesProcessed++;
-          if (upload?.success && upload.result?.url && upload.result.key) {
-            uploadedByDriveId.set(item.entry.file.id, {
-              url: upload.result.url,
-              key: upload.result.key,
-            });
-            rawJob.imagesUploaded++;
-            rawJob.imageResults.push({
-              fileId: item.entry.file.id,
-              name: item.file.name,
-              status: "success",
-              url: upload.result.url,
-              key: upload.result.key,
-            });
-          } else {
-            rawJob.imagesFailed++;
-            rawJob.imageResults.push({
-              fileId: item.entry.file.id,
-              name: item.file.name,
-              status: "failed",
-              error: upload?.error || "S3 image optimizer/upload did not return a storage URL.",
-            });
+            rawJob.progress = rawJob.imagesTotal > 0
+              ? Math.round((40 * rawJob.imagesProcessed) / rawJob.imagesTotal)
+              : 0;
+            rawJob.currentFile = item.file.name;
+            await this.saveJob(rawJob);
           }
-        }
+        );
       }
 
       products = applyUploadedDriveImages(products, allMatchedEntries, uploadedByDriveId);
