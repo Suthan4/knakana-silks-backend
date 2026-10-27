@@ -8,6 +8,7 @@ import { BulkProductParser } from "../bulk/bulk-product.parser.js";
 import { BulkProductValidator, CategoryCacheInfo, WarehouseCacheInfo } from "../bulk/bulk-product.validator.js";
 import {
   BulkParsedProduct,
+  BulkParsedMedia,
   BulkValidationResponse,
   BulkImportResponse,
   BulkProductRow,
@@ -29,6 +30,38 @@ export interface HierarchicalCategoryNode {
   isActive: boolean;
   parentId?: string | null;
   children: HierarchicalCategoryNode[];
+}
+
+function isTemporaryOrNonStorageImageUrl(value?: string): boolean {
+  const url = (value || "").trim();
+  return !/^https:\/\//i.test(url) ||
+    /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(url);
+}
+
+function listUnsafeImageReferences(products: BulkParsedProduct[]): string[] {
+  const issues: string[] = [];
+  for (const product of products) {
+    const media: BulkParsedMedia[] = [
+      ...(product.media || []).filter((item) => !item.variantSku || item.source === "product"),
+      ...((product.variants || []).flatMap((variant) => variant.media || [])),
+      ...(product.media || []).filter((item) => Boolean(item.variantSku) || item.source === "variant"),
+    ];
+    for (const item of media) {
+      if (item.type !== "VIDEO" && isTemporaryOrNonStorageImageUrl(item.url)) {
+        issues.push(`${product.name}: ${item.title || item.altText || item.url || "image without a URL"}`);
+      }
+    }
+  }
+  return issues;
+}
+
+function safeThumbnailUrl(media: BulkParsedMedia): string | undefined {
+  const thumbnailUrl = media.thumbnailUrl?.trim();
+  if (!thumbnailUrl) return undefined;
+  if (/drive\.google\.com|docs\.google\.com|googleusercontent\.com|[?&]token=/i.test(thumbnailUrl)) {
+    return media.url;
+  }
+  return thumbnailUrl;
 }
 
 @injectable()
@@ -328,7 +361,7 @@ export class BulkProductService {
                 type: vm.type,
                 url: vm.url,
                 key: vm.key,
-                thumbnailUrl: vm.thumbnailUrl,
+                thumbnailUrl: safeThumbnailUrl(vm),
                 altText: vm.altText,
                 title: vm.title,
                 description: vm.description,
@@ -366,7 +399,7 @@ export class BulkProductService {
             type: m.type,
             url: m.url,
             key: m.key,
-            thumbnailUrl: m.thumbnailUrl,
+            thumbnailUrl: safeThumbnailUrl(m),
             altText: m.altText,
             title: m.title,
             description: m.description,
@@ -407,6 +440,18 @@ export class BulkProductService {
   ): Promise<BulkImportResponse> {
     if (!productsToImport || productsToImport.length === 0) {
       throw new ValidationError("No products provided for import.");
+    }
+
+    // Safety boundary for every import route, including direct bulk-import calls
+    // that might bypass the background Drive-to-S3 image job. Never persist a
+    // Drive proxy, Google-hosted preview, filename, or tokenized URL as ProductMedia.
+    const unsafeImages = listUnsafeImageReferences(productsToImport);
+    if (unsafeImages.length > 0) {
+      throw new ValidationError(
+        "Bulk import blocked before saving products because some images are not permanent HTTPS storage URLs. " +
+        "Run the Google Drive background image upload or replace the references with permanent storage URLs. " +
+        unsafeImages.slice(0, 8).join(" | "),
+      );
     }
 
     // 1. Re-validate everything against live DB state
@@ -460,7 +505,7 @@ export class BulkProductService {
             title: m.title,
             description: m.description,
             order: m.order !== undefined ? m.order : idx,
-            thumbnailUrl: m.thumbnailUrl,
+            thumbnailUrl: safeThumbnailUrl(m),
             mimeType: m.mimeType,
             fileSize: m.fileSize,
             duration: m.duration,
@@ -501,7 +546,7 @@ export class BulkProductService {
                     title: m.title,
                     description: m.description,
                     order: m.order !== undefined ? m.order : idx,
-                    thumbnailUrl: m.thumbnailUrl,
+                    thumbnailUrl: safeThumbnailUrl(m),
                     mimeType: m.mimeType,
                     fileSize: m.fileSize,
                     duration: m.duration,
