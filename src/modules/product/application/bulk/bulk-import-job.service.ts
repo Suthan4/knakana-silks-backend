@@ -672,15 +672,34 @@ export class BulkImportJobService {
     });
     if (unresolvedMedia.length > 0) {
       products = sanitizeTemporaryDriveMedia(products);
+      const unresolvedReferences = unresolvedMedia.flatMap(({ product, references }) =>
+        references.map((reference, index) => ({
+          product,
+          reference,
+          index,
+        })),
+      );
       const examples = unresolvedMedia
         .slice(0, 5)
         .map(({ product, references }) => `${product.name}: ${references.slice(0, 2).join(", ")}`)
         .join(" | ");
+
       rawJob.status = "failed";
-      rawJob.stage = "failed";
+      rawJob.stage = "images_failed";
       rawJob.completedAt = new Date().toISOString();
       rawJob.currentFile = undefined;
       rawJob.progress = 100;
+      rawJob.imagesTotal = Math.max(rawJob.imagesTotal, rawJob.imagesUploaded) + unresolvedReferences.length;
+      rawJob.imagesProcessed = Math.max(rawJob.imagesProcessed, rawJob.imagesUploaded) + unresolvedReferences.length;
+      rawJob.imagesFailed += unresolvedReferences.length;
+      rawJob.imageResults.push(
+        ...unresolvedReferences.map(({ product, reference, index }) => ({
+          fileId: `unresolved-${product.productGroupId}-${index}`,
+          name: `${product.name} — ${reference}`,
+          status: "failed" as const,
+          error: "This image still uses a filename or temporary Drive URL instead of a permanent storage URL. Run Drive matching again, or remove and re-upload this image.",
+        })),
+      );
       rawJob.failed = products.length;
       rawJob.processed = products.length;
       rawJob.results = products.map((product) => ({
@@ -688,7 +707,7 @@ export class BulkImportJobService {
         name: product.name,
         sku: product.sku,
         status: "failed" as const,
-        error: "Import blocked before product creation because one or more image URLs are not permanent storage URLs. Re-run Drive matching/upload and retry.",
+        error: "Import blocked before product creation because required image references were not uploaded to permanent storage. Fix the image references and retry.",
       }));
       rawJob.error =
         "Import blocked before creating any products: " +
