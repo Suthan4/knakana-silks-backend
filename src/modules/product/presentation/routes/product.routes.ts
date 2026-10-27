@@ -213,7 +213,14 @@ router.get(
   (req, res) => getDraftController().listDriveJsonFiles(req, res)
 );
 
-// Drive proxy – streams file through the backend without exposing OAuth tokens
+// Lightweight Drive thumbnail proxy; does not stream full-size originals.
+router.get(
+  "/products/bulk/drive-thumbnail/:fileId",
+  authenticate,
+  (req, res) => getDraftController().driveThumbnail(req, res)
+);
+
+// Drive proxy – streams original file only when explicitly requested.
 router.get(
   "/products/bulk/drive-proxy/:fileId",
   authenticate,
