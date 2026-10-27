@@ -5,7 +5,7 @@ import { redisClient } from "@/config/redis.config.js";
 import { BulkProductService } from "../service/bulk-product.service.js";
 import { BulkImportDraftRepository } from "../../infrastructure/repository/bulk-import-draft.repository.js";
 import { DraftStatus as PrismaDraftStatus } from "@/generated/prisma/enums.js";
-import type { BulkParsedProduct } from "./bulk-product.dto.js";
+import type { BulkParsedMedia, BulkParsedProduct } from "./bulk-product.dto.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/shared/utils/errors.js";
 import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
 import { S3UploadService } from "@/config/s3-upload.js";
@@ -162,8 +162,10 @@ export class BulkImportJobService {
     userId: string;
     draftId?: string;
     products: BulkParsedProduct[];
+    imageMatches?: ImageMatchResult | null;
+    driveUserId?: string;
   }): Promise<BulkImportJob> {
-    const { userId, draftId, products } = params;
+    const { userId, draftId, products, imageMatches, driveUserId } = params;
 
     if (!products || products.length === 0) {
       throw new ValidationError("No products provided for bulk import job");
@@ -171,6 +173,9 @@ export class BulkImportJobService {
 
     const jobId = uuidv4();
     const now = new Date().toISOString();
+    const matchedCount = Array.isArray(imageMatches?.matched)
+      ? imageMatches!.matched.length
+      : 0;
 
     const job: BulkImportJob = {
       id: jobId,
@@ -184,16 +189,31 @@ export class BulkImportJobService {
       failed: 0,
       skipped: 0,
       results: [],
+      stage: matchedCount > 0 && driveUserId ? "preparing_images" : "importing_products",
+      imagesTotal: 0,
+      imagesProcessed: 0,
+      imagesUploaded: 0,
+      imagesFailed: 0,
+      imageResults: [],
       createdAt: now,
       updatedAt: now,
     };
 
     await this.saveJob(job);
 
-    // Run in background asynchronously (never block HTTP request)
+    // Respond immediately; matching images, S3 uploads, and product creation run
+    // in the background and write progress to the job store after each batch.
     setImmediate(() => {
-      this.executeJob(jobId, products).catch((err) => {
-        console.error(`❌ Background import job ${jobId} crashed:`, err);
+      this.executeJob(jobId, products, imageMatches ?? undefined, driveUserId).catch(async (err) => {
+        console.error("Background bulk job " + jobId + " crashed:", err);
+        const current = this.memoryStore.get(jobId);
+        if (current) {
+          current.status = "failed";
+          current.stage = current.stage === "uploading_images" ? "images_failed" : "failed";
+          current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
+          current.completedAt = new Date().toISOString();
+          await this.saveJob(current);
+        }
       });
     });
 
