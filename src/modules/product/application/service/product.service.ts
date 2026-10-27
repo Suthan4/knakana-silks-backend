@@ -19,6 +19,42 @@ import {
 } from "../product.dto.js";
 import { S3UploadService } from "@/config/s3-upload.js";
 
+function isTemporaryGoogleMediaUrl(value?: string): boolean {
+  return /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(
+    value || "",
+  );
+}
+
+/**
+ * A Drive proxy is only a preview endpoint; it must never be stored as a
+ * product's primary image URL/thumbnail. The browser may use it in memory,
+ * but manual Product CRUD must receive permanent uploaded media URLs.
+ */
+function assertNoTemporaryGoogleProductMedia(data: {
+  media?: any[];
+  variants?: any[];
+}): void {
+  const collections: Array<{ where: string; media: any }> = [
+    ...(data.media || []).map((media) => ({ where: "product media", media })),
+    ...((data.variants || []).flatMap((variant, index) =>
+      (variant.media || []).map((media: any) => ({
+        where: `variant ${variant.sku || index + 1} media`,
+        media,
+      })),
+    )),
+  ];
+
+  const unsafe = collections.find(({ media }) =>
+    isTemporaryGoogleMediaUrl(media?.url) ||
+    isTemporaryGoogleMediaUrl(media?.thumbnailUrl),
+  );
+  if (unsafe) {
+    throw new ValidationError(
+      `Cannot save ${unsafe.where} that still uses a temporary Google Drive preview URL. Upload the image to permanent storage and submit its returned storage URL first.`,
+    );
+  }
+}
+
 @injectable()
 export class ProductService {
   constructor(
@@ -33,6 +69,7 @@ export class ProductService {
 
   async createProduct(data: CreateProductDTO): Promise<Product | null> {
     try {
+      assertNoTemporaryGoogleProductMedia(data);
       console.log("🔵 ProductService.createProduct called");
 
       return await this.prisma.$transaction(async (tx) => {
@@ -316,6 +353,7 @@ export class ProductService {
   }
 
   async updateProduct(id: string, data: UpdateProductDTO): Promise<Product> {
+    assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
 
     return (await this.prisma.$transaction(async (tx) => {
