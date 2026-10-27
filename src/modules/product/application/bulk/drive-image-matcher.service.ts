@@ -40,12 +40,24 @@ export interface DuplicateEntry {
   file?: DriveFileRef;
 }
 
+export interface ImageMatchDiagnostics {
+  receivedReferenceCount: number;
+  usableReferenceCount: number;
+  indexedDriveFileCount: number;
+  imageFileCount: number;
+  sampleReferences: string[];
+  sampleDriveFileNames: string[];
+  sampleNormalizedReferences: string[];
+  sampleNormalizedDriveNames: string[];
+}
+
 export interface ImageMatchResult {
   matched: MatchedEntry[];
   missing: MissingEntry[];
   ambiguous: AmbiguousEntry[];
   duplicates: DuplicateEntry[];
   folderFileCount: number;
+  diagnostics: ImageMatchDiagnostics;
 }
 
 interface NormalizedMediaRef {
@@ -54,6 +66,20 @@ interface NormalizedMediaRef {
   idx: number;
   media: BulkParsedMedia;
 }
+
+const IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "bmp",
+  "tif",
+  "tiff",
+  "avif",
+  "heic",
+  "heif",
+]);
 
 @injectable()
 export class DriveImageMatcherService {
@@ -76,29 +102,18 @@ export class DriveImageMatcherService {
       throw new Error("Media references must be an array.");
     }
 
-    let driveFiles: Array<{
-      id: string;
-      name: string;
-      mimeType: string;
-      thumbnailLink?: string;
-    }>;
+    const driveFiles = await this.driveService.listFolderFiles(
+      userId,
+      folderId.trim()
+    );
 
-    try {
-      driveFiles = await this.driveService.listFolderFiles(
-        userId,
-        folderId.trim()
-      );
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Unknown Drive error";
-
-      throw new Error(`Drive folder listing failed: ${message}`);
-    }
-
-    const byExactName = new Map<string, DriveFileRef[]>();
-    const byBaseName = new Map<string, DriveFileRef[]>();
-    const byNormalized = new Map<string, DriveFileRef[]>();
     const fileById = new Map<string, DriveFileRef>();
+
+    // Map both full names and extensionless names to Drive files.
+    const byFilename = new Map<string, DriveFileRef[]>();
+    const byNormalizedFilename = new Map<string, DriveFileRef[]>();
+
+    let imageFileCount = 0;
 
     for (const driveFile of driveFiles) {
       if (!driveFile.id || !driveFile.name) continue;
@@ -115,15 +130,34 @@ export class DriveImageMatcherService {
 
       fileById.set(file.id, file);
 
-      addToMap(byExactName, normalize(file.name), file);
+      const isImage =
+        file.mimeType.startsWith("image/") ||
+        IMAGE_EXTENSIONS.has(getExtension(file.name));
 
-      const baseName = stripExtension(file.name);
-      addToMap(byBaseName, normalize(baseName), file);
-      addToMap(byNormalized, normalizeZeros(baseName), file);
+      if (isImage) imageFileCount++;
+
+      const fullNameKey = normalizeFilename(file.name);
+      const stemKey = normalizeFilename(removeImageExtension(file.name));
+
+      addToMap(byFilename, fullNameKey, file);
+      addToMap(byFilename, stemKey, file);
+
+      // Secondary lookup handles harmless spaces, hyphens and underscores.
+      addToMap(
+        byNormalizedFilename,
+        normalizeFilenameLoose(file.name),
+        file
+      );
+      addToMap(
+        byNormalizedFilename,
+        normalizeFilenameLoose(removeImageExtension(file.name)),
+        file
+      );
     }
 
     const refs: NormalizedMediaRef[] = mediaRefs.map((media, idx) => {
       const candidates = extractCandidates(media);
+
       return {
         key: candidates[0] || "",
         candidates,
@@ -137,7 +171,7 @@ export class DriveImageMatcherService {
     for (const ref of refs) {
       if (!ref.key) continue;
 
-      const duplicateKey = normalize(ref.key);
+      const duplicateKey = normalizeFilename(ref.key);
       const indices = occurrences.get(duplicateKey) || [];
 
       indices.push(ref.idx);
@@ -149,15 +183,18 @@ export class DriveImageMatcherService {
     for (const [key, indices] of occurrences) {
       if (indices.length < 2) continue;
 
-      const candidates = findCandidates(
-        refs.find((ref) => ref.idx === indices[0])?.candidates || [],
-        byExactName,
-        byBaseName,
-        byNormalized
-      );
+      const firstRef = refs.find((ref) => ref.idx === indices[0]);
+      const candidates = firstRef
+        ? findCandidates(
+            firstRef.candidates,
+            fileById,
+            byFilename,
+            byNormalizedFilename
+          )
+        : [];
 
       duplicates.push({
-        reference: refs.find((ref) => ref.idx === indices[0])?.key || key,
+        reference: firstRef?.key || key,
         occurrences: indices,
         file: candidates.length === 1 ? candidates[0] : undefined,
       });
@@ -171,12 +208,10 @@ export class DriveImageMatcherService {
       const { idx, media } = ref;
       const reference = ref.key;
 
-      // Preserve an administrator's confirmed assignment when the file
-      // still exists in the selected Drive folder.
       const confirmedFileId =
         confirmedAssignments[String(idx)] ||
         confirmedAssignments[reference] ||
-        confirmedAssignments[normalize(reference)];
+        confirmedAssignments[normalizeFilename(reference)];
 
       const confirmedFile = confirmedFileId
         ? fileById.get(confirmedFileId)
@@ -203,26 +238,12 @@ export class DriveImageMatcherService {
         continue;
       }
 
-      // A direct Drive file ID is the most reliable reference.
-      let candidates: DriveFileRef[] = [];
-
-      for (const candidate of ref.candidates) {
-        const byId = fileById.get(candidate);
-
-        if (byId) {
-          candidates = [byId];
-          break;
-        }
-      }
-
-      if (candidates.length === 0) {
-        candidates = findCandidates(
-          ref.candidates,
-          byExactName,
-          byBaseName,
-          byNormalized
-        );
-      }
+      const candidates = findCandidates(
+        ref.candidates,
+        fileById,
+        byFilename,
+        byNormalizedFilename
+      );
 
       if (candidates.length === 0) {
         missing.push({
@@ -254,12 +275,45 @@ export class DriveImageMatcherService {
       });
     }
 
+    const diagnostics: ImageMatchDiagnostics = {
+      receivedReferenceCount: mediaRefs.length,
+      usableReferenceCount: refs.filter((ref) => ref.candidates.length > 0)
+        .length,
+      indexedDriveFileCount: fileById.size,
+      imageFileCount,
+      sampleReferences: refs
+        .map((ref) => ref.key)
+        .filter(Boolean)
+        .slice(0, 10),
+      sampleDriveFileNames: [...fileById.values()]
+        .slice(0, 15)
+        .map((file) => file.name),
+      sampleNormalizedReferences: refs
+        .map((ref) => ref.key)
+        .filter(Boolean)
+        .slice(0, 10)
+        .map(normalizeFilename),
+      sampleNormalizedDriveNames: [...fileById.values()]
+        .slice(0, 15)
+        .map((file) => normalizeFilename(removeImageExtension(file.name))),
+    };
+
+    // Safe diagnostics only: never log OAuth tokens or credentials.
+    console.info("[DriveImageMatcher] Matching summary", {
+      folderFileCount: driveFiles.length,
+      matched: matched.length,
+      missing: missing.length,
+      ambiguous: ambiguous.length,
+      diagnostics,
+    });
+
     return {
       matched,
       missing,
       ambiguous,
       duplicates,
       folderFileCount: driveFiles.length,
+      diagnostics,
     };
   }
 }
@@ -271,35 +325,13 @@ function addToMap(
 ): void {
   if (!key) return;
 
-  const files = map.get(key) || [];
+  const existing = map.get(key) || [];
 
-  if (!files.some((existing) => existing.id === file.id)) {
-    files.push(file);
+  if (!existing.some((item) => item.id === file.id)) {
+    existing.push(file);
   }
 
-  map.set(key, files);
-}
-
-function normalize(value: string): string {
-  return decodeSafely(value)
-    .trim()
-    .normalize("NFC")
-    .toLocaleLowerCase("en-US");
-}
-
-function stripExtension(value: string): string {
-  const lastSlash = Math.max(
-    value.lastIndexOf("/"),
-    value.lastIndexOf("\\")
-  );
-  const filename = value.slice(lastSlash + 1);
-  const lastDot = filename.lastIndexOf(".");
-
-  return lastDot > 0 ? filename.slice(0, lastDot) : filename;
-}
-
-function normalizeZeros(value: string): string {
-  return normalize(value).replace(/(^|[^\d])0+(\d+)/g, "$1$2");
+  map.set(key, existing);
 }
 
 function decodeSafely(value: string): string {
@@ -310,10 +342,41 @@ function decodeSafely(value: string): string {
   }
 }
 
-/**
- * Convert a URL, S3 key, filename, or Drive reference into a comparable
- * filename/identifier. For Drive share URLs, prefer the actual file ID.
- */
+function getBasename(value: string): string {
+  const decoded = decodeSafely(value.trim());
+  const clean = decoded.split(/[?#]/, 1)[0];
+  const lastSlash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+
+  return clean.slice(lastSlash + 1).trim().replace(/^["']|["']$/g, "");
+}
+
+function getExtension(value: string): string {
+  const filename = getBasename(value);
+  const dot = filename.lastIndexOf(".");
+
+  return dot > 0 ? filename.slice(dot + 1).toLowerCase() : "";
+}
+
+function removeImageExtension(value: string): string {
+  const filename = getBasename(value);
+  const extension = getExtension(filename);
+
+  if (!IMAGE_EXTENSIONS.has(extension)) return filename;
+
+  return filename.slice(0, -(extension.length + 1));
+}
+
+function normalizeFilename(value: string): string {
+  return removeImageExtension(value)
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("en-US");
+}
+
+function normalizeFilenameLoose(value: string): string {
+  return normalizeFilename(value).replace(/[\s_-]+/g, "");
+}
+
 export function extractRef(value: string): string {
   if (!value?.trim()) return "";
 
@@ -323,12 +386,8 @@ export function extractRef(value: string): string {
     const parsed = new URL(raw);
     const host = parsed.hostname.toLowerCase();
 
-    if (
-      host === "drive.google.com" ||
-      host === "docs.google.com"
-    ) {
+    if (host === "drive.google.com" || host === "docs.google.com") {
       const queryId = parsed.searchParams.get("id");
-
       if (queryId) return queryId;
 
       const pathMatch = parsed.pathname.match(
@@ -338,28 +397,14 @@ export function extractRef(value: string): string {
       if (pathMatch?.[1]) return decodeSafely(pathMatch[1]);
     }
 
-    const pathname = decodeSafely(parsed.pathname);
-    return pathname.substring(pathname.lastIndexOf("/") + 1);
+    return getBasename(parsed.pathname);
   } catch {
-    const clean = raw.split(/[?#]/, 1)[0];
-    const parts = clean.split(/[/\\]/);
-
-    return decodeSafely(parts[parts.length - 1] || clean);
+    return getBasename(raw);
   }
 }
 
-/**
- * Prioritize key and URL references. Alt text/title are fallback identifiers,
- * not substitutes for a valid filename when one is already available.
- */
 function extractCandidates(media: BulkParsedMedia): string[] {
-  const values = [
-    media.key,
-    media.url,
-    media.altText,
-    media.title,
-  ];
-
+  const values = [media.key, media.url, media.altText, media.title];
   const candidates: string[] = [];
 
   for (const value of values) {
@@ -370,7 +415,8 @@ function extractCandidates(media: BulkParsedMedia): string[] {
     if (
       extracted &&
       !candidates.some(
-        (candidate) => normalize(candidate) === normalize(extracted)
+        (candidate) =>
+          normalizeFilename(candidate) === normalizeFilename(extracted)
       )
     ) {
       candidates.push(extracted);
@@ -382,25 +428,40 @@ function extractCandidates(media: BulkParsedMedia): string[] {
 
 function findCandidates(
   references: string[],
-  byExactName: Map<string, DriveFileRef[]>,
-  byBaseName: Map<string, DriveFileRef[]>,
-  byNormalized: Map<string, DriveFileRef[]>
+  fileById: Map<string, DriveFileRef>,
+  byFilename: Map<string, DriveFileRef[]>,
+  byNormalizedFilename: Map<string, DriveFileRef[]>
 ): DriveFileRef[] {
   for (const reference of references) {
-    const exactKey = normalize(reference);
-    const baseKey = normalize(stripExtension(reference));
-    const normalizedKey = normalizeZeros(stripExtension(reference));
+    // A reference can be a direct Google Drive file ID.
+    const directFile = fileById.get(reference);
+    if (directFile) return [directFile];
 
-    const candidates =
-      byExactName.get(exactKey) ||
-      byBaseName.get(baseKey) ||
-      byNormalized.get(normalizedKey);
+    const keys = [
+      normalizeFilename(reference),
+      normalizeFilenameLoose(reference),
+    ];
 
-    if (candidates?.length) {
-      // Do not combine lower-priority matches with an exact match.
-      return [...candidates];
+    for (const key of keys) {
+      const exact = byFilename.get(key);
+
+      if (exact?.length) {
+        return uniqueFiles(exact);
+      }
+    }
+
+    const loose = byNormalizedFilename.get(
+      normalizeFilenameLoose(reference)
+    );
+
+    if (loose?.length) {
+      return uniqueFiles(loose);
     }
   }
 
   return [];
+}
+
+function uniqueFiles(files: DriveFileRef[]): DriveFileRef[] {
+  return [...new Map(files.map((file) => [file.id, file])).values()];
 }
