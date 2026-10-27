@@ -91,7 +91,7 @@ function isPermanentStorageUrl(value?: string): boolean {
 }
 
 function mediaMatchesDriveEntry(media: BulkParsedMedia, entry: MatchedEntry): boolean {
-  if (media.key === entry.file.id) return true;
+  if (media.key === entry.file.id || media.sourceDriveFileId === entry.file.id) return true;
   const refs = new Set(
     [entry.reference, entry.file.name]
       .map(normalizeDriveReference)
@@ -158,6 +158,7 @@ function applyUploadedDriveImages(
         ...media,
         url: stored.url,
         key: stored.key,
+        sourceDriveFileId: entry.file.id,
         thumbnailUrl: stored.url,
         title: media.title || entry.file.name,
         altText: media.altText || entry.file.name,
@@ -317,7 +318,7 @@ export class BulkImportJobService {
       skipped: 0,
       results: [],
       stage: matchedCount > 0 && driveUserId ? "preparing_images" : "importing_products",
-      imagesTotal: 0,
+      imagesTotal: matchedCount,
       imagesProcessed: 0,
       imagesUploaded: 0,
       imagesFailed: 0,
