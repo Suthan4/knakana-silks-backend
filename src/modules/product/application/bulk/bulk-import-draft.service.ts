@@ -226,7 +226,8 @@ export class BulkImportDraftService {
     const validationResult = await this.bulkProductService.validateWorkbookBuffer(buffer);
 
     const draft = await this.repo.update(id, {
-      parsedData: validationResult as any,
+      rawInput: sanitizeDraftRawInput(existing.rawInput),
+      parsedData: sanitizeDraftMediaPayload(validationResult) as any,
       status: validationResult.valid ? "READY_FOR_IMPORT" : "DRAFT",
     });
 
