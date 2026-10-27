@@ -419,9 +419,13 @@ export class BulkImportJobService {
         const current = this.memoryStore.get(jobId);
         if (current) {
           current.status = "failed";
-          current.stage = current.stage === "uploading_images" ? "images_failed" : "failed";
+          current.stage =
+            current.stage === "preparing_images" || current.stage === "uploading_images"
+              ? "images_failed"
+              : "failed";
           current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
           current.completedAt = new Date().toISOString();
+          current.currentFile = undefined;
           await this.saveJob(current);
         }
       });
