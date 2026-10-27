@@ -149,11 +149,12 @@ function applyUploadedDriveImages(
   ): BulkParsedMedia[] | undefined => {
     if (!mediaList) return mediaList;
     return mediaList.map((media) => {
+      const effectiveVariantSku = variantSku || media.variantSku || "";
       const entry = entries.find((candidate) =>
         candidate.file?.id &&
         (!candidate.productGroupId || candidate.productGroupId === productGroupId) &&
         (candidate.variantSku || "").trim().toLocaleLowerCase("en-US") ===
-          (variantSku || "").trim().toLocaleLowerCase("en-US") &&
+          effectiveVariantSku.trim().toLocaleLowerCase("en-US") &&
         mediaMatchesDriveEntry(media, candidate) &&
         uploadedByDriveId.has(candidate.file.id)
       );
