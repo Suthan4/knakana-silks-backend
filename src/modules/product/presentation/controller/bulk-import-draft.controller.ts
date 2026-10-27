@@ -284,6 +284,28 @@ export class BulkImportDraftController {
       res.status(502).json({ success: false, message: "Failed to stream file from Google Drive" });
     }
   }
+
+  // ── GET /api/products/bulk/drive-thumbnail/:fileId ────────────────────────
+
+  async driveThumbnail(req: Request, res: Response): Promise<void> {
+    try {
+      const fileId = String(req.params.fileId);
+      const userId = req.user!.userId;
+      const thumbnail = await this.driveService.getImageThumbnail(userId, fileId);
+      res.setHeader("Content-Type", thumbnail.mimeType);
+      res.setHeader("Content-Length", thumbnail.buffer.length);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.status(200).send(thumbnail.buffer);
+    } catch (err: any) {
+      const status = Number(err?.statusCode) || 502;
+      // Do not fall back to the original 40+ MB image in the thumbnail route.
+      res.status(status).json({
+        success: false,
+        message: err?.message || "Failed to load Google Drive thumbnail",
+      });
+    }
+  }
 }
 
 // ─── Error helper ─────────────────────────────────────────────────────────────
