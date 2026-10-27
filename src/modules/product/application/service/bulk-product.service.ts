@@ -34,8 +34,29 @@ export interface HierarchicalCategoryNode {
 
 function isTemporaryOrNonStorageImageUrl(value?: string): boolean {
   const url = (value || "").trim();
-  return !/^https:\/\//i.test(url) ||
-    /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(url);
+  if (!url || /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(url)) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search) {
+      return true;
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const isConfiguredCloudFront = host === "d2eb3zuw9j68gk.cloudfront.net";
+    const isS3VirtualHosted =
+      /^[a-z0-9][a-z0-9.-]*\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(host);
+    const isS3PathStyle =
+      /^s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(host) &&
+      parsed.pathname.split("/").filter(Boolean).length >= 2;
+
+    return !((isConfiguredCloudFront || isS3VirtualHosted || isS3PathStyle) &&
+      parsed.pathname !== "/");
+  } catch {
+    return true;
+  }
 }
 
 function listUnsafeImageReferences(products: BulkParsedProduct[]): string[] {
@@ -58,10 +79,9 @@ function listUnsafeImageReferences(products: BulkParsedProduct[]): string[] {
 function safeThumbnailUrl(media: BulkParsedMedia): string | undefined {
   const thumbnailUrl = media.thumbnailUrl?.trim();
   if (!thumbnailUrl) return undefined;
-  if (/drive\.google\.com|docs\.google\.com|googleusercontent\.com|[?&]token=/i.test(thumbnailUrl)) {
-    return media.url;
-  }
-  return thumbnailUrl;
+  // Product thumbnails must also be permanent storage URLs; never persist
+  // arbitrary hosts, Google previews, or signed temporary URLs.
+  return isTemporaryOrNonStorageImageUrl(thumbnailUrl) ? media.url : thumbnailUrl;
 }
 
 @injectable()
