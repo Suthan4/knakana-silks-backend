@@ -528,7 +528,10 @@ export class BulkImportJobService {
     }
 
     const uploadedByDriveId = new Map<string, UploadedDriveImage>();
-    const batchSize = 3;
+    // Four selected images can be sent through one multi-file S3 upload call.
+    // Keep batches bounded to avoid excessive per-request overhead without
+    // downloading every original from Drive at once.
+    const batchSize = 4;
 
     if (entriesToUpload.length > 0 || mappingFailures.length > 0) {
       rawJob.stage = "uploading_images";
