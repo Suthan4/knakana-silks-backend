@@ -86,8 +86,32 @@ function normalizeDriveReference(value?: string): string {
 }
 
 function isPermanentStorageUrl(value?: string): boolean {
-  return /^https:\/\//i.test(value || "") &&
-    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(value || "");
+  const raw = (value || "").trim();
+  if (!raw || /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(raw)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search) {
+      return false;
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const isConfiguredCloudFront = host === "d2eb3zuw9j68gk.cloudfront.net";
+    const isS3VirtualHosted =
+      /^[a-z0-9][a-z0-9.-]*\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(host);
+    const isS3PathStyle =
+      /^s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(host) &&
+      parsed.pathname.split("/").filter(Boolean).length >= 2;
+
+    // Only canonical permanent storage URLs are publishable media. Arbitrary
+    // HTTPS image hosts and signed URLs must go through the upload workflow.
+    return (isConfiguredCloudFront || isS3VirtualHosted || isS3PathStyle) &&
+      parsed.pathname !== "/";
+  } catch {
+    return false;
+  }
 }
 
 function isTemporaryDriveMediaUrl(value?: string): boolean {
