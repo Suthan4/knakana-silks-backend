@@ -393,6 +393,8 @@ async matchDrive(
       userId: userId.toString(),
       draftId: id,
       products,
+      imageMatches: existing.imageMatches as any,
+      driveUserId: userId.toString(),
     });
   }
 }
