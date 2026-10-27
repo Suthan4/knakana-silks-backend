@@ -603,6 +603,50 @@ describe("Bulk Product Upload — Manual Product Creation & S3 Image Parity Test
       assert.equal(mediaErr?.severity, "error");
     });
 
+    it("should block arbitrary HTTPS image hosts before product creation", async () => {
+      let createCalled = false;
+      const mockProductService: any = {
+        createProduct: async () => {
+          createCalled = true;
+          return { id: BigInt(999), name: "External Host Product" };
+        },
+      };
+      const bulkService = new BulkProductService(
+        mockPrisma,
+        {} as any,
+        {} as any,
+        mockProductService
+      );
+
+      await assert.rejects(
+        () => bulkService.importProducts([
+          {
+            productGroupId: "EXTERNAL-HOST-001",
+            name: "External Host Product",
+            categoryPath: "Clothing > Sarees > Silk Sarees",
+            categoryId: "12",
+            productType: "simple",
+            description: "Should not accept an arbitrary external image URL.",
+            basePrice: 5000,
+            sellingPrice: 4500,
+            weight: 0.5,
+            length: 10,
+            breadth: 10,
+            height: 5,
+            media: [
+              {
+                type: "IMAGE",
+                url: "https://example.com/external-image.jpg",
+                order: 0,
+              },
+            ],
+          } as any,
+        ]),
+        /not permanent HTTPS storage URLs/i,
+      );
+      assert.equal(createCalled, false, "Unsafe media must be rejected before product creation");
+    });
+
     it("should flag validation error for empty media URL", async () => {
       const emptyUrlJson = JSON.stringify([
         {
