@@ -80,6 +80,8 @@ export interface BulkMediaRow {
   type: MediaType;
   url: string;
   key?: string;
+  /** Transient association for retriable Drive-to-S3 jobs; not persisted on ProductMedia. */
+  sourceDriveFileId?: string;
   thumbnailUrl?: string;
   altText?: string;
   title?: string;
@@ -128,6 +130,8 @@ export interface BulkParsedMedia {
   type: MediaType;
   url: string;
   key?: string;
+  /** Keeps the Drive-to-S3 association for background job retries. */
+  sourceDriveFileId?: string;
   thumbnailUrl?: string;
   altText?: string;
   title?: string;
