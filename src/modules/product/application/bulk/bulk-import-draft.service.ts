@@ -219,67 +219,156 @@ export class BulkImportDraftService {
 
   // ── Match Drive ───────────────────────────────────────────────────────────
 
-  async matchDrive(
-    id: string,
-    userId: bigint,
-    dto: MatchDriveDto
-  ): Promise<BulkImportDraftResponse> {
-    const existing = await this.repo.findById(id);
-    if (!existing) throw new NotFoundError("Draft not found");
-    assertOwner(existing.userId, userId);
+  
+async matchDrive(
+  id: string,
+  userId: bigint,
+  dto: MatchDriveDto
+): Promise<BulkImportDraftResponse> {
+  const existing = await this.repo.findById(id);
 
-    if (!existing.parsedData) {
-      throw new ValidationError(
-        "Draft has no parsed data. Parse the workbook or text before matching images."
-      );
-    }
+  if (!existing) {
+    throw new NotFoundError("Draft not found");
+  }
 
-    // Collect all media references from parsed products and variants
-    const parsedData = existing.parsedData as any;
-    const allMedia: any[] = [];
+  assertOwner(existing.userId, userId);
 
-    // Support both { products: [...] } and flat array [...] formats
-    const productList: any[] = Array.isArray(parsedData)
-      ? parsedData
-      : Array.isArray(parsedData?.products)
+  if (!existing.parsedData) {
+    throw new ValidationError(
+      "Draft has no parsed data. Parse the workbook or text before matching images."
+    );
+  }
+
+  const parsedData = existing.parsedData as any;
+
+  // Support:
+  // 1. Validated data: { valid, products: [...] }
+  // 2. Parser output: { products, variants, seo, media }
+  // 3. Direct product array: [...]
+  const productList: any[] = Array.isArray(parsedData)
+    ? parsedData
+    : Array.isArray(parsedData?.products)
       ? parsedData.products
       : [];
 
-    for (const p of productList) {
-      if (Array.isArray(p.media)) {
-        p.media.forEach((m: any) => allMedia.push({ ...m, productGroupId: p.productGroupId }));
-      }
-      if (Array.isArray(p.variants)) {
-        for (const v of p.variants) {
-          if (Array.isArray(v.media)) {
-            v.media.forEach((m: any) =>
-              allMedia.push({ ...m, productGroupId: p.productGroupId, variantSku: v.sku })
-            );
-          }
-        }
+  // Some draft formats store media inside each product/variant.
+  // Other formats store every media reference in parsedData.media.
+  const collectedMedia: any[] = [];
+
+  for (const product of productList) {
+    const productGroupId = product.productGroupId
+      ? String(product.productGroupId)
+      : undefined;
+
+    if (Array.isArray(product.media)) {
+      for (const media of product.media) {
+        collectedMedia.push({
+          ...media,
+          productGroupId:
+            media.productGroupId ?? productGroupId,
+          variantSku: media.variantSku,
+        });
       }
     }
 
-    // Preserve prior confirmed assignments unless forceRematch
-    const priorConfirmed: Record<string, string> = dto.forceRematch
-      ? {}
-      : ((existing.confirmedAssignments as Record<string, string> | null) ?? {});
+    if (Array.isArray(product.variants)) {
+      for (const variant of product.variants) {
+        const variantSku = variant.sku ?? variant.variantSku;
 
-    const matchResult = await this.matcher.match(
-      userId.toString(),
-      dto.folderId,
-      allMedia,
-      priorConfirmed
-    );
+        if (!Array.isArray(variant.media)) continue;
 
-    // Persist matching results in BulkImportDraft.imageMatches
-    const draft = await this.repo.update(id, {
-      imageMatches: matchResult as any,
-      status: "READY_FOR_IMPORT",
-    });
-
-    return serialise(draft);
+        for (const media of variant.media) {
+          collectedMedia.push({
+            ...media,
+            productGroupId:
+              media.productGroupId ?? productGroupId,
+            variantSku:
+              media.variantSku ?? variantSku,
+          });
+        }
+      }
+    }
   }
+
+  // Include top-level media references as well. These are important when
+  // parsedData came directly from BulkProductParser.parseRawText().
+  if (Array.isArray(parsedData?.media)) {
+    for (const media of parsedData.media) {
+      collectedMedia.push({
+        ...media,
+        productGroupId: media.productGroupId
+          ? String(media.productGroupId)
+          : undefined,
+        variantSku: media.variantSku
+          ? String(media.variantSku)
+          : undefined,
+      });
+    }
+  }
+
+  // Deduplicate references appearing in both nested and top-level media.
+  // Keep the first occurrence to preserve stable media indices.
+  const seenMedia = new Set<string>();
+  const allMedia: any[] = [];
+
+  for (const media of collectedMedia) {
+    const reference = String(
+      media.key ?? media.url ?? media.altText ?? media.title ?? ""
+    ).trim();
+
+    const identity = JSON.stringify([
+      media.productGroupId ?? "",
+      media.variantSku ?? "",
+      reference,
+      media.order ?? 0,
+      media.type ?? "IMAGE",
+    ]);
+
+    if (seenMedia.has(identity)) continue;
+
+    seenMedia.add(identity);
+    allMedia.push(media);
+  }
+
+  if (allMedia.length === 0) {
+    throw new ValidationError(
+      "No media references were found in this draft. " +
+      "Check that product images are provided in products[].media, " +
+      "variants[].media, or the top-level media array."
+    );
+  }
+
+  // Preserve manually confirmed assignments unless a forced rematch
+  // was explicitly requested.
+  const priorConfirmed: Record<string, string> = dto.forceRematch
+    ? {}
+    : (
+        (existing.confirmedAssignments as
+          | Record<string, string>
+          | null) ?? {}
+      );
+
+  const matchResult = await this.matcher.match(
+    userId.toString(),
+    dto.folderId,
+    allMedia,
+    priorConfirmed
+  );
+
+  // Store the full matching report for the frontend preview.
+  // Do not mark the draft as import-ready while images remain unresolved.
+  const unresolved =
+    matchResult.missing.length > 0 ||
+    matchResult.ambiguous.length > 0;
+
+  const draft = await this.repo.update(id, {
+    imageMatches: matchResult as any,
+    status: unresolved ? "DRAFT" : "READY_FOR_IMPORT",
+  });
+
+  return serialise(draft);
+}
+
 
   // ── Start Background Import from Draft ────────────────────────────────────
 
