@@ -458,7 +458,18 @@ export class DriveService {
       throw new AppError(404, "Google Drive did not provide a thumbnail for this image.");
     }
 
-    const response = await fetch(thumbnailLink, { redirect: "follow" });
+    // Google requires credentials when fetching thumbnails for private/shared files.
+    // OAuth2Client refreshes the account's access token if needed.
+    const tokenResult = await auth.getAccessToken();
+    const accessToken = tokenResult.token;
+    if (!accessToken) {
+      throw new AppError(401, "Google Drive authorization is expired. Reconnect Google Drive.");
+    }
+
+    const response = await fetch(thumbnailLink, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      redirect: "follow",
+    });
     if (!response.ok) {
       throw new AppError(502, "Google Drive thumbnail could not be fetched.");
     }
