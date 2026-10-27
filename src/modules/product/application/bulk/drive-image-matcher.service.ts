@@ -106,7 +106,8 @@ export class DriveImageMatcherService {
       userId,
       folderId.trim()
     );
-
+    // Temporary diagnostics: compare requested image names with Drive files.
+    diagnoseDriveReferences(mediaRefs, driveFiles);
     const fileById = new Map<string, DriveFileRef>();
 
     // Map both full names and extensionless names to Drive files.
@@ -461,6 +462,74 @@ function findCandidates(
 
   return [];
 }
+
+
+function diagnoseDriveReferences(
+  references: BulkParsedMedia[],
+  driveFiles: Array<{ id: string; name: string; mimeType: string }>
+): void {
+  const driveNames = new Set(
+    driveFiles.map((file) => normalizeDriveFilename(file.name))
+  );
+
+  const requested = references
+    .map((media) => {
+      const value =
+        media.key || media.url || media.altText || media.title || "";
+
+      return extractRef(value);
+    })
+    .filter(Boolean);
+
+  const missing = requested.filter(
+    (reference) => !driveNames.has(normalizeDriveFilename(reference))
+  );
+
+  const driveNameList = driveFiles.map((file) => file.name);
+
+  // Search for similar prefixes to help identify incorrect references
+  // without automatically assigning unrelated images.
+  const samples = missing.slice(0, 10).map((reference) => {
+    const normalized = normalizeDriveFilename(reference);
+
+    return {
+      reference,
+      exactMatch: driveNames.has(normalized),
+      possibleCandidates: driveNameList
+        .filter((name) => {
+          const candidate = normalizeDriveFilename(name);
+
+          return (
+            candidate.startsWith(normalized) ||
+            normalized.startsWith(candidate)
+          );
+        })
+        .slice(0, 5),
+    };
+  });
+
+  console.info("[DriveImageMatcher] Reference verification", {
+    requestedCount: requested.length,
+    driveFileCount: driveFiles.length,
+    exactMatches: requested.length - missing.length,
+    missingCount: missing.length,
+    missingReferenceSample: missing.slice(0, 20),
+    candidateDiagnostics: samples,
+  });
+}
+
+function normalizeDriveFilename(value: string): string {
+  const filename = value
+    .trim()
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/[?#].*$/, "")
+    .normalize("NFKC")
+    .toLowerCase();
+
+  return filename.replace(/\.(jpe?g|png|webp|gif|bmp|tiff?|avif|heic|heif)$/i, "");
+}
+
 
 function uniqueFiles(files: DriveFileRef[]): DriveFileRef[] {
   return [...new Map(files.map((file) => [file.id, file])).values()];
