@@ -486,7 +486,12 @@ describe("Bulk Import Drafts & Drive Matching Test Suite", () => {
         update: async () => {},
       };
 
-      const jobService = new BulkImportJobService(mockBulkProductService, mockDraftRepo);
+      const jobService = new BulkImportJobService(
+        mockBulkProductService,
+        mockDraftRepo,
+        {} as any,
+        {} as any,
+      );
 
       const sampleProducts: any[] = [
         { productGroupId: "P-1", name: "Product 1" },
@@ -540,7 +545,12 @@ describe("Bulk Import Drafts & Drive Matching Test Suite", () => {
         update: async () => {},
       };
 
-      const jobService = new BulkImportJobService(mockBulkProductService, mockDraftRepo);
+      const jobService = new BulkImportJobService(
+        mockBulkProductService,
+        mockDraftRepo,
+        {} as any,
+        {} as any,
+      );
 
       const job = await jobService.startJob({
         userId: "user-123",

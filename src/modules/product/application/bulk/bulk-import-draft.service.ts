@@ -104,7 +104,7 @@ export class BulkImportDraftService {
   ): Promise<BulkImportDraftResponse> {
     const safeDto = {
       ...dto,
-      rawInput: sanitizeDraftRawInput(dto.rawInput),
+      rawInput: sanitizeDraftRawInput(dto.rawInput) ?? "",
       parsedData: sanitizeDraftMediaPayload(dto.parsedData),
       products: sanitizeDraftMediaPayload(dto.products),
     };

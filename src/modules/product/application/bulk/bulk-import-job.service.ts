@@ -470,7 +470,7 @@ export class BulkImportJobService {
     const rawJob = this.memoryStore.get(jobId);
     if (!rawJob) return;
 
-    let products = inputProducts.map((product) => ({
+    let products: BulkParsedProduct[] = inputProducts.map((product) => ({
       ...product,
       media: product.media ? [...product.media] : [],
       variants: (product.variants || []).map((variant) => ({
