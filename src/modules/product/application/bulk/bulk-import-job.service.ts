@@ -145,7 +145,7 @@ function applyUploadedDriveImages(
     return mediaList.map((media) => {
       const entry = entries.find((candidate) =>
         candidate.file?.id &&
-        candidate.productGroupId === productGroupId &&
+        (!candidate.productGroupId || candidate.productGroupId === productGroupId) &&
         (candidate.variantSku || "").trim().toLocaleLowerCase("en-US") ===
           (variantSku || "").trim().toLocaleLowerCase("en-US") &&
         mediaMatchesDriveEntry(media, candidate) &&
