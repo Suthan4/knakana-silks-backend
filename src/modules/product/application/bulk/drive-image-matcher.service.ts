@@ -367,10 +367,21 @@ function removeImageExtension(value: string): string {
 }
 
 function normalizeFilename(value: string): string {
-  return removeImageExtension(value)
+  const normalized = removeImageExtension(value)
     .normalize("NFKC")
     .trim()
     .toLocaleLowerCase("en-US");
+
+  // Some product-photo references use the letter "O" where the camera filename
+  // uses the digit "0" (for example, NAVO2845 in product JSON vs NAV02845.JPG
+  // in Drive). Canonicalize only compact camera-style identifiers so unrelated
+  // names are not broadly rewritten and accidental collisions are minimized.
+  const cameraReference = normalized.match(/^([a-z]{2,5})[o0](\\d{4,})$/);
+  if (cameraReference) {
+    return `${cameraReference[1]}0${cameraReference[2]}`;
+  }
+
+  return normalized;
 }
 
 function normalizeFilenameLoose(value: string): string {
