@@ -87,7 +87,7 @@ function normalizeDriveReference(value?: string): string {
 
 function isPermanentStorageUrl(value?: string): boolean {
   return /^https:\/\//i.test(value || "") &&
-    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\//i.test(value || "");
+    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(value || "");
 }
 
 function isTemporaryDriveMediaUrl(value?: string): boolean {
