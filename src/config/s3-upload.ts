@@ -221,20 +221,33 @@ export class S3UploadService {
    */
   async uploadFilesWithResults(
     files: Express.Multer.File[],
-    folder?: string
+    folder?: string,
+    onFileResult?: (index: number, result: S3UploadFileResult) => Promise<void> | void
   ): Promise<S3UploadFileResult[]> {
     return Promise.all(
-      files.map(async (file): Promise<S3UploadFileResult> => {
+      files.map(async (file, index): Promise<S3UploadFileResult> => {
+        let fileResult: S3UploadFileResult;
         try {
           const result = await this.uploadFile(file, folder);
-          return { originalname: file.originalname, success: true, result };
+          fileResult = { originalname: file.originalname, success: true, result };
         } catch (error: any) {
-          return {
+          fileResult = {
             originalname: file.originalname,
             success: false,
             error: error instanceof Error ? error.message : String(error || "Unknown upload error"),
           };
         }
+
+        // Report every completed file without making a progress-store failure
+        // turn a successful S3 upload into a failed upload.
+        if (onFileResult) {
+          try {
+            await onFileResult(index, fileResult);
+          } catch (callbackError) {
+            console.warn("Bulk upload progress callback failed:", callbackError);
+          }
+        }
+        return fileResult;
       })
     );
   }
