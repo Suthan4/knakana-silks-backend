@@ -436,7 +436,54 @@ export class DriveService {
   }
 
   /**
-   * Stream file from Drive directly to HTTP response
+   * Fetch Google's generated thumbnail for a Drive image.
+   * This intentionally never falls back to the original file bytes: source images
+   * can be 40+ MB, while previews should remain small and cheap to render.
+   */
+  async getImageThumbnail(
+    userId: string,
+    fileId: string
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    const auth = await this.getOAuthClient(userId);
+    const drive = google.drive({ version: "v3", auth });
+
+    const meta: any = await drive.files.get({
+      fileId,
+      fields: "id, name, mimeType, thumbnailLink",
+      supportsAllDrives: true,
+    });
+
+    const thumbnailLink = meta.data?.thumbnailLink;
+    if (!thumbnailLink) {
+      throw new AppError(404, "Google Drive did not provide a thumbnail for this image.");
+    }
+
+    const response = await fetch(thumbnailLink, { redirect: "follow" });
+    if (!response.ok) {
+      throw new AppError(502, "Google Drive thumbnail could not be fetched.");
+    }
+
+    const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
+    if (!mimeType.toLowerCase().startsWith("image/")) {
+      throw new AppError(502, "Google Drive returned an invalid image thumbnail.");
+    }
+
+    const maxThumbnailBytes = 5 * 1024 * 1024;
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > maxThumbnailBytes) {
+      throw new AppError(413, "The generated image thumbnail is unexpectedly large.");
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0 || arrayBuffer.byteLength > maxThumbnailBytes) {
+      throw new AppError(413, "The generated image thumbnail is empty or too large.");
+    }
+
+    return { buffer: Buffer.from(arrayBuffer), mimeType };
+  }
+
+  /**
+   * Stream file from Drive directly to HTTP response.
    */
   async streamFile(userId: string, fileId: string, res: Response): Promise<void> {
     const auth = await this.getOAuthClient(userId);
