@@ -23,6 +23,13 @@ export interface S3UploadResult {
   attempts?: number;
 }
 
+export interface S3UploadFileResult {
+  originalname: string;
+  success: boolean;
+  result?: S3UploadResult;
+  error?: string;
+}
+
 export class S3UploadService {
   private s3Client: S3Client;
   private bucket: string;
@@ -205,6 +212,31 @@ export class S3UploadService {
     console.log(`📤 Uploading ${files.length} file(s)…`);
     const uploadPromises = files.map((file) => this.uploadFile(file, folder));
     return Promise.all(uploadPromises);
+  }
+
+  /**
+   * Upload a group of files through the same optimizer/S3 pipeline but retain
+   * an individual result for every file. One invalid image must not hide the
+   * error details for the rest of the batch.
+   */
+  async uploadFilesWithResults(
+    files: Express.Multer.File[],
+    folder?: string
+  ): Promise<S3UploadFileResult[]> {
+    return Promise.all(
+      files.map(async (file): Promise<S3UploadFileResult> => {
+        try {
+          const result = await this.uploadFile(file, folder);
+          return { originalname: file.originalname, success: true, result };
+        } catch (error: any) {
+          return {
+            originalname: file.originalname,
+            success: false,
+            error: error instanceof Error ? error.message : String(error || "Unknown upload error"),
+          };
+        }
+      })
+    );
   }
 
   /**
