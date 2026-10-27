@@ -45,11 +45,23 @@ function sanitizeDraftMediaPayload(value: any): any {
     next.sourceDriveFileId = next.sourceDriveFileId || id || undefined;
   }
 
-  if (
-    typeof next.thumbnailUrl === "string" &&
-    /drive\.google\.com|docs\.google\.com|googleusercontent\.com|[?&]token=/i.test(next.thumbnailUrl)
-  ) {
-    delete next.thumbnailUrl;
+  // Drive match results also contain thumbnailLink, previewUrl, webContentLink
+  // and webViewLink fields. They are display/navigation helpers only; omit
+  // temporary Google URLs from draft storage because the frontend can rebuild
+  // authenticated preview URLs from file.id when rendering.
+  for (const key of [
+    "thumbnailUrl",
+    "thumbnailLink",
+    "previewUrl",
+    "webContentLink",
+    "webViewLink",
+  ]) {
+    if (
+      typeof next[key] === "string" &&
+      /drive\.google\.com|docs\.google\.com|googleusercontent\.com|[?&]token=/i.test(next[key])
+    ) {
+      delete next[key];
+    }
   }
   return next;
 }
