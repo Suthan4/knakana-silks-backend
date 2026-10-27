@@ -431,7 +431,9 @@ async matchDrive(
     matchResult.ambiguous.length > 0;
 
   const draft = await this.repo.update(id, {
-    imageMatches: matchResult as any,
+    imageMatches: sanitizeDraftMediaPayload(matchResult) as any,
+    parsedData: sanitizeDraftMediaPayload(existing.parsedData),
+    rawInput: sanitizeDraftRawInput(existing.rawInput),
     status: unresolved ? "DRAFT" : "READY_FOR_IMPORT",
   });
 
