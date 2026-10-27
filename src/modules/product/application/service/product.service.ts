@@ -710,6 +710,7 @@ export class ProductService {
   }
 
   async patchProduct(id: string, data: PatchProductDTO): Promise<Product> {
+    assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
 
     return (await this.prisma.$transaction(async (tx) => {
@@ -1381,6 +1382,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       isActive?: boolean;
     }
   ) {
+    assertNoTemporaryGoogleProductMedia({ media: [data] });
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new NotFoundError("Product not found");
@@ -1434,6 +1436,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       };
     }
   ): Promise<ProductVariant> {
+    assertNoTemporaryGoogleProductMedia({ variants: [{ media: data.media }] });
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new NotFoundError("Product not found");
@@ -1587,6 +1590,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       isActive?: boolean;
     }
   ) {
+    assertNoTemporaryGoogleProductMedia({ media: [data] });
     const variant = await this.productRepository.findVariantById(
       BigInt(variantId)
     );
