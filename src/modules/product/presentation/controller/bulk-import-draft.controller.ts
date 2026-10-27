@@ -189,8 +189,8 @@ export class BulkImportDraftController {
       const job = await this.service.startImportJob(id, userId);
       res.status(202).json({
         success: true,
-        message: "Background import job initiated",
-        data: job,
+        message: "Background image preparation and product import job started",
+        data: { ...job, jobId: job.id, draftId: job.draftId, startedAt: job.createdAt },
       });
     } catch (err: any) {
       handleError(err, res);
@@ -211,7 +211,7 @@ export class BulkImportDraftController {
       res.status(202).json({
         success: true,
         message: "Bulk import job started",
-        data: job,
+        data: { ...job, jobId: job.id, draftId: job.draftId, startedAt: job.createdAt },
       });
     } catch (err: any) {
       handleError(err, res);
@@ -225,7 +225,10 @@ export class BulkImportDraftController {
       const jobId = String(req.params.jobId);
       const userId = req.user!.userId;
       const job = await this.jobService.getJob(jobId, userId);
-      res.status(200).json({ success: true, data: job });
+      res.status(200).json({
+        success: true,
+        data: { ...job, jobId: job.id, draftId: job.draftId, startedAt: job.createdAt },
+      });
     } catch (err: any) {
       handleError(err, res);
     }
@@ -241,7 +244,7 @@ export class BulkImportDraftController {
       res.status(202).json({
         success: true,
         message: "Retry import job started",
-        data: newJob,
+        data: { ...newJob, jobId: newJob.id, draftId: newJob.draftId, startedAt: newJob.createdAt },
       });
     } catch (err: any) {
       handleError(err, res);
