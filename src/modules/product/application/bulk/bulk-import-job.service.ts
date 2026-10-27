@@ -66,6 +66,133 @@ export interface BulkImportJob {
 
 const JOB_TTL_SECONDS = 86400; // 24 hours
 
+interface UploadedDriveImage {
+  url: string;
+  key: string;
+}
+
+function normalizeDriveReference(value?: string): string {
+  if (!value || typeof value !== "string") return "";
+  let name = value.trim();
+  try {
+    const parsed = new URL(name);
+    name = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || name);
+  } catch {
+    name = name.split(/[?#]/, 1)[0].split(/[\\/]/).pop() || name;
+  }
+  name = name.normalize("NFKC").trim().toLocaleLowerCase("en-US").replace(/\.[^.]+$/, "");
+  const cameraReference = name.match(/^([a-z]{2,5})[o0](\d{4,})$/);
+  return cameraReference ? cameraReference[1] + "0" + cameraReference[2] : name;
+}
+
+function isPermanentStorageUrl(value?: string): boolean {
+  return /^https:\/\//i.test(value || "") &&
+    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\//i.test(value || "");
+}
+
+function mediaMatchesDriveEntry(media: BulkParsedMedia, entry: MatchedEntry): boolean {
+  if (media.key === entry.file.id) return true;
+  const refs = new Set(
+    [entry.reference, entry.file.name]
+      .map(normalizeDriveReference)
+      .filter(Boolean)
+  );
+  return [media.url, media.title, media.altText]
+    .some((value) => {
+      const key = normalizeDriveReference(value);
+      return Boolean(key && refs.has(key));
+    });
+}
+
+function findDriveEntryTargets(
+  products: BulkParsedProduct[],
+  entry: MatchedEntry
+): BulkParsedMedia[] {
+  const productGroupId = entry.productGroupId;
+  const variantSku = (entry.variantSku || "").trim().toLocaleLowerCase("en-US");
+  const targets: BulkParsedMedia[] = [];
+
+  for (const product of products) {
+    if (productGroupId && product.productGroupId !== productGroupId) continue;
+
+    if (variantSku) {
+      for (const variant of product.variants || []) {
+        if ((variant.sku || "").trim().toLocaleLowerCase("en-US") !== variantSku) continue;
+        for (const media of variant.media || []) {
+          if (mediaMatchesDriveEntry(media, entry)) targets.push(media);
+        }
+      }
+    } else {
+      for (const media of product.media || []) {
+        if (mediaMatchesDriveEntry(media, entry)) targets.push(media);
+      }
+    }
+  }
+  return targets;
+}
+
+function applyUploadedDriveImages(
+  products: BulkParsedProduct[],
+  entries: MatchedEntry[],
+  uploadedByDriveId: Map<string, UploadedDriveImage>
+): BulkParsedProduct[] {
+  const updateList = (
+    mediaList: BulkParsedMedia[] | undefined,
+    productGroupId: string,
+    variantSku?: string
+  ): BulkParsedMedia[] | undefined => {
+    if (!mediaList) return mediaList;
+    return mediaList.map((media) => {
+      const entry = entries.find((candidate) =>
+        candidate.file?.id &&
+        candidate.productGroupId === productGroupId &&
+        (candidate.variantSku || "").trim().toLocaleLowerCase("en-US") ===
+          (variantSku || "").trim().toLocaleLowerCase("en-US") &&
+        mediaMatchesDriveEntry(media, candidate) &&
+        uploadedByDriveId.has(candidate.file.id)
+      );
+      if (!entry) return media;
+      const stored = uploadedByDriveId.get(entry.file.id);
+      if (!stored) return media;
+      return {
+        ...media,
+        url: stored.url,
+        key: stored.key,
+        thumbnailUrl: stored.url,
+        title: media.title || entry.file.name,
+        altText: media.altText || entry.file.name,
+        mimeType: "image/webp",
+      };
+    });
+  };
+
+  return products.map((product) => {
+    const media = updateList(product.media, product.productGroupId) || [];
+    const variants = (product.variants || []).map((variant) => ({
+      ...variant,
+      media: updateList(variant.media, product.productGroupId, variant.sku) || [],
+    }));
+    const allImages = [
+      ...media.map((item, index) => ({
+        ...item,
+        source: "product" as const,
+        order: item.order ?? index,
+      })),
+      ...variants.flatMap((variant) =>
+        (variant.media || []).map((item, index) => ({
+          ...item,
+          source: "variant" as const,
+          variantSku: variant.sku,
+          order: item.order ?? (100 + index),
+        }))
+      ),
+    ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    return { ...product, media, variants, allImages };
+  });
+}
+
+
+
 @injectable()
 export class BulkImportJobService {
   private redis: Redis | null = null;
