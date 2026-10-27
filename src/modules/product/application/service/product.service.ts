@@ -1021,8 +1021,9 @@ export class ProductService {
       ...(product.variants?.flatMap((v) => 
         (v as any).media?.map((m: any) => m.url) ?? []
       ) ?? []),
-    ].filter(Boolean);
+    ].filter((url): url is string => Boolean(url) && !isTemporaryGoogleMediaUrl(url));
 
+    // Never treat a Drive proxy / Google thumbnail as an S3 object key.
     // ✅ Delete from S3 (non-fatal — still delete DB record if S3 fails)
     if (allUrls.length > 0) {
       try {
