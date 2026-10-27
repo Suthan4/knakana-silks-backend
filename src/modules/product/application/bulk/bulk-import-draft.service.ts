@@ -19,6 +19,51 @@ import type {
 } from "./dto/bulk-import-draft.dto.js";
 
 /**
+ * Drive proxy URLs carry a browser-readable access token for image previews.
+ * Never persist those URLs (or temporary Google-hosted thumbnails) in draft
+ * parsedData/rawInput. Keep a stable filename/Drive ID reference for retry.
+ */
+function sanitizeDraftMediaPayload(value: any): any {
+  if (Array.isArray(value)) return value.map(sanitizeDraftMediaPayload);
+  if (!value || typeof value !== "object") return value;
+
+  const next: Record<string, any> = {};
+  for (const [key, child] of Object.entries(value)) next[key] = sanitizeDraftMediaPayload(child);
+
+  if (
+    typeof next.url === "string" &&
+    /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(next.url)
+  ) {
+    const url = next.url as string;
+    const proxyId = url.match(/\/products\/bulk\/drive-proxy\/([^/?#]+)/)?.[1];
+    let id = String(next.sourceDriveFileId || next.key || "");
+    if (!id && proxyId) {
+      try { id = decodeURIComponent(proxyId); } catch { id = proxyId; }
+    }
+    next.url = next.title || next.altText || id;
+    next.key = next.key || id || undefined;
+    next.sourceDriveFileId = next.sourceDriveFileId || id || undefined;
+  }
+
+  if (
+    typeof next.thumbnailUrl === "string" &&
+    /drive\.google\.com|docs\.google\.com|googleusercontent\.com|[?&]token=/i.test(next.thumbnailUrl)
+  ) {
+    delete next.thumbnailUrl;
+  }
+  return next;
+}
+
+function sanitizeDraftRawInput(rawInput: string | undefined): string | undefined {
+  if (rawInput === undefined) return undefined;
+  try {
+    return JSON.stringify(sanitizeDraftMediaPayload(JSON.parse(rawInput)), null, 2);
+  } catch {
+    return rawInput.replace(/([?&])token=[^&#\s"'\\]+/g, "$1[redacted]");
+  }
+}
+
+/**
  * Orchestrates draft lifecycle:
  *   create → parse/validate → match images → (user corrects) → background import
  *
@@ -45,7 +90,13 @@ export class BulkImportDraftService {
     userId: bigint,
     dto: CreateBulkImportDraftDto
   ): Promise<BulkImportDraftResponse> {
-    const draft = await this.repo.create(userId, dto);
+    const safeDto = {
+      ...dto,
+      rawInput: sanitizeDraftRawInput(dto.rawInput),
+      parsedData: sanitizeDraftMediaPayload(dto.parsedData),
+      products: sanitizeDraftMediaPayload(dto.products),
+    };
+    const draft = await this.repo.create(userId, safeDto);
 
     // If caller provided structured parsedData or products directly, keep it
     if (dto.parsedData || dto.products) {
@@ -137,12 +188,16 @@ export class BulkImportDraftService {
       }
     }
 
+    const safeRawInput = sanitizeDraftRawInput(
+      dto.rawInput !== undefined ? dto.rawInput : existing.rawInput,
+    );
+    const safeParsedData = sanitizeDraftMediaPayload(updatedParsedData);
     const draft = await this.repo.update(id, {
       ...dto,
-      rawInput: dto.rawInput !== undefined ? dto.rawInput : existing.rawInput,
-      parsedData: updatedParsedData,
+      rawInput: safeRawInput,
+      parsedData: safeParsedData,
       confirmedAssignments: mergedConfirmed,
-      status: dto.status || (updatedParsedData?.valid ? "READY_FOR_IMPORT" : "DRAFT"),
+      status: dto.status || (safeParsedData?.valid ? "READY_FOR_IMPORT" : "DRAFT"),
     });
 
     return serialise(draft);
@@ -171,7 +226,8 @@ export class BulkImportDraftService {
     const validationResult = await this.bulkProductService.validateWorkbookBuffer(buffer);
 
     const draft = await this.repo.update(id, {
-      parsedData: validationResult as any,
+      rawInput: sanitizeDraftRawInput(existing.rawInput),
+      parsedData: sanitizeDraftMediaPayload(validationResult) as any,
       status: validationResult.valid ? "READY_FOR_IMPORT" : "DRAFT",
     });
 
@@ -194,7 +250,8 @@ export class BulkImportDraftService {
       throw new ValidationError("Raw input text is empty");
     }
 
-    const parsedRows = BulkProductParser.parseRawText(textToParse);
+    const safeTextToParse = sanitizeDraftRawInput(textToParse) || textToParse;
+    const parsedRows = BulkProductParser.parseRawText(safeTextToParse);
     const { flatList: categoryList } = await this.bulkProductService.getCategoryHierarchy();
     const warehouseList = await this.bulkProductService.getWarehouseLookupList();
 
@@ -209,8 +266,8 @@ export class BulkImportDraftService {
     });
 
     const draft = await this.repo.update(id, {
-      rawInput: textToParse,
-      parsedData: validationResult as any,
+      rawInput: safeTextToParse,
+      parsedData: sanitizeDraftMediaPayload(validationResult) as any,
       status: validationResult.valid ? "READY_FOR_IMPORT" : "DRAFT",
     });
 
