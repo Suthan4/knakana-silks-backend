@@ -87,7 +87,82 @@ function normalizeDriveReference(value?: string): string {
 
 function isPermanentStorageUrl(value?: string): boolean {
   return /^https:\/\//i.test(value || "") &&
-    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\//i.test(value || "");
+    !/drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(value || "");
+}
+
+function isTemporaryDriveMediaUrl(value?: string): boolean {
+  return /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(value || "");
+}
+
+/**
+ * Draft payloads must never persist the authenticated Drive proxy URL/token.
+ * If an image has not reached S3 yet, retain only a stable reference that the
+ * next job attempt can match using key/sourceDriveFileId and its filename.
+ */
+function sanitizeTemporaryDriveMedia(products: BulkParsedProduct[]): BulkParsedProduct[] {
+  const sanitizeMedia = (media: BulkParsedMedia): BulkParsedMedia => {
+    if (isPermanentStorageUrl(media.url)) {
+      return {
+        ...media,
+        thumbnailUrl: isTemporaryDriveMediaUrl(media.thumbnailUrl)
+          ? undefined
+          : media.thumbnailUrl,
+      };
+    }
+
+    const currentUrl = (media.url || "").trim();
+    const proxyId = currentUrl.match(/\/products\/bulk\/drive-proxy\/([^/?#]+)/)?.[1];
+    let sourceId = media.sourceDriveFileId || media.key || "";
+    if (!sourceId && proxyId) {
+      try { sourceId = decodeURIComponent(proxyId); } catch { sourceId = proxyId; }
+    }
+    return {
+      ...media,
+      url: media.title || media.altText || sourceId || "",
+      key: media.key || sourceId || undefined,
+      sourceDriveFileId: media.sourceDriveFileId || sourceId || undefined,
+      thumbnailUrl: undefined,
+    };
+  };
+
+  return products.map((product) => ({
+    ...product,
+    media: (product.media || []).map(sanitizeMedia),
+    variants: (product.variants || []).map((variant) => ({
+      ...variant,
+      media: (variant.media || []).map(sanitizeMedia),
+    })),
+    allImages: (product.allImages || []).map(sanitizeMedia),
+  }));
+}
+
+function findNonPermanentImageReferences(product: BulkParsedProduct): string[] {
+  const bad: string[] = [];
+  const collections: Array<{ label: string; media: BulkParsedMedia[] }> = [
+    { label: "product", media: product.media || [] },
+    ...((product.variants || []).map((variant) => ({
+      label: `variant ${variant.sku || "(no SKU)"}`,
+      media: variant.media || [],
+    }))),
+  ];
+
+  for (const collection of collections) {
+    for (const media of collection.media) {
+      if (media.type !== "IMAGE") continue;
+      const url = (media.url || "").trim();
+      const hasTemporaryThumbnail = isTemporaryDriveMediaUrl(media.thumbnailUrl);
+      if (!url) {
+        if (hasTemporaryThumbnail || media.sourceDriveFileId) {
+          bad.push(`${collection.label}: ${media.title || media.altText || media.sourceDriveFileId || "image without a stored URL"}`);
+        }
+        continue;
+      }
+      if (!isPermanentStorageUrl(url) || isTemporaryDriveMediaUrl(url)) {
+        bad.push(`${collection.label}: ${media.title || media.altText || url}`);
+      }
+    }
+  }
+  return bad;
 }
 
 function mediaMatchesDriveEntry(media: BulkParsedMedia, entry: MatchedEntry): boolean {
@@ -535,7 +610,9 @@ export class BulkImportJobService {
         );
       }
 
-      products = applyUploadedDriveImages(products, allMatchedEntries, uploadedByDriveId);
+      products = sanitizeTemporaryDriveMedia(
+        applyUploadedDriveImages(products, allMatchedEntries, uploadedByDriveId),
+      );
 
       // Persist successful image URLs after each batch. A retry only needs to
       // process images that are still references; successful S3 uploads survive.
@@ -564,14 +641,13 @@ export class BulkImportJobService {
         .map((result) => result.name + ": " + (result.error || "Unknown image error"));
       rawJob.error = rawJob.imagesFailed + " of " + rawJob.imagesTotal +
         " image(s) failed. Product import was not started. " + firstFailures.join(" | ");
-      if (rawJob.draftId && uploadedByDriveId.size > 0) {
+      products = sanitizeTemporaryDriveMedia(products);
+      if (rawJob.draftId) {
         await this.draftRepo.update(rawJob.draftId, {
           rawInput: JSON.stringify(products, null, 2),
           parsedData: products,
           status: "DRAFT",
         });
-      } else if (rawJob.draftId) {
-        await this.draftRepo.update(rawJob.draftId, { status: "DRAFT" });
       }
       await this.saveJob(rawJob);
       return;
@@ -583,6 +659,70 @@ export class BulkImportJobService {
         parsedData: products,
         status: "READY_FOR_IMPORT",
       });
+    }
+
+    // Never create/update a product with a Drive proxy, Google thumbnail, raw
+    // filename, or any other non-permanent image reference. This prevents
+    // temporary proxy URLs and access tokens from leaking into ProductMedia.
+    const unresolvedMedia = products.flatMap((product) => {
+      const references = findNonPermanentImageReferences(product);
+      return references.length
+        ? [{ product, references }]
+        : [];
+    });
+    if (unresolvedMedia.length > 0) {
+      products = sanitizeTemporaryDriveMedia(products);
+      const unresolvedReferences = unresolvedMedia.flatMap(({ product, references }) =>
+        references.map((reference, index) => ({
+          product,
+          reference,
+          index,
+        })),
+      );
+      const examples = unresolvedMedia
+        .slice(0, 5)
+        .map(({ product, references }) => `${product.name}: ${references.slice(0, 2).join(", ")}`)
+        .join(" | ");
+
+      rawJob.status = "failed";
+      rawJob.stage = "images_failed";
+      rawJob.completedAt = new Date().toISOString();
+      rawJob.currentFile = undefined;
+      rawJob.progress = 100;
+      rawJob.imagesTotal = Math.max(rawJob.imagesTotal, rawJob.imagesUploaded) + unresolvedReferences.length;
+      rawJob.imagesProcessed = Math.max(rawJob.imagesProcessed, rawJob.imagesUploaded) + unresolvedReferences.length;
+      rawJob.imagesFailed += unresolvedReferences.length;
+      rawJob.imageResults.push(
+        ...unresolvedReferences.map(({ product, reference, index }) => ({
+          fileId: `unresolved-${product.productGroupId}-${index}`,
+          name: `${product.name} — ${reference}`,
+          status: "failed" as const,
+          error: "This image still uses a filename or temporary Drive URL instead of a permanent storage URL. Run Drive matching again, or remove and re-upload this image.",
+        })),
+      );
+      rawJob.failed = products.length;
+      rawJob.processed = products.length;
+      rawJob.results = products.map((product) => ({
+        productGroupId: product.productGroupId,
+        name: product.name,
+        sku: product.sku,
+        status: "failed" as const,
+        error: "Import blocked before product creation because required image references were not uploaded to permanent storage. Fix the image references and retry.",
+      }));
+      rawJob.error =
+        "Import blocked before creating any products: " +
+        unresolvedMedia.length +
+        " product(s) still contain non-permanent image references. " +
+        examples;
+      if (rawJob.draftId) {
+        await this.draftRepo.update(rawJob.draftId, {
+          rawInput: JSON.stringify(products, null, 2),
+          parsedData: products,
+          status: "DRAFT",
+        });
+      }
+      await this.saveJob(rawJob);
+      return;
     }
 
     rawJob.stage = "importing_products";
