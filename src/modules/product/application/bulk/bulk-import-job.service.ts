@@ -779,15 +779,22 @@ export class BulkImportJobService {
     rawJob.completedAt = new Date().toISOString();
     rawJob.progress = 100;
     rawJob.currentFile = undefined;
-    rawJob.stage = rawJob.failed === 0 || rawJob.successful > 0 ? "completed" : "failed";
-    rawJob.status = rawJob.failed === 0 || rawJob.successful > 0 ? "completed" : "failed";
+    // Partial success is not a completed import: keep the draft editable and
+    // the failed product results retryable instead of clearing the draft ID.
+    const hasFailures = rawJob.failed > 0;
+    rawJob.stage = hasFailures ? "failed" : "completed";
+    rawJob.status = hasFailures ? "failed" : "completed";
+    if (hasFailures) {
+      rawJob.error =
+        `${rawJob.successful} product(s) imported successfully; ${rawJob.failed} product(s) need attention. Review the per-product errors and use Retry Failed Items.`;
+    }
     await this.saveJob(rawJob);
 
     if (rawJob.draftId) {
       try {
-        const finalDraftStatus = rawJob.successful > 0
-          ? PrismaDraftStatus.COMPLETED
-          : PrismaDraftStatus.FAILED;
+        const finalDraftStatus = hasFailures
+          ? PrismaDraftStatus.DRAFT
+          : PrismaDraftStatus.COMPLETED;
         await this.draftRepo.update(rawJob.draftId, { status: finalDraftStatus });
       } catch (err: any) {
         console.warn("Failed to update draft " + rawJob.draftId + " on job finish:", err.message);
@@ -817,9 +824,15 @@ export class BulkImportJobService {
     let failedProducts: BulkParsedProduct[] = [];
     if (parentJob.draftId) {
       const draft = await this.draftRepo.findById(parentJob.draftId);
-      if (draft && draft.parsedData && Array.isArray(draft.parsedData.products)) {
-        failedProducts = draft.parsedData.products.filter((p: BulkParsedProduct) =>
-          failedGroupIds.has(p.productGroupId)
+      if (draft?.parsedData) {
+        const parsedData = draft.parsedData as any;
+        const productList: BulkParsedProduct[] = Array.isArray(parsedData)
+          ? parsedData
+          : Array.isArray(parsedData.products)
+            ? parsedData.products
+            : [];
+        failedProducts = productList.filter((product) =>
+          failedGroupIds.has(product.productGroupId)
         );
       }
     }
