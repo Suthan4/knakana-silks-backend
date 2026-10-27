@@ -7,6 +7,9 @@ import { BulkImportDraftRepository } from "../../infrastructure/repository/bulk-
 import { DraftStatus as PrismaDraftStatus } from "@/generated/prisma/enums.js";
 import type { BulkParsedProduct } from "./bulk-product.dto.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/shared/utils/errors.js";
+import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
+import { S3UploadService } from "@/config/s3-upload.js";
+import type { ImageMatchResult, MatchedEntry } from "./drive-image-matcher.service.js";
 
 export type JobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -16,6 +19,23 @@ export interface BulkImportJobItemResult {
   sku?: string;
   status: "success" | "failed" | "skipped";
   productId?: string;
+  error?: string;
+}
+
+export type BulkImportJobStage =
+  | "preparing_images"
+  | "uploading_images"
+  | "images_failed"
+  | "importing_products"
+  | "completed"
+  | "failed";
+
+export interface BulkImportImageResult {
+  fileId: string;
+  name: string;
+  status: "success" | "failed";
+  url?: string;
+  key?: string;
   error?: string;
 }
 
@@ -31,6 +51,13 @@ export interface BulkImportJob {
   failed: number;
   skipped: number;
   results: BulkImportJobItemResult[];
+  stage: BulkImportJobStage;
+  imagesTotal: number;
+  imagesProcessed: number;
+  imagesUploaded: number;
+  imagesFailed: number;
+  currentFile?: string;
+  imageResults: BulkImportImageResult[];
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -48,7 +75,9 @@ export class BulkImportJobService {
 
   constructor(
     @inject(BulkProductService) private bulkProductService: BulkProductService,
-    @inject(BulkImportDraftRepository) private draftRepo: BulkImportDraftRepository
+    @inject(BulkImportDraftRepository) private draftRepo: BulkImportDraftRepository,
+    @inject(DriveService) private driveService: DriveService,
+    @inject("S3UploadService") private s3UploadService: S3UploadService
   ) {}
 
   private getRedis(): Redis | null {
