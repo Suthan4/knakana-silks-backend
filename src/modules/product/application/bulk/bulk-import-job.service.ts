@@ -374,12 +374,10 @@ export class BulkImportJobService {
       : "importing_products";
     await this.saveJob(rawJob);
 
-    const entriesById = new Map<string, MatchedEntry>();
-    for (const entry of imageMatches?.matched || []) {
-      if (entry.file?.id) entriesById.set(entry.file.id, entry);
-    }
-    const allMatchedEntries = [...entriesById.values()];
-    const entriesToUpload: MatchedEntry[] = [];
+    // Keep all match associations (a Drive image may be referenced by more
+    // than one product), but only download/upload each Drive file ID once.
+    const allMatchedEntries = (imageMatches?.matched || []).filter((entry) => Boolean(entry.file?.id));
+    const entriesToUploadById = new Map<string, MatchedEntry>();
     const mappingFailures: Array<{ entry: MatchedEntry; error: string }> = [];
 
     if (driveUserId) {
@@ -394,10 +392,11 @@ export class BulkImportJobService {
         }
         // A previously uploaded product image is permanent; retain it on retries.
         if (targets.some((media) => !isPermanentStorageUrl(media.url))) {
-          entriesToUpload.push(entry);
+          entriesToUploadById.set(entry.file.id, entry);
         }
       }
     }
+    const entriesToUpload = [...entriesToUploadById.values()];
 
     rawJob.imagesTotal = entriesToUpload.length + mappingFailures.length;
     rawJob.imagesProcessed = 0;
