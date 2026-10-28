@@ -203,6 +203,14 @@ router.post(
   (req, res) => getDraftController().retryJob(req, res)
 );
 
+router.post(
+  "/products/bulk/job/:jobId/cancel",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().cancelJob(req, res)
+);
+
 // Drive folder list
 router.get(
   "/products/bulk/drive/folders",

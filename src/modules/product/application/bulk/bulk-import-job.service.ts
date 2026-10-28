@@ -28,7 +28,8 @@ export type BulkImportJobStage =
   | "images_failed"
   | "importing_products"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export interface BulkImportImageResult {
   fileId: string;
@@ -390,34 +391,47 @@ export class BulkImportJobService {
     return job;
   }
 
-  /** Request cancellation; the worker checks between image batches and products. */
+  /** Request cancellation for a job owned by the current admin. In-flight image
+   * batches finish safely; the processor stops before starting the next batch/product. */
   public async cancelJob(jobId: string, userId: string): Promise<BulkImportJob> {
-    const job = await this.getJob(jobId, userId);
-    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
-    job.cancelRequested = true;
-    job.updatedAt = new Date().toISOString();
-    await this.saveJob(job);
-    return job;
+    const authorized = await this.getJob(jobId, userId);
+    if (authorized.status === "completed" || authorized.status === "failed" || authorized.status === "cancelled") {
+      return authorized;
+    }
+    const live = this.memoryStore.get(jobId) || authorized;
+    live.cancelRequested = true;
+    live.error = "Cancellation requested. The current upload or product operation will finish before the job stops.";
+    await this.saveJob(live);
+    return live;
   }
 
-  private async cancellationRequested(jobId: string): Promise<boolean> {
-    const job = this.memoryStore.get(jobId);
-    return Boolean(job?.cancelRequested);
+  private async isCancellationRequested(jobId: string): Promise<boolean> {
+    const live = this.memoryStore.get(jobId);
+    if (live?.cancelRequested) return true;
+    const r = this.getRedis();
+    if (this.isRedisReady() && r) {
+      try {
+        const raw = await r.get(this.getJobKey(jobId));
+        if (raw) return Boolean((JSON.parse(raw) as BulkImportJob).cancelRequested);
+      } catch (err: any) {
+        console.warn("Unable to check bulk cancellation state:", err.message);
+      }
+    }
+    return false;
   }
 
-  private async finishCancelled(job: BulkImportJob): Promise<void> {
+  private async finishCancelledJob(job: BulkImportJob): Promise<void> {
     job.status = "cancelled";
-    job.stage = "failed";
-    job.completedAt = new Date().toISOString();
-    job.updatedAt = job.completedAt;
+    job.stage = "cancelled";
     job.currentFile = undefined;
-    job.error = "Import stopped by admin. Images already uploaded to storage are retained; no further products will be created.";
+    job.completedAt = new Date().toISOString();
+    job.error = "Import cancelled by an administrator. Completed uploads and successfully imported products were kept; review the draft and retry remaining items when ready.";
     await this.saveJob(job);
     if (job.draftId) {
       try {
         await this.draftRepo.update(job.draftId, { status: PrismaDraftStatus.DRAFT });
       } catch (err: any) {
-        console.warn("Failed to restore draft after cancellation:", err.message);
+        console.warn("Could not restore draft after cancellation:", err.message);
       }
     }
   }
@@ -475,15 +489,19 @@ export class BulkImportJobService {
         console.error("Background bulk job " + jobId + " crashed:", err);
         const current = this.memoryStore.get(jobId);
         if (current) {
-          current.status = "failed";
-          current.stage =
-            current.stage === "preparing_images" || current.stage === "uploading_images"
-              ? "images_failed"
-              : "failed";
-          current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
-          current.completedAt = new Date().toISOString();
-          current.currentFile = undefined;
-          await this.saveJob(current);
+          if (current.cancelRequested) {
+            await this.finishCancelledJob(current);
+          } else {
+            current.status = "failed";
+            current.stage =
+              current.stage === "preparing_images" || current.stage === "uploading_images"
+                ? "images_failed"
+                : "failed";
+            current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
+            current.completedAt = new Date().toISOString();
+            current.currentFile = undefined;
+            await this.saveJob(current);
+          }
         }
       });
     });
@@ -503,7 +521,7 @@ export class BulkImportJobService {
     const rawJob = this.memoryStore.get(jobId);
     if (!rawJob) return;
 
-    let products = inputProducts.map((product) => ({
+    let products: BulkParsedProduct[] = inputProducts.map((product) => ({
       ...product,
       media: product.media ? [...product.media] : [],
       variants: (product.variants || []).map((variant) => ({
@@ -561,10 +579,9 @@ export class BulkImportJobService {
     }
 
     const uploadedByDriveId = new Map<string, UploadedDriveImage>();
-    // Four selected images can be sent through one multi-file S3 upload call.
-    // Keep batches bounded to avoid excessive per-request overhead without
-    // downloading every original from Drive at once.
-    const batchSize = 4;
+    // Large camera originals can be 40–60 MB each. Process one source at a time
+    // so Drive buffers and Sharp processing do not multiply peak memory usage.
+    const batchSize = 1;
 
     if (entriesToUpload.length > 0 || mappingFailures.length > 0) {
       rawJob.stage = "uploading_images";
@@ -576,7 +593,7 @@ export class BulkImportJobService {
     }
 
     for (let offset = 0; offset < entriesToUpload.length; offset += batchSize) {
-      if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
+      if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
       const batch = entriesToUpload.slice(offset, offset + batchSize);
       rawJob.currentFile = batch.map((entry) => entry.file.name).join(", ");
       await this.saveJob(rawJob);
@@ -671,7 +688,8 @@ export class BulkImportJobService {
               : 0;
             rawJob.currentFile = item.file.name;
             await this.saveJob(rawJob);
-          }
+          },
+          "bulk"
         );
       }
 
@@ -790,8 +808,7 @@ export class BulkImportJobService {
       return;
     }
 
-    if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
-
+    if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
     rawJob.stage = "importing_products";
     rawJob.currentFile = undefined;
     const imageProgressBase = rawJob.imagesTotal > 0 ? 40 : 0;
@@ -799,7 +816,7 @@ export class BulkImportJobService {
     await this.saveJob(rawJob);
 
     for (let i = 0; i < products.length; i++) {
-      if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
+      if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
       const product = products[i];
       rawJob.currentFile = product.name;
       await this.saveJob(rawJob);
@@ -844,6 +861,7 @@ export class BulkImportJobService {
       await this.saveJob(rawJob);
     }
 
+    if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
     rawJob.completedAt = new Date().toISOString();
     rawJob.progress = 100;
     rawJob.currentFile = undefined;

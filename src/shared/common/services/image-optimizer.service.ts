@@ -125,7 +125,7 @@ export class KankanaImageOptimizer {
     if (normalized.includes("banner") || normalized.includes("hero")) {
       return "banner";
     }
-    if (normalized.includes("category")) {
+    if (normalized.includes("categor")) {
       return "category";
     }
     if (normalized.includes("bulk")) {
@@ -140,9 +140,13 @@ export class KankanaImageOptimizer {
    */
   public static async optimize(
     sourceBuffer: Buffer,
-    assetCategory: AssetCategory = "product"
+    assetCategory: AssetCategory = "product",
+    configuredQuality?: number,
   ): Promise<OptimizationResult> {
     const config = ASSET_BOUNDARIES[assetCategory] || ASSET_BOUNDARIES.product;
+    const initialQuality = Number.isInteger(configuredQuality) && configuredQuality! >= 1 && configuredQuality! <= 100
+      ? configuredQuality!
+      : config.initialQuality;
 
     // ── STEP 1: Deep Security Validation on Input Buffer ────────────────────
     const detectedType = await fileTypeFromBuffer(sourceBuffer);
@@ -238,56 +242,19 @@ export class KankanaImageOptimizer {
       m2: 2.0,
     });
 
-    // ── STEP 4: Predictable WebP export ────────────────────────────────────
-    // Product/catalog images use a fixed quality of 70. If the result exceeds
-    // the preferred byte budget, progressively reduce dimensions before upload.
-    // The size budget is a target, never a reason to reject an otherwise valid image.
-    const exportQuality = 70;
-    let attempts = 0;
-    let exportDimension = Math.min(config.maxDimension, Math.max(width, height));
-    let finalBuffer: Buffer | null = null;
-    let finalMetadata: sharp.Metadata | null = null;
-
-    while (attempts < 12) {
-      attempts++;
-      const candidate = await basePipeline
-        .clone()
-        .resize({
-          width: exportDimension,
-          height: exportDimension,
-          fit: sharp.fit.inside,
-          withoutEnlargement: true,
-          kernel: sharp.kernel.lanczos3,
-        })
-        .webp({
-          quality: exportQuality,
-          effort: 6,
-          smartSubsample: true,
-        })
-        .toBuffer();
-
-      finalBuffer = candidate;
-      finalMetadata = await sharp(candidate).metadata();
-
-      if (candidate.length <= config.maxBytes || exportDimension <= this.MIN_RESOLUTION_PX) {
-        break;
-      }
-
-      // Keep Q70 fixed. Reduce pixel dimensions in small steps rather than
-      // degrading compression quality unpredictably for detailed fabric.
-      exportDimension = Math.max(
-        this.MIN_RESOLUTION_PX,
-        Math.floor(exportDimension * 0.9),
-      );
-    }
-
-    if (!finalBuffer || !finalMetadata) {
-      throw new ImageOptimizationError(
-        "INVALID_FILE_TYPE",
-        "Image processing did not produce an output image.",
-        422,
-      );
-    }
+    // ── STEP 4: Encode once at the configured quality ───────────────────────
+    // Output size is a target, not a validation boundary. Do not repeatedly
+    // re-encode the same image or reject valid images for missing a size window.
+    const finalQuality = initialQuality;
+    const attempts = 1;
+    const finalBuffer = await basePipeline
+      .clone()
+      .webp({
+        quality: finalQuality,
+        effort: 6,
+        smartSubsample: true,
+      })
+      .toBuffer();
 
     const finalSize = finalBuffer.length;
 

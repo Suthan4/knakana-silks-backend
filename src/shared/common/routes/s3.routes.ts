@@ -2,6 +2,8 @@ import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { CommonController } from "../controller/s3.controller.js";
 import { ImageOptimizationError } from "../services/image-optimizer.service.js";
+import { authenticate, authorize } from "@/shared/middleware/auth.middleware.js";
+import { UserRole } from "@/generated/prisma/enums.js";
 
 const router = express.Router();
 const commonController = new CommonController();
@@ -103,6 +105,27 @@ const handleUpload = (uploadMiddleware: any) => {
 };
 
 // ── Routes ───────────────────────────────────────────────────────────────────
+
+// ── Direct-to-S3 staged image uploads ───────────────────────────────────────
+// These endpoints are admin-only. Staging objects are never returned as public
+// media URLs; finalize validates ownership and runs the normal optimizer first.
+router.post(
+  "/upload/presigned-url",
+  jsonParser,
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  commonController.createStagedUpload
+);
+
+router.post(
+  "/upload/finalize",
+  jsonParser,
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  commonController.finalizeStagedUpload
+);
+
+
 
 /**
  * Upload single file
