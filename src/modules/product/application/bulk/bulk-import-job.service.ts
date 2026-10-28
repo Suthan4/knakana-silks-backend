@@ -28,7 +28,8 @@ export type BulkImportJobStage =
   | "images_failed"
   | "importing_products"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export interface BulkImportImageResult {
   fileId: string;
@@ -421,7 +422,7 @@ export class BulkImportJobService {
 
   private async finishCancelledJob(job: BulkImportJob): Promise<void> {
     job.status = "cancelled";
-    job.stage = "failed";
+    job.stage = "cancelled";
     job.currentFile = undefined;
     job.completedAt = new Date().toISOString();
     job.error = "Import cancelled by an administrator. Completed uploads and successfully imported products were kept; review the draft and retry remaining items when ready.";
