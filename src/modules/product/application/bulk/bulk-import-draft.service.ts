@@ -493,9 +493,11 @@ async matchDrive(
       throw new ValidationError("Draft has no products to import");
     }
 
-    const products = productList.filter((product) => product._importStatus !== "skipped");
+    const products = productList.filter((product) =>
+      product._importStatus !== "skipped" && product._importStatus !== "success" && !product.productId
+    );
     if (products.length === 0) {
-      throw new ValidationError("There are no products left to import. All remaining items have been skipped or deleted.");
+      throw new ValidationError("There are no products left to import. Remaining items were already imported, skipped, or removed from this draft.");
     }
 
     // Validate against current catalog state before any Drive download or S3 upload.
