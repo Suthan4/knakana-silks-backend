@@ -187,7 +187,7 @@ export type PatchProductDTO = z.infer<typeof PatchProductDTOSchema>;
  */
 export const ConsolidateSimpleProductsDTOSchema = z.object({
   parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
-  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")),
+  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")).pipe(z.string().min(1, "Attribute name must include letters or numbers")),
   products: z.array(z.object({
     productId: z.string().regex(/^[1-9]\d*$/, "Product ID must be a positive integer"),
     attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
@@ -212,7 +212,7 @@ export type ConsolidateSimpleProductsDTO = z.infer<typeof ConsolidateSimpleProdu
 export const AddSimpleProductAsVariantDTOSchema = z.object({
   parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
   sourceProductId: z.string().regex(/^[1-9]\d*$/, "Source product ID must be a positive integer"),
-  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")),
+  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")).pipe(z.string().min(1, "Attribute name must include letters or numbers")),
   attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
 }).superRefine((data, ctx) => {
   if (data.parentProductId === data.sourceProductId) {
