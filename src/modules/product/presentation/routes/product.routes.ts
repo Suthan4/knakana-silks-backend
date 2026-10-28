@@ -283,6 +283,22 @@ router.post(
   (req, res) => getProductController().consolidateSimpleProducts(req, res)
 );
 
+router.post(
+  "/admin/products/add-simple-variant",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().addSimpleProductAsVariant(req, res)
+);
+
+router.post(
+  "/admin/products/extract-variant",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().extractVariantAsSimpleProduct(req, res)
+);
+
 router.get(
   "/admin/products",
   authenticate,

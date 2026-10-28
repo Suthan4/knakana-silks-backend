@@ -207,6 +207,29 @@ export const ConsolidateSimpleProductsDTOSchema = z.object({
 });
 export type ConsolidateSimpleProductsDTO = z.infer<typeof ConsolidateSimpleProductsDTOSchema>;
 
+
+/** Attach an existing simple product to an existing variable product. */
+export const AddSimpleProductAsVariantDTOSchema = z.object({
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  sourceProductId: z.string().regex(/^[1-9]\d*$/, "Source product ID must be a positive integer"),
+  attributeName: z.enum(["color", "size", "fabric", "style"]),
+  attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
+}).superRefine((data, ctx) => {
+  if (data.parentProductId === data.sourceProductId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Source and target products must be different", path: ["sourceProductId"] });
+  }
+});
+export type AddSimpleProductAsVariantDTO = z.infer<typeof AddSimpleProductAsVariantDTOSchema>;
+
+/** Extract an existing variant as a standalone simple product. */
+export const ExtractVariantAsSimpleProductDTOSchema = z.object({
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  variantId: z.string().regex(/^[1-9]\d*$/, "Variant ID must be a positive integer"),
+  productName: z.string().trim().min(2, "Product name must contain at least 2 characters").max(180),
+  productSku: z.string().trim().min(2).max(100).optional(),
+});
+export type ExtractVariantAsSimpleProductDTO = z.infer<typeof ExtractVariantAsSimpleProductDTOSchema>;
+
 // Query Product DTO
 // Enhanced Product Query DTO with URL params support
 export const QueryProductDTOSchema = z.object({
