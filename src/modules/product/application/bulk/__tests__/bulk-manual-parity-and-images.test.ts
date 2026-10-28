@@ -5,6 +5,8 @@ import { BulkProductParser } from "../bulk-product.parser.js";
 import { BulkProductValidator } from "../bulk-product.validator.js";
 import { BulkProductService } from "../../service/bulk-product.service.js";
 import { MediaType } from "@/generated/prisma/enums.js";
+import sharp from "sharp";
+import { KankanaImageOptimizer } from "@/shared/common/services/image-optimizer.service.js";
 
 describe("Bulk Product Upload — Manual Product Creation & S3 Image Parity Test Suite", () => {
   const mockCategories = [
@@ -685,5 +687,35 @@ describe("Bulk Product Upload — Manual Product Creation & S3 Image Parity Test
       assert.ok(mediaErr);
       assert.equal(mediaErr?.message, "Media URL or file reference is required.");
     });
+  });
+});
+
+
+describe("Dynamic image optimizer policy", () => {
+  it("resolves category folder plural forms and explicit asset types", () => {
+    assert.equal(KankanaImageOptimizer.resolveAssetCategory("categories"), "category");
+    assert.equal(KankanaImageOptimizer.resolveAssetCategory("banners"), "banner");
+    assert.equal(KankanaImageOptimizer.resolveAssetCategory("products"), "product");
+    assert.equal(KankanaImageOptimizer.resolveAssetCategory("bulk"), "bulk");
+  });
+
+  it("uses the configured encoder quality and accepts a valid image below the old 400 KB floor", async () => {
+    const pixels = Buffer.alloc(800 * 800 * 3, 128);
+    const source = await sharp(pixels, { raw: { width: 800, height: 800, channels: 3 } })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    const result = await KankanaImageOptimizer.optimize(source, "product", 70);
+    assert.equal(result.mimeType, "image/webp");
+    assert.equal(result.qualityUsed, 70);
+    assert.ok(result.size > 0);
+    assert.ok(result.size < 400 * 1024, "simple images may legitimately compress below 400 KB");
+  });
+
+  it("rejects corrupt image bytes before optimization", async () => {
+    await assert.rejects(
+      () => KankanaImageOptimizer.optimize(Buffer.from("not an image"), "product", 70),
+      /unsupported format|magic bytes mismatch/i,
+    );
   });
 });
