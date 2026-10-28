@@ -906,25 +906,27 @@ export class BulkImportJobService {
       throw new ValidationError("There are no failed products to retry in this job");
     }
 
-    // Find original product details from draft if available
+    // Recover only failed products that still exist in the draft and were not skipped.
     let failedProducts: BulkParsedProduct[] = [];
+    let draftPayloadAvailable = false;
     if (parentJob.draftId) {
       const draft = await this.draftRepo.findById(parentJob.draftId);
       if (draft?.parsedData) {
+        draftPayloadAvailable = true;
         const parsedData = draft.parsedData as any;
         const productList: BulkParsedProduct[] = Array.isArray(parsedData)
           ? parsedData
           : Array.isArray(parsedData.products)
             ? parsedData.products
             : [];
-        failedProducts = productList.filter((product) =>
-          failedGroupIds.has(product.productGroupId)
+        failedProducts = productList.filter((product: any) =>
+          failedGroupIds.has(product.productGroupId) && product._importStatus !== "skipped"
         );
       }
     }
 
-    if (failedProducts.length === 0) {
-      // Reconstruct minimal representations if draft is not available
+    if (failedProducts.length === 0 && !draftPayloadAvailable) {
+      // Reconstruct minimal representations only when the original draft is unavailable
       failedProducts = parentJob.results
         .filter((r) => r.status === "failed")
         .map((r) => ({
@@ -941,6 +943,10 @@ export class BulkImportJobService {
           breadth: 10,
           height: 5,
         }));
+    }
+
+    if (failedProducts.length === 0) {
+      throw new ValidationError("There are no eligible failed products left to retry. Skipped or deleted draft items are excluded.");
     }
 
     return this.startJob({
