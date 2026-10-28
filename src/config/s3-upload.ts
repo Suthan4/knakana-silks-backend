@@ -44,7 +44,7 @@ export class S3UploadService {
   // Resolve Prisma lazily so services can be constructed in tests and contexts
   // that do not need compression settings/database access yet.
   private get prisma() {
-    return getPrismaClient();
+    return getPrismaClient;
   }
 
   constructor() {
