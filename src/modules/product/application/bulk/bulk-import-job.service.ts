@@ -11,7 +11,7 @@ import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
 import { S3UploadService } from "@/config/s3-upload.js";
 import type { ImageMatchResult, MatchedEntry } from "./drive-image-matcher.service.js";
 
-export type JobStatus = "pending" | "processing" | "completed" | "failed";
+export type JobStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 
 export interface BulkImportJobItemResult {
   productGroupId: string;
@@ -62,6 +62,7 @@ export interface BulkImportJob {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  cancelRequested?: boolean;
 }
 
 const JOB_TTL_SECONDS = 86400; // 24 hours
@@ -389,6 +390,38 @@ export class BulkImportJobService {
     return job;
   }
 
+  /** Request cancellation; the worker checks between image batches and products. */
+  public async cancelJob(jobId: string, userId: string): Promise<BulkImportJob> {
+    const job = await this.getJob(jobId, userId);
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
+    job.cancelRequested = true;
+    job.updatedAt = new Date().toISOString();
+    await this.saveJob(job);
+    return job;
+  }
+
+  private async cancellationRequested(jobId: string): Promise<boolean> {
+    const job = this.memoryStore.get(jobId);
+    return Boolean(job?.cancelRequested);
+  }
+
+  private async finishCancelled(job: BulkImportJob): Promise<void> {
+    job.status = "cancelled";
+    job.stage = "failed";
+    job.completedAt = new Date().toISOString();
+    job.updatedAt = job.completedAt;
+    job.currentFile = undefined;
+    job.error = "Import stopped by admin. Images already uploaded to storage are retained; no further products will be created.";
+    await this.saveJob(job);
+    if (job.draftId) {
+      try {
+        await this.draftRepo.update(job.draftId, { status: PrismaDraftStatus.DRAFT });
+      } catch (err: any) {
+        console.warn("Failed to restore draft after cancellation:", err.message);
+      }
+    }
+  }
+
   /**
    * Start a new background import job
    */
@@ -543,6 +576,7 @@ export class BulkImportJobService {
     }
 
     for (let offset = 0; offset < entriesToUpload.length; offset += batchSize) {
+      if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
       const batch = entriesToUpload.slice(offset, offset + batchSize);
       rawJob.currentFile = batch.map((entry) => entry.file.name).join(", ");
       await this.saveJob(rawJob);
@@ -756,6 +790,8 @@ export class BulkImportJobService {
       return;
     }
 
+    if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
+
     rawJob.stage = "importing_products";
     rawJob.currentFile = undefined;
     const imageProgressBase = rawJob.imagesTotal > 0 ? 40 : 0;
@@ -763,6 +799,7 @@ export class BulkImportJobService {
     await this.saveJob(rawJob);
 
     for (let i = 0; i < products.length; i++) {
+      if (await this.cancellationRequested(jobId)) { await this.finishCancelled(rawJob); return; }
       const product = products[i];
       rawJob.currentFile = product.name;
       await this.saveJob(rawJob);
