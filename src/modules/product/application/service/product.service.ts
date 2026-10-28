@@ -1788,6 +1788,13 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       for (const product of selected) {
         const variant = variantByProductId.get(String(product.id))!;
         for (const media of product.media) {
+          const alreadyOnVariant = variant.media.some((existingMedia) =>
+            Boolean(
+              (media.key && existingMedia.key && media.key === existingMedia.key) ||
+              (media.url && existingMedia.url === media.url)
+            )
+          );
+          if (alreadyOnVariant) continue;
           await tx.productVariantMedia.create({
             data: {
               variantId: variant.id,
