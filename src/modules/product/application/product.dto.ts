@@ -210,8 +210,8 @@ export type ConsolidateSimpleProductsDTO = z.infer<typeof ConsolidateSimpleProdu
 
 /** Attach an existing simple product to an existing variable product. */
 export const AddSimpleProductAsVariantDTOSchema = z.object({
-  parentProductId: z.string().regex(/^[1-9]\\d*$/, "Parent product ID must be a positive integer"),
-  sourceProductId: z.string().regex(/^[1-9]\\d*$/, "Source product ID must be a positive integer"),
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  sourceProductId: z.string().regex(/^[1-9]\d*$/, "Source product ID must be a positive integer"),
   attributeName: z.enum(["color", "size", "fabric", "style"]),
   attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
 }).superRefine((data, ctx) => {
@@ -223,8 +223,8 @@ export type AddSimpleProductAsVariantDTO = z.infer<typeof AddSimpleProductAsVari
 
 /** Extract an existing variant as a standalone simple product. */
 export const ExtractVariantAsSimpleProductDTOSchema = z.object({
-  parentProductId: z.string().regex(/^[1-9]\\d*$/, "Parent product ID must be a positive integer"),
-  variantId: z.string().regex(/^[1-9]\\d*$/, "Variant ID must be a positive integer"),
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  variantId: z.string().regex(/^[1-9]\d*$/, "Variant ID must be a positive integer"),
   productName: z.string().trim().min(2, "Product name must contain at least 2 characters").max(180),
   productSku: z.string().trim().min(2).max(100).optional(),
 });
