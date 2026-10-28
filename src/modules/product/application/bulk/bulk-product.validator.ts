@@ -954,7 +954,7 @@ export class BulkProductValidator {
               row: p.rowNumber,
               productGroupId: p.productGroupId,
               field: "Parent / Base SKU",
-              message: `SKU "${p.sku}" already exists in database (${conflictSkuMap.get(p.sku.toLowerCase())}).`,
+              message: `SKU "${p.sku}" already exists in database (${conflictSkuMap.get(p.sku.trim().toLowerCase())}).`,
               fix: "Change this SKU to a unique value or leave blank to auto-generate.",
               severity: "error",
             };
