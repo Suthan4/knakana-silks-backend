@@ -112,12 +112,13 @@ export class S3UploadService {
     if (!this.stagingBucket) {
       throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Configure AWS_S3_STAGING_BUCKET as a separate private bucket before enabling direct uploads.", 503);
     }
-    const maxBytes = 100 * 1024 * 1024;
     const allowedImageTypes = new Set([
       "image/jpeg", "image/png", "image/webp", "image/tiff", "image/avif",
     ]);
-    if (!Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > maxBytes) {
-      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Image must be between 1 byte and 100 MB.", 413, { limitBytes: maxBytes });
+    // No configured per-image byte ceiling for now. Keep validating that the
+    // declared size is a positive safe integer; actual S3 size is checked on finalize.
+    if (!Number.isSafeInteger(input.fileSize) || input.fileSize <= 0) {
+      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Image size must be a positive integer.", 400);
     }
     if (!allowedImageTypes.has(input.fileType)) {
       throw new ImageOptimizationError("INVALID_FILE_TYPE", "Unsupported image format for direct upload.", 422);
@@ -142,8 +143,8 @@ export class S3UploadService {
   }
 
   /**
-   * Fetch an admin-owned staged object, enforce the size limit before download,
-   * then run the exact same image validation/compression/storage path as Multer.
+   * Fetch an admin-owned staged object, reject empty objects, then run the same
+   * image validation/compression/storage path as Multer. No byte ceiling is configured.
    */
   async finalizeStagedUpload(input: {
     userId: string;
@@ -161,9 +162,8 @@ export class S3UploadService {
     }
     const head = await this.s3Client.send(new HeadObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
     const size = Number(head.ContentLength || 0);
-    const maxBytes = 100 * 1024 * 1024;
-    if (!size || size > maxBytes) {
-      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image is empty or exceeds the 100 MB processing limit.", 413, { sizeBytes: size, limitBytes: maxBytes });
+    if (!Number.isSafeInteger(size) || size <= 0) {
+      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Staged image is empty or has an invalid size.", 422, { sizeBytes: size });
     }
 
     const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
@@ -174,8 +174,8 @@ export class S3UploadService {
     // Create a Buffer view over the SDK byte array instead of copying the entire
     // 40–100 MB payload and doubling peak memory during finalization.
     const bytes = Buffer.from(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
-    if (bytes.length !== size || bytes.length > maxBytes) {
-      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image size verification failed.", 413, { expectedBytes: size, actualBytes: bytes.length });
+    if (bytes.length !== size) {
+      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Staged image size verification failed.", 422, { expectedBytes: size, actualBytes: bytes.length });
     }
 
     const originalName = path.basename(input.stagingKey).replace(/^[0-9a-f-]{36}-/i, "") || "image";
