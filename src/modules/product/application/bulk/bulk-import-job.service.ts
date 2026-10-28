@@ -898,7 +898,29 @@ export class BulkImportJobService {
         const finalDraftStatus = hasFailures
           ? PrismaDraftStatus.DRAFT
           : PrismaDraftStatus.COMPLETED;
-        await this.draftRepo.update(rawJob.draftId, { status: finalDraftStatus });
+        const completedByGroup = new Map(rawJob.results.map((result) => [result.productGroupId, result]));
+        const persistedProducts = products.map((product) => {
+          const result = completedByGroup.get(product.productGroupId);
+          if (!result) return product;
+          return {
+            ...product,
+            _importStatus: result.status,
+            ...(result.status === "success" ? { productId: result.productId } : {}),
+            ...(result.status === "failed" ? { _importError: result.error } : {}),
+          };
+        });
+        const draft = await this.draftRepo.findById(rawJob.draftId);
+        const currentParsed = draft?.parsedData as any;
+        const parsedPayload = Array.isArray(currentParsed)
+          ? persistedProducts
+          : currentParsed && typeof currentParsed === "object"
+            ? { ...currentParsed, products: persistedProducts }
+            : persistedProducts;
+        await this.draftRepo.update(rawJob.draftId, {
+          rawInput: JSON.stringify(parsedPayload, null, 2),
+          parsedData: parsedPayload,
+          status: finalDraftStatus,
+        });
       } catch (err: any) {
         console.warn("Failed to update draft " + rawJob.draftId + " on job finish:", err.message);
       }
