@@ -111,8 +111,12 @@ export class S3UploadService {
 
     const safeName = path.basename(input.fileName || "image").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "image";
     const allowedFolders = new Set(["products", "products/variants", "categories", "banners", "home-sections", "bulk"]);
-    const folder = input.folder && allowedFolders.has(input.folder) ? input.folder : "products";
-    const stagingKey = `staging/${input.userId}/${randomUUID()}-${safeName}`;
+    if (input.folder && !allowedFolders.has(input.folder)) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Unsupported upload folder.", 400);
+    }
+    const folder = input.folder || "products";
+    const assetCategory = input.uploadType || KankanaImageOptimizer.resolveAssetCategory(folder);
+    const stagingKey = `staging/${input.userId}/${assetCategory}/${randomUUID()}-${safeName}`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: stagingKey,
