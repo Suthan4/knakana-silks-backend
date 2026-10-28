@@ -1,6 +1,8 @@
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
   DeleteObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
@@ -81,6 +83,109 @@ export class S3UploadService {
         console.error("Failed to auto-create local S3 bucket:", err);
       }
     }
+  }
+
+  /**
+   * Create a short-lived presigned PUT URL for a private staging object.
+   * The object is not exposed as a product URL until finalizeStagedUpload
+   * validates and processes it through the normal optimizer policy.
+   */
+  async createStagedUpload(input: {
+    userId: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    folder?: string;
+    uploadType?: AssetCategory;
+  }): Promise<{ uploadUrl: string; stagingKey: string; expiresIn: number }> {
+    const maxBytes = 100 * 1024 * 1024;
+    const allowedImageTypes = new Set([
+      "image/jpeg", "image/png", "image/webp", "image/tiff", "image/avif",
+      "image/heic", "image/heif",
+    ]);
+    if (!Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > maxBytes) {
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Image must be between 1 byte and 100 MB.", 413, { limitBytes: maxBytes });
+    }
+    if (!allowedImageTypes.has(input.fileType)) {
+      throw new ImageOptimizationError("INVALID_FILE_TYPE", "Unsupported image format for direct upload.", 422);
+    }
+
+    const safeName = path.basename(input.fileName || "image").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "image";
+    const allowedFolders = new Set(["products", "products/variants", "categories", "banners", "home-sections", "bulk"]);
+    const folder = input.folder && allowedFolders.has(input.folder) ? input.folder : "products";
+    const stagingKey = `staging/${input.userId}/${randomUUID()}-${safeName}`;
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: stagingKey,
+      ContentType: input.fileType,
+      Metadata: {
+        "uploader-id": input.userId,
+        "original-name": safeName,
+        "expected-size": String(input.fileSize),
+        "upload-folder": folder,
+        "upload-type": input.uploadType || KankanaImageOptimizer.resolveAssetCategory(folder),
+      },
+      CacheControl: "no-store",
+    });
+    const expiresIn = 300;
+    const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn });
+    return { uploadUrl, stagingKey, expiresIn };
+  }
+
+  /**
+   * Fetch an admin-owned staged object, enforce the size limit before download,
+   * then run the exact same image validation/compression/storage path as Multer.
+   */
+  async finalizeStagedUpload(input: {
+    userId: string;
+    stagingKey: string;
+    folder?: string;
+    uploadType?: AssetCategory;
+  }): Promise<S3UploadResult> {
+    const prefix = `staging/${input.userId}/`;
+    if (!input.stagingKey.startsWith(prefix) || input.stagingKey.includes("..")) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Staging object does not belong to the authenticated uploader.", 403);
+    }
+
+    const head = await this.s3Client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    const size = Number(head.ContentLength || 0);
+    const maxBytes = 100 * 1024 * 1024;
+    if (!size || size > maxBytes) {
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image is empty or exceeds the 100 MB processing limit.", 413, { sizeBytes: size, limitBytes: maxBytes });
+    }
+    if (head.Metadata?.["uploader-id"] !== input.userId) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Staging metadata does not match the authenticated uploader.", 403);
+    }
+
+    const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    if (!response.Body) {
+      throw new ImageOptimizationError("INVALID_FILE_TYPE", "Staged image could not be read.", 422);
+    }
+    const bytes = Buffer.from(await response.Body.transformToByteArray());
+    if (bytes.length !== size || bytes.length > maxBytes) {
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image size verification failed.", 413, { expectedBytes: size, actualBytes: bytes.length });
+    }
+
+    const originalName = head.Metadata?.["original-name"] || "image";
+    const fileType = String(head.ContentType || "application/octet-stream");
+    const folder = input.folder || head.Metadata?.["upload-folder"] || "products";
+    const uploadType = input.uploadType || (head.Metadata?.["upload-type"] as AssetCategory | undefined);
+    const result = await this.uploadFile({
+      fieldname: "file",
+      originalname: originalName,
+      encoding: "7bit",
+      mimetype: fileType,
+      size: bytes.length,
+      buffer: bytes,
+      destination: "",
+      filename: originalName,
+      path: "",
+      stream: undefined as any,
+    } as Express.Multer.File, folder, uploadType);
+
+    // Remove staging bytes only after the final object has been written.
+    await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    return result;
   }
 
   /**
