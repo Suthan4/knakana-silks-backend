@@ -201,9 +201,16 @@ export const QueryProductDTOSchema = z.object({
     ),
 
   // Product Flags
-  // Keep omitted status distinct from explicit true/false so admin can request all statuses.
-  isActive: z.coerce.boolean().optional(),
-  hasVariants: z.coerce.boolean().optional(),
+  // Query parameters arrive as strings; z.coerce.boolean() incorrectly treats "false" as true.
+  // Preserve explicit true/false and keep omitted values undefined for admin "all" filters.
+  isActive: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().optional()
+  ),
+  hasVariants: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().optional()
+  ),
 
   // Price Range
   minPrice: z.coerce.number().positive().optional(),
