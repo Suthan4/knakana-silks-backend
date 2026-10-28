@@ -1695,6 +1695,267 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     await this.productRepository.deleteVariantMedia(BigInt(id));
   }
 
+
+  /**
+   * Consolidate existing simple products into one variable product.
+   *
+   * Existing ProductVariant IDs/SKUs are reused instead of recreating variants.
+   * This preserves variant media, stock-adjustment history, cart links and
+   * historical OrderItem references. Source products are archived, never deleted.
+   */
+  async consolidateSimpleProducts(data: {
+    parentProductId: string;
+    attributeName: "color" | "size" | "fabric" | "style";
+    products: Array<{ productId: string; attributeValue: string }>;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const ids = data.products.map((item) => BigInt(item.productId));
+    if (new Set(ids.map(String)).size !== ids.length) {
+      throw new ValidationError("Each product can only be selected once");
+    }
+    if (!ids.some((id) => id === parentId)) {
+      throw new ValidationError("The parent product must be one of the selected products");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const selected = await tx.product.findMany({
+        where: { id: { in: ids } },
+        include: {
+          variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+          media: { orderBy: { order: "asc" } },
+          stock: true,
+          specifications: true,
+        },
+      });
+      if (selected.length !== ids.length) {
+        const found = new Set(selected.map((item) => String(item.id)));
+        const missing = data.products.filter((item) => !found.has(item.productId)).map((item) => item.productId);
+        throw new NotFoundError(`Product(s) not found: ${missing.join(", ")}`);
+      }
+
+      const parent = selected.find((product) => product.id === parentId)!;
+      if (!parent.isActive) {
+        throw new ValidationError("Activate the parent product before consolidating variants");
+      }
+      if (selected.some((product) => product.hasVariants)) {
+        throw new ValidationError("Only simple products can be consolidated. Remove any variable product from the selection.");
+      }
+      if (selected.some((product) => product.categoryId !== parent.categoryId)) {
+        throw new ValidationError("All selected products must belong to the same category");
+      }
+      if (selected.some((product) => product.variants.length !== 1)) {
+        throw new ValidationError("Every selected simple product must have exactly one existing default variant. Resolve missing or duplicate default variants first.");
+      }
+
+      const values = data.products.map((item) => item.attributeValue.trim().toLocaleLowerCase());
+      if (new Set(values).size !== values.length) {
+        throw new ValidationError("Variant values must be unique");
+      }
+
+      const selectedById = new Map(selected.map((product) => [String(product.id), product]));
+      const itemById = new Map(data.products.map((item) => [item.productId, item]));
+      const variantByProductId = new Map(
+        selected.map((product) => [String(product.id), product.variants[0]]),
+      );
+      const parentVariant = variantByProductId.get(String(parentId))!;
+
+      // Keep the parent SKU stable; price fields on the parent represent the
+      // lowest variant price so catalog cards can show a useful "from" price.
+      const minBasePrice = Math.min(...selected.map((product) => Number(product.basePrice)));
+      const minSellingPrice = Math.min(...selected.map((product) => Number(product.sellingPrice)));
+
+      // Turn each existing default variant into a real color/size/fabric/style
+      // variant and attach it to the parent product without changing its ID/SKU.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        const item = itemById.get(String(product.id))!;
+        const attributeValue = item.attributeValue.trim();
+        const attributes = { [data.attributeName]: attributeValue };
+        await tx.productVariant.update({
+          where: { id: variant.id },
+          data: {
+            productId: parentId,
+            attributes: attributes as Prisma.InputJsonValue,
+            color: data.attributeName === "color" ? attributeValue : (variant.color ?? undefined),
+            size: data.attributeName === "size" ? attributeValue : (variant.size ?? undefined),
+            fabric: data.attributeName === "fabric" ? attributeValue : (variant.fabric ?? undefined),
+          },
+        });
+      }
+
+      // Move existing product-level media to variant-level media. Keep the old
+      // media rows inactive for audit/history; do not upload duplicate files.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        for (const media of product.media) {
+          await tx.productVariantMedia.create({
+            data: {
+              variantId: variant.id,
+              type: media.type,
+              url: media.url,
+              key: media.key,
+              thumbnailUrl: media.thumbnailUrl,
+              altText: media.altText,
+              title: media.title,
+              description: media.description,
+              mimeType: media.mimeType,
+              fileSize: media.fileSize,
+              duration: media.duration,
+              width: media.width,
+              height: media.height,
+              order: media.order,
+              isActive: media.isActive,
+            },
+          });
+        }
+        if (product.media.length) {
+          await tx.productMedia.updateMany({
+            where: { productId: product.id },
+            data: { isActive: false },
+          });
+        }
+      }
+
+      // Move stock to the retained parent and associate it with the existing
+      // variant. If product-level and variant-level stock collide, merge the
+      // quantity and re-point stock adjustments before removing the duplicate row.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        for (const stock of product.stock) {
+          const targetVariantId = stock.variantId ?? variant.id;
+          const existing = await tx.stock.findFirst({
+            where: {
+              productId: parentId,
+              variantId: targetVariantId,
+              warehouseId: stock.warehouseId,
+              NOT: { id: stock.id },
+            },
+          });
+          if (existing) {
+            await tx.stockAdjustment.updateMany({
+              where: { stockId: stock.id },
+              data: { stockId: existing.id },
+            });
+            await tx.stock.update({
+              where: { id: existing.id },
+              data: {
+                quantity: existing.quantity + stock.quantity,
+                lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({
+              where: { id: stock.id },
+              data: { productId: parentId, variantId: targetVariantId },
+            });
+          }
+        }
+      }
+
+      // Preserve active cart lines, moving each selected product to its existing
+      // variant. Merge quantities if a matching target line already exists.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        const cartItems = await tx.cartItem.findMany({ where: { productId: product.id } });
+        for (const cartItem of cartItems) {
+          if (cartItem.productId === parentId && cartItem.variantId === variant.id) continue;
+          const duplicate = await tx.cartItem.findFirst({
+            where: {
+              cartId: cartItem.cartId,
+              productId: parentId,
+              variantId: variant.id,
+              NOT: { id: cartItem.id },
+            },
+          });
+          if (duplicate) {
+            await tx.cartItem.update({
+              where: { id: duplicate.id },
+              data: { quantity: duplicate.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({
+              where: { id: cartItem.id },
+              data: { productId: parentId, variantId: variant.id },
+            });
+          }
+        }
+      }
+
+      // Wishlist has a unique (wishlistId, productId) pair, so avoid duplicates.
+      for (const product of selected) {
+        if (product.id === parentId) continue;
+        const wishlistItems = await tx.wishlistItem.findMany({ where: { productId: product.id } });
+        for (const item of wishlistItems) {
+          const duplicate = await tx.wishlistItem.findFirst({
+            where: { wishlistId: item.wishlistId, productId: parentId },
+          });
+          if (duplicate) {
+            await tx.wishlistItem.delete({ where: { id: item.id } });
+          } else {
+            await tx.wishlistItem.update({
+              where: { id: item.id },
+              data: { productId: parentId },
+            });
+          }
+        }
+      }
+
+      // Repoint product availability requests while retaining their variant IDs.
+      for (const product of selected) {
+        await tx.productRequest.updateMany({
+          where: { productId: product.id },
+          data: {
+            productId: parentId,
+            variantId: { set: variantByProductId.get(String(product.id))!.id },
+          },
+        });
+      }
+
+      // Keep historical order item productIds unchanged. Their variant IDs still
+      // resolve to the retained variant; archived source products remain available
+      // for old order details and reports.
+      await tx.product.update({
+        where: { id: parentId },
+        data: {
+          hasVariants: true,
+          basePrice: minBasePrice,
+          sellingPrice: minSellingPrice,
+        },
+      });
+      const sourceIds = ids.filter((id) => id !== parentId);
+      if (sourceIds.length) {
+        await tx.product.updateMany({
+          where: { id: { in: sourceIds } },
+          data: { isActive: false },
+        });
+      }
+
+      const result = await tx.product.findUnique({
+        where: { id: parentId },
+        include: {
+          category: true,
+          specifications: true,
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
+          stock: true,
+          variants: {
+            include: {
+              media: { where: { isActive: true }, orderBy: { order: "asc" } },
+              stock: true,
+            },
+            orderBy: { id: "asc" },
+          },
+        },
+      });
+      return {
+        product: result,
+        archivedProductIds: sourceIds.map(String),
+        variantsCreated: selected.length,
+      };
+    }, { timeout: 30000 });
+  }
+
   private generateSKU(name: string): string {
     const slug = SlugUtil.generateSlug(name).substring(0, 10).toUpperCase();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
