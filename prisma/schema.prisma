@@ -1273,3 +1273,16 @@ model SeoMeta {
   @@index([pageType])
   @@map("seo_meta")
 }
+
+
+// Runtime-managed image compression configuration; values are read on each upload.
+model ImageCompressionSetting {
+  id                   BigInt   @id @default(autoincrement())
+  uploadType           String   @unique
+  imgCompressionEnabled Boolean  @default(true)
+  imgQuality           Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("image_compression_settings")
+}
