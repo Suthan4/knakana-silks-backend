@@ -199,8 +199,13 @@ export class S3UploadService {
       stream: undefined as any,
     } as Express.Multer.File, folder, uploadType);
 
-    // Remove staging bytes only after the final object has been written.
-    await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
+    // The permanent object is already committed. Staging cleanup is best-effort:
+    // do not report failure and encourage duplicate retries if deletion is delayed.
+    try {
+      await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
+    } catch (cleanupError) {
+      console.warn("Final image stored, but staging cleanup failed; lifecycle expiry will clean it up.", cleanupError);
+    }
     return result;
   }
 
