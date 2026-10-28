@@ -6,6 +6,8 @@ import {
   CreateBucketCommand,
 } from "@aws-sdk/client-s3";
 
+import { fileTypeFromBuffer } from "file-type";
+import { getPrismaClient } from "@/lib/database/prisma.js";
 import {
   KankanaImageOptimizer,
   ImageOptimizationError,
@@ -33,6 +35,7 @@ export interface S3UploadFileResult {
 export class S3UploadService {
   private s3Client: S3Client;
   private bucket: string;
+  private readonly prisma = getPrismaClient();
 
   constructor() {
     const isProd =
@@ -112,29 +115,48 @@ export class S3UploadService {
           folder
         ) as AssetCategory;
 
-        console.log(
-          `🖼️  Image detected (${(file.size / 1024).toFixed(1)} KB) — optimising as "${assetCategory}"…`
-        );
+        const setting = await this.prisma.imageCompressionSetting.findUnique({
+          where: { uploadType: assetCategory },
+        }).catch(() => null);
+        const defaultQuality = assetCategory === "category" || assetCategory === "banner" ? 85 : 70;
+        const compressionEnabled = setting?.imgCompressionEnabled ?? true;
+        const quality = setting?.imgQuality ?? defaultQuality;
 
-        // Full optimisation pipeline — throws ImageOptimizationError on failure
-        const result = await KankanaImageOptimizer.optimize(
-          file.buffer,
-          assetCategory
-        );
-
-        // Always store optimised images with a .webp key preserving original slug
-        const key = this.generateKey(file.originalname || "optimized", folder, ".webp");
-
-        await this.s3Client.send(
-          new PutObjectCommand({
+        if (!compressionEnabled) {
+          // Validate the actual bytes, but never pass them through Sharp or rewrite them.
+          const detected = await fileTypeFromBuffer(file.buffer);
+          const allowed = new Set(["image/jpeg", "image/png", "image/webp", "image/tiff", "image/avif"]);
+          if (!detected || !allowed.has(detected.mime)) {
+            throw new ImageOptimizationError("INVALID_FILE_TYPE", "The uploaded file is not a supported, valid image.", 422);
+          }
+          const key = this.generateKey(file.originalname || "image", folder);
+          await this.s3Client.send(new PutObjectCommand({
             Bucket: this.bucket,
             Key: key,
-            Body: result.buffer,
-            ContentType: "image/webp",
-            ContentLength: result.size,
+            Body: file.buffer,
+            ContentType: detected.mime,
+            ContentLength: file.buffer.length,
             CacheControl: "public, max-age=31536000, immutable",
-          })
+          }));
+          const url = buildUrl(key);
+          return { url, key, size: file.buffer.length, format: detected.ext };
+        }
+
+        console.log(
+          `🖼️  Image detected (${(file.size / 1024).toFixed(1)} KB) — optimising as "${assetCategory}" at quality ${quality}…`
         );
+
+        const result = await KankanaImageOptimizer.optimize(file.buffer, assetCategory, quality);
+        const key = this.generateKey(file.originalname || "optimized", folder, ".webp");
+
+        await this.s3Client.send(new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: result.buffer,
+          ContentType: "image/webp",
+          ContentLength: result.size,
+          CacheControl: "public, max-age=31536000, immutable",
+        }));
 
         const url = buildUrl(key);
         console.log(
