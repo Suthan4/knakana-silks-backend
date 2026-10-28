@@ -257,6 +257,8 @@ export class KankanaImageOptimizer {
       .toBuffer();
 
     const finalSize = finalBuffer.length;
+    const finalMetadata = await sharp(finalBuffer).metadata();
+    const exportQuality = finalQuality;
 
     // ── STEP 6: Deep Security Verification of Output WebP Magic Bytes ───────
     const finalFileType = await fileTypeFromBuffer(finalBuffer);
