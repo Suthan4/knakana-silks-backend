@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "prebuild": "prisma generate",
-    "build": "tsc && tsc-alias",
+    "build": "node --max-old-space-size=2560 ./node_modules/typescript/bin/tsc && tsc-alias",
     "test": "cross-env NODE_ENV=test tsx --test src/modules/product/application/bulk/__tests__/*.test.ts",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
