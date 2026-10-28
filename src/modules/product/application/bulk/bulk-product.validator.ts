@@ -888,21 +888,24 @@ export class BulkProductValidator {
     if (allSkusToCheck.length > 0) {
       const [existingProductsWithSku, existingVariantsWithSku] = await Promise.all([
         prisma.product.findMany({
-          where: { sku: { in: allSkusToCheck } },
+          // SKU uniqueness is treated case-insensitively by bulk validation.
+          // Match that rule in the database query too; a plain "in" query on
+          // PostgreSQL can miss an existing SKU with different letter casing.
+          where: { sku: { in: allSkusToCheck.map((sku) => sku.trim()), mode: "insensitive" } },
           select: { id: true, sku: true, name: true },
         }),
         prisma.productVariant.findMany({
-          where: { sku: { in: allSkusToCheck } },
-          select: { id: true, sku: true, product: { select: { name: true } } },
+          where: { sku: { in: allSkusToCheck.map((sku) => sku.trim()), mode: "insensitive" } },
+          select: { id: true, sku: true, productId: true, product: { select: { name: true } } },
         }),
       ]);
 
       const conflictSkuMap = new Map<string, string>();
       for (const ep of existingProductsWithSku) {
-        conflictSkuMap.set(ep.sku.toLowerCase(), `Product "${ep.name}"`);
+        conflictSkuMap.set(ep.sku.trim().toLowerCase(), `Product "${ep.name}"`);
       }
       for (const ev of existingVariantsWithSku) {
-        conflictSkuMap.set(ev.sku.toLowerCase(), `Variant of "${ev.product.name}"`);
+        conflictSkuMap.set(ev.sku.trim().toLowerCase(), `Variant of "${ev.product.name}"`);
       }
 
       for (const p of productMap.values()) {
