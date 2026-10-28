@@ -35,11 +35,8 @@ const ALLOWED_VIDEO_MIMES = new Set([
 // ── Multer configuration ─────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    // 60 MB raw payload limit (images are expected ≤ ~20–30 MB originals;
-    // 60 MB leaves plenty of headroom for large banner TIFFs or HEICs)
-    fileSize: 60 * 1024 * 1024,
-  },
+  // No application-level per-file byte limit for now. Actual limits may still
+  // apply at the reverse proxy, runtime memory, or object-storage layer.
   fileFilter: (_req, file, cb) => {
     // Validate against the declared MIME type — NOT the filename extension.
     // Extension-based checks are trivially bypassed; MIME is checked again
@@ -62,8 +59,8 @@ const upload = multer({
 });
 
 /**
- * Higher-order middleware wrapping Multer to trap payload size limits
- * and MIME rejection errors cleanly into 422/400 JSON responses.
+ * Higher-order middleware wrapping Multer to handle MIME rejection and other
+ * multipart parsing errors cleanly. No explicit per-file size cap is configured.
  */
 const handleUpload = (uploadMiddleware: any) => {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -71,17 +68,9 @@ const handleUpload = (uploadMiddleware: any) => {
       if (!err) return next();
 
       if (err instanceof multer.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return res.status(422).json({
-            success: false,
-            code: "SIZE_POLICY_VIOLATION",
-            error: "Raw file payload exceeds the maximum allowable limit of 60 MB.",
-            details: { limitBytes: 60 * 1024 * 1024 },
-          });
-        }
         return res.status(400).json({
           success: false,
-          code: "INVALID_FILE_TYPE",
+          code: "MULTIPART_UPLOAD_ERROR",
           error: `Multer upload error: ${err.message}`,
         });
       }
