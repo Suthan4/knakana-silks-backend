@@ -616,15 +616,35 @@ export class ProductService {
         if (data.variants !== undefined) {
           const matchedVariantIds = new Set<string>();
           const existingVariants = product.variants || [];
+          const variantSignature = (variant: any): string => {
+            const attributes = variant.attributes && typeof variant.attributes === "object"
+              ? Object.fromEntries(Object.entries(variant.attributes).sort(([a], [b]) => a.localeCompare(b)))
+              : {};
+            return JSON.stringify({
+              size: String(variant.size ?? attributes.size ?? attributes.Size ?? "").trim().toLowerCase(),
+              color: String(variant.color ?? attributes.color ?? attributes.Color ?? "").trim().toLowerCase(),
+              fabric: String(variant.fabric ?? attributes.fabric ?? attributes.Fabric ?? "").trim().toLowerCase(),
+              attributes,
+            });
+          };
 
           for (const variant of data.variants) {
             const variantSku = variant.sku || this.generateSKU(
               `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${variant.fabric || ""}-${JSON.stringify(variant.attributes || {})}`
             );
-            const existingVariant = existingVariants.find((candidate: any) => {
-              if (variant.id && String(candidate.id) === String(variant.id)) return true;
-              return Boolean(variantSku && candidate.sku === variantSku);
-            });
+            const unmatchedVariants = existingVariants.filter(
+              (candidate: any) => !matchedVariantIds.has(String(candidate.id)),
+            );
+            const existingVariant =
+              unmatchedVariants.find((candidate: any) =>
+                variant.id && String(candidate.id) === String(variant.id),
+              ) ||
+              unmatchedVariants.find((candidate: any) =>
+                Boolean(variantSku && candidate.sku === variantSku),
+              ) ||
+              unmatchedVariants.find((candidate: any) =>
+                variantSignature(candidate) === variantSignature(variant),
+              );
 
             let vVolWeight: number | undefined;
             if (variant.weight && variant.length && variant.breadth && variant.height) {
