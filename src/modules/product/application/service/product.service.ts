@@ -1808,7 +1808,9 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
             },
           });
         }
-        if (product.media.length) {
+        // Keep the retained parent's product-level media active for existing
+        // catalog cards/SEO; only archive media on source products.
+        if (product.id !== parentId && product.media.length) {
           await tx.productMedia.updateMany({
             where: { productId: product.id },
             data: { isActive: false },
