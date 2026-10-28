@@ -11,7 +11,7 @@ import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
 import { S3UploadService } from "@/config/s3-upload.js";
 import type { ImageMatchResult, MatchedEntry } from "./drive-image-matcher.service.js";
 
-export type JobStatus = "pending" | "processing" | "completed" | "failed";
+export type JobStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 
 export interface BulkImportJobItemResult {
   productGroupId: string;
@@ -62,6 +62,7 @@ export interface BulkImportJob {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  cancelRequested?: boolean;
 }
 
 const JOB_TTL_SECONDS = 86400; // 24 hours
@@ -389,6 +390,51 @@ export class BulkImportJobService {
     return job;
   }
 
+  /** Request cancellation for a job owned by the current admin. In-flight image
+   * batches finish safely; the processor stops before starting the next batch/product. */
+  public async cancelJob(jobId: string, userId: string): Promise<BulkImportJob> {
+    const authorized = await this.getJob(jobId, userId);
+    if (authorized.status === "completed" || authorized.status === "failed" || authorized.status === "cancelled") {
+      return authorized;
+    }
+    const live = this.memoryStore.get(jobId) || authorized;
+    live.cancelRequested = true;
+    live.error = "Cancellation requested. The current upload or product operation will finish before the job stops.";
+    await this.saveJob(live);
+    return live;
+  }
+
+  private async isCancellationRequested(jobId: string): Promise<boolean> {
+    const live = this.memoryStore.get(jobId);
+    if (live?.cancelRequested) return true;
+    const r = this.getRedis();
+    if (this.isRedisReady() && r) {
+      try {
+        const raw = await r.get(this.getJobKey(jobId));
+        if (raw) return Boolean((JSON.parse(raw) as BulkImportJob).cancelRequested);
+      } catch (err: any) {
+        console.warn("Unable to check bulk cancellation state:", err.message);
+      }
+    }
+    return false;
+  }
+
+  private async finishCancelledJob(job: BulkImportJob): Promise<void> {
+    job.status = "cancelled";
+    job.stage = "failed";
+    job.currentFile = undefined;
+    job.completedAt = new Date().toISOString();
+    job.error = "Import cancelled by an administrator. Completed uploads and successfully imported products were kept; review the draft and retry remaining items when ready.";
+    await this.saveJob(job);
+    if (job.draftId) {
+      try {
+        await this.draftRepo.update(job.draftId, { status: PrismaDraftStatus.DRAFT });
+      } catch (err: any) {
+        console.warn("Could not restore draft after cancellation:", err.message);
+      }
+    }
+  }
+
   /**
    * Start a new background import job
    */
@@ -543,6 +589,7 @@ export class BulkImportJobService {
     }
 
     for (let offset = 0; offset < entriesToUpload.length; offset += batchSize) {
+      if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
       const batch = entriesToUpload.slice(offset, offset + batchSize);
       rawJob.currentFile = batch.map((entry) => entry.file.name).join(", ");
       await this.saveJob(rawJob);
@@ -763,6 +810,7 @@ export class BulkImportJobService {
     await this.saveJob(rawJob);
 
     for (let i = 0; i < products.length; i++) {
+      if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
       const product = products[i];
       rawJob.currentFile = product.name;
       await this.saveJob(rawJob);
