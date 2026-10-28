@@ -1136,7 +1136,39 @@ export class ProductService {
     if (!product) {
       throw new NotFoundError("Product not found");
     }
-    return product;
+
+    // Storefront compatibility: legacy fields (color/size/fabric) and dynamic
+    // attributes can describe the same option. Normalize attribute names and
+    // suppress duplicate representations so shoppers see each option only once.
+    const variants = (product as any).variants;
+    if (!Array.isArray(variants)) return product;
+
+    const normalizedVariants = variants.map((variant: any) => {
+      const raw = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+        ? variant.attributes as Record<string, unknown>
+        : {};
+      const attributes: Record<string, unknown> = {};
+      const entries = Object.entries(raw).sort(([left], [right]) => {
+        const leftKey = left.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const rightKey = right.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const leftCanonical = left === leftKey ? 0 : 1;
+        const rightCanonical = right === rightKey ? 0 : 1;
+        return leftCanonical - rightCanonical;
+      });
+
+      for (const [rawKey, value] of entries) {
+        const key = rawKey.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+        if (!key || key === "default") continue;
+        if (key === "color" && typeof variant.color === "string" && variant.color.trim()) continue;
+        if (key === "size" && typeof variant.size === "string" && variant.size.trim()) continue;
+        if (key === "fabric" && typeof variant.fabric === "string" && variant.fabric.trim()) continue;
+        if (!(key in attributes)) attributes[key] = value;
+      }
+
+      return { ...variant, attributes: Object.keys(attributes).length ? attributes : null };
+    });
+
+    return { ...product, variants: normalizedVariants };
   }
 
   async getProducts(params: {
@@ -1705,7 +1737,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
    */
   async consolidateSimpleProducts(data: {
     parentProductId: string;
-    attributeName: "color" | "size" | "fabric" | "style";
+    attributeName: string;
     products: Array<{ productId: string; attributeValue: string }>;
   }) {
     const parentId = BigInt(data.parentProductId);
@@ -1772,7 +1804,16 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         const variant = variantByProductId.get(String(product.id))!;
         const item = itemById.get(String(product.id))!;
         const attributeValue = item.attributeValue.trim();
-        const attributes = { [data.attributeName]: attributeValue };
+        const rawAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? (variant.attributes as Record<string, unknown>)
+          : {};
+        const attributes: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(rawAttributes)) {
+          const normalizedKey = key.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+          if (!normalizedKey || normalizedKey === "default" || normalizedKey === data.attributeName) continue;
+          attributes[normalizedKey] = value;
+        }
+        attributes[data.attributeName] = attributeValue;
         await tx.productVariant.update({
           where: { id: variant.id },
           data: {
@@ -1992,7 +2033,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
   async addSimpleProductAsVariant(data: {
     parentProductId: string;
     sourceProductId: string;
-    attributeName: "color" | "size" | "fabric" | "style";
+    attributeName: string;
     attributeValue: string;
   }) {
     const parentId = BigInt(data.parentProductId);
@@ -2193,9 +2234,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       }
       const variant = parent.variants.find((item) => item.id === variantId);
       if (!variant) throw new NotFoundError("The selected variant does not belong to this variable product");
-      if (parent.variants.length <= 2) {
-        throw new ValidationError("At least three variants are required. Extraction must leave at least two variants in the original variable product.");
-      }
+
 
       const slug = SlugUtil.generateSlug(name);
       const slugConflict = await tx.product.findUnique({ where: { slug } });
@@ -2265,13 +2304,81 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       await tx.productRequest.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
 
       const remaining = parent.variants.filter((item) => item.id !== variantId);
-      await tx.product.update({
-        where: { id: parentId },
-        data: {
-          basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
-          sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
-        },
-      });
+      if (remaining.length > 0) {
+        // If one variant remains, the original product becomes a normal simple product.
+        // This lets admins extract from a two-variant product without leaving a broken catalog item.
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            hasVariants: remaining.length > 1,
+            basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+            sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+          },
+        });
+        if (remaining.length === 1) {
+          await tx.stock.updateMany({
+            where: { productId: parentId, variantId: null },
+            data: { variantId: remaining[0].id },
+          });
+        }
+      } else {
+        // The selected variant was the only one. Keep the old product record for
+        // historical references, but archive it so the new simple product is the live listing.
+        for (const stock of await tx.stock.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.stock.findFirst({
+            where: { productId: newProduct.id, variantId, warehouseId: stock.warehouseId, NOT: { id: stock.id } },
+          });
+          if (target) {
+            await tx.stockAdjustment.updateMany({ where: { stockId: stock.id }, data: { stockId: target.id } });
+            await tx.stock.update({
+              where: { id: target.id },
+              data: {
+                quantity: target.quantity + stock.quantity,
+                lowStockThreshold: Math.min(target.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({ where: { id: stock.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
+        for (const cartItem of await tx.cartItem.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.cartItem.findFirst({
+            where: { cartId: cartItem.cartId, productId: newProduct.id, variantId, NOT: { id: cartItem.id } },
+          });
+          if (target) {
+            await tx.cartItem.update({
+              where: { id: target.id },
+              data: { quantity: target.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({ where: { id: cartItem.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
+        await tx.productRequest.updateMany({
+          where: { productId: parentId, variantId: null },
+          data: { productId: newProduct.id, variantId },
+        });
+        await tx.review.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        await tx.productView.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        for (const wishlistItem of await tx.wishlistItem.findMany({ where: { productId: parentId } })) {
+          const duplicate = await tx.wishlistItem.findFirst({
+            where: { wishlistId: wishlistItem.wishlistId, productId: newProduct.id, NOT: { id: wishlistItem.id } },
+          });
+          if (duplicate) await tx.wishlistItem.delete({ where: { id: wishlistItem.id } });
+          else await tx.wishlistItem.update({ where: { id: wishlistItem.id }, data: { productId: newProduct.id } });
+        }
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            isActive: false,
+            hasVariants: false,
+            homeSections: { set: [] },
+            coupons: { set: [] },
+          },
+        });
+      }
 
       return {
         product: await tx.product.findUnique({
