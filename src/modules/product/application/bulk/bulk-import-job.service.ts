@@ -452,6 +452,23 @@ export class BulkImportJobService {
       throw new ValidationError("No products provided for bulk import job");
     }
 
+    // This is the final server-side safety gate shared by draft imports, direct
+    // bulk jobs, and retries. Validate against live catalog state before the
+    // background worker can download Drive files or upload anything to S3.
+    const preflight = await this.bulkProductService.validateParsedProducts(products);
+    const invalid = preflight.products.filter((product) => product.isValid === false);
+    if (invalid.length > 0) {
+      const details = invalid.slice(0, 4).map((product) => {
+        const messages = (product.errors || [])
+          .filter((error: any) => error.severity === "error")
+          .map((error: any) => error.message);
+        return `${product.name || product.productGroupId}: ${messages.join("; ") || "Please correct this product's validation errors"}`;
+      });
+      throw new ValidationError(
+        `Import paused before image upload: ${invalid.length} product(s) need correction. ${details.join(" | ")}`
+      );
+    }
+
     const jobId = uuidv4();
     const now = new Date().toISOString();
     const matchedCount = Array.isArray(imageMatches?.matched)
