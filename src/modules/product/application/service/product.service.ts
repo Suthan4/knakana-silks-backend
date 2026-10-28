@@ -1705,7 +1705,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
    */
   async consolidateSimpleProducts(data: {
     parentProductId: string;
-    attributeName: "color" | "size" | "fabric" | "style";
+    attributeName: string;
     products: Array<{ productId: string; attributeValue: string }>;
   }) {
     const parentId = BigInt(data.parentProductId);
@@ -1772,7 +1772,11 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         const variant = variantByProductId.get(String(product.id))!;
         const item = itemById.get(String(product.id))!;
         const attributeValue = item.attributeValue.trim();
-        const attributes = { [data.attributeName]: attributeValue };
+        const existingAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? { ...(variant.attributes as Record<string, unknown>) }
+          : {};
+        delete existingAttributes.default;
+        const attributes = { ...existingAttributes, [data.attributeName]: attributeValue };
         await tx.productVariant.update({
           where: { id: variant.id },
           data: {
@@ -1992,7 +1996,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
   async addSimpleProductAsVariant(data: {
     parentProductId: string;
     sourceProductId: string;
-    attributeName: "color" | "size" | "fabric" | "style";
+    attributeName: string;
     attributeValue: string;
   }) {
     const parentId = BigInt(data.parentProductId);
@@ -2193,9 +2197,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       }
       const variant = parent.variants.find((item) => item.id === variantId);
       if (!variant) throw new NotFoundError("The selected variant does not belong to this variable product");
-      if (parent.variants.length <= 2) {
-        throw new ValidationError("At least three variants are required. Extraction must leave at least two variants in the original variable product.");
-      }
+
 
       const slug = SlugUtil.generateSlug(name);
       const slugConflict = await tx.product.findUnique({ where: { slug } });
@@ -2265,13 +2267,51 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       await tx.productRequest.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
 
       const remaining = parent.variants.filter((item) => item.id !== variantId);
-      await tx.product.update({
-        where: { id: parentId },
-        data: {
-          basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
-          sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
-        },
-      });
+      if (remaining.length > 0) {
+        // If one variant remains, the original product becomes a normal simple product.
+        // This lets admins extract from a two-variant product without leaving a broken catalog item.
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            hasVariants: remaining.length > 1,
+            basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+            sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+          },
+        });
+        if (remaining.length === 1) {
+          await tx.stock.updateMany({
+            where: { productId: parentId, variantId: null },
+            data: { variantId: remaining[0].id },
+          });
+        }
+      } else {
+        // The selected variant was the only one. Keep the old product record for
+        // historical references, but archive it so the new simple product is the live listing.
+        await tx.stock.updateMany({
+          where: { productId: parentId, variantId: null },
+          data: { productId: newProduct.id, variantId },
+        });
+        await tx.cartItem.updateMany({
+          where: { productId: parentId, variantId: null },
+          data: { productId: newProduct.id, variantId },
+        });
+        await tx.productRequest.updateMany({
+          where: { productId: parentId, variantId: null },
+          data: { productId: newProduct.id, variantId },
+        });
+        await tx.review.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        await tx.productView.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        await tx.wishlistItem.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            isActive: false,
+            hasVariants: false,
+            homeSections: { set: [] },
+            coupons: { set: [] },
+          },
+        });
+      }
 
       return {
         product: await tx.product.findUnique({
