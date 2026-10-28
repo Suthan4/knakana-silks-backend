@@ -1772,11 +1772,16 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         const variant = variantByProductId.get(String(product.id))!;
         const item = itemById.get(String(product.id))!;
         const attributeValue = item.attributeValue.trim();
-        const existingAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
-          ? { ...(variant.attributes as Record<string, unknown>) }
+        const rawAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? (variant.attributes as Record<string, unknown>)
           : {};
-        delete existingAttributes.default;
-        const attributes = { ...existingAttributes, [data.attributeName]: attributeValue };
+        const attributes: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(rawAttributes)) {
+          const normalizedKey = key.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+          if (!normalizedKey || normalizedKey === "default" || normalizedKey === data.attributeName) continue;
+          attributes[normalizedKey] = value;
+        }
+        attributes[data.attributeName] = attributeValue;
         await tx.productVariant.update({
           where: { id: variant.id },
           data: {
@@ -2301,7 +2306,13 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         });
         await tx.review.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
         await tx.productView.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
-        await tx.wishlistItem.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        for (const wishlistItem of await tx.wishlistItem.findMany({ where: { productId: parentId } })) {
+          const duplicate = await tx.wishlistItem.findFirst({
+            where: { wishlistId: wishlistItem.wishlistId, productId: newProduct.id, NOT: { id: wishlistItem.id } },
+          });
+          if (duplicate) await tx.wishlistItem.delete({ where: { id: wishlistItem.id } });
+          else await tx.wishlistItem.update({ where: { id: wishlistItem.id }, data: { productId: newProduct.id } });
+        }
         await tx.product.update({
           where: { id: parentId },
           data: {
