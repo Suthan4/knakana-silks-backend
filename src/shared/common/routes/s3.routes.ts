@@ -1,58 +1,157 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { CommonController } from "../controller/s3.controller.js";
+import { ImageOptimizationError } from "../services/image-optimizer.service.js";
+import { authenticate, authorize } from "@/shared/middleware/auth.middleware.js";
+import { UserRole } from "@/generated/prisma/enums.js";
 
 const router = express.Router();
 const commonController = new CommonController();
-const jsonParser = express.json(); // ✅ Add this
+const jsonParser = express.json();
 
+// ── Accepted MIME types ──────────────────────────────────────────────────────
+// Images: all common raster formats (optimiser will convert everything to WebP)
+// Videos: passthrough, no optimisation
+const ALLOWED_IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/tiff",
+  "image/avif",
+  "image/heic",
+  "image/heif",
+]);
 
-// Configure multer for memory storage
+const ALLOWED_VIDEO_MIMES = new Set([
+  "video/mp4",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/webm",
+]);
+
+// ── Multer configuration ─────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize:  100 * 1024 * 1024, // 100 MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Accept images and videos
-    const allowedTypes = /jpeg|jpg|png|gif|webp|mp4|mov|avi|mkv|webm/;
-    const extname = allowedTypes.test(file.originalname.toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-
-    if (mimetype && extname) {
-      return cb(null, true);
+  // No application-level per-file byte limit for now. Actual limits may still
+  // apply at the reverse proxy, runtime memory, or object-storage layer.
+  fileFilter: (_req, file, cb) => {
+    // Validate against the declared MIME type — NOT the filename extension.
+    // Extension-based checks are trivially bypassed; MIME is checked again
+    // via magic bytes inside the optimiser pipeline for images.
+    if (
+      ALLOWED_IMAGE_MIMES.has(file.mimetype) ||
+      ALLOWED_VIDEO_MIMES.has(file.mimetype)
+    ) {
+      cb(null, true);
     } else {
-      cb(new Error("Only images and videos are allowed!"));
+      cb(
+        new Error(
+          `Unsupported file type "${file.mimetype}". ` +
+            `Accepted image types: jpeg, png, webp, gif, tiff, avif, heic. ` +
+            `Accepted video types: mp4, mov, avi, mkv, webm.`
+        )
+      );
     }
   },
 });
 
 /**
- * Upload single file
- * POST /api/upload
+ * Higher-order middleware wrapping Multer to handle MIME rejection and other
+ * multipart parsing errors cleanly. No explicit per-file size cap is configured.
  */
-router.post("/upload", upload.single("file"), commonController.uploadFile);
+const handleUpload = (uploadMiddleware: any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    uploadMiddleware(req, res, (err: any) => {
+      if (!err) return next();
+
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({
+          success: false,
+          code: "MULTIPART_UPLOAD_ERROR",
+          error: `Multer upload error: ${err.message}`,
+        });
+      }
+
+      if (err instanceof ImageOptimizationError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          code: err.code,
+          error: err.message,
+          ...(err.details ? { details: err.details } : {}),
+        });
+      }
+
+      return res.status(422).json({
+        success: false,
+        code: "INVALID_FILE_TYPE",
+        error: err.message || "Invalid file format or unsupported MIME type.",
+      });
+    });
+  };
+};
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+
+// ── Direct-to-S3 staged image uploads ───────────────────────────────────────
+// These endpoints are admin-only. Staging objects are never returned as public
+// media URLs; finalize validates ownership and runs the normal optimizer first.
+router.post(
+  "/upload/presigned-url",
+  jsonParser,
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  commonController.createStagedUpload
+);
+
+router.post(
+  "/upload/finalize",
+  jsonParser,
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  commonController.finalizeStagedUpload
+);
+
+
 
 /**
- * Upload multiple files
+ * Upload single file
+ * POST /api/upload
+ * Body: multipart/form-data  — field: "file"
+ * Optional body field: folder (e.g. "products", "banners", "categories")
+ */
+router.post(
+  "/upload",
+  handleUpload(upload.single("file")),
+  commonController.uploadFile
+);
+
+/**
+ * Upload multiple files (up to 10 per request)
  * POST /api/upload/multiple
+ * Body: multipart/form-data  — field: "files" (repeatable)
+ * Optional body field: folder
  */
 router.post(
   "/upload/multiple",
-  upload.array("files", 10),
+  handleUpload(upload.array("files", 10)),
   commonController.uploadFiles
 );
 
 /**
  * Delete single file
  * DELETE /api/upload
+ * Body: { url: "https://…/key" } OR { key: "folder/file.webp" }
  */
-router.delete("/upload",jsonParser, commonController.deleteFile);
+router.delete("/upload", jsonParser, commonController.deleteFile);
 
 /**
  * Delete multiple files
  * DELETE /api/upload/multiple
+ * Body: { urls: ["url1", "url2"] } OR { keys: ["key1", "key2"] }
  */
-router.delete("/upload/multiple",jsonParser, commonController.deleteFiles);
+router.delete("/upload/multiple", jsonParser, commonController.deleteFiles);
 
 export default router;

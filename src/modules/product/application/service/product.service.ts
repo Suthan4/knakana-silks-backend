@@ -19,6 +19,42 @@ import {
 } from "../product.dto.js";
 import { S3UploadService } from "@/config/s3-upload.js";
 
+function isTemporaryGoogleMediaUrl(value?: string): boolean {
+  return /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(
+    value || "",
+  );
+}
+
+/**
+ * A Drive proxy is only a preview endpoint; it must never be stored as a
+ * product's primary image URL/thumbnail. The browser may use it in memory,
+ * but manual Product CRUD must receive permanent uploaded media URLs.
+ */
+function assertNoTemporaryGoogleProductMedia(data: {
+  media?: any[];
+  variants?: any[];
+}): void {
+  const collections: Array<{ where: string; media: any }> = [
+    ...(data.media || []).map((media) => ({ where: "product media", media })),
+    ...((data.variants || []).flatMap((variant, index) =>
+      (variant.media || []).map((media: any) => ({
+        where: `variant ${variant.sku || index + 1} media`,
+        media,
+      })),
+    )),
+  ];
+
+  const unsafe = collections.find(({ media }) =>
+    isTemporaryGoogleMediaUrl(media?.url) ||
+    isTemporaryGoogleMediaUrl(media?.thumbnailUrl),
+  );
+  if (unsafe) {
+    throw new ValidationError(
+      `Cannot save ${unsafe.where} that still uses a temporary Google Drive preview URL. Upload the image to permanent storage and submit its returned storage URL first.`,
+    );
+  }
+}
+
 @injectable()
 export class ProductService {
   constructor(
@@ -33,6 +69,7 @@ export class ProductService {
 
   async createProduct(data: CreateProductDTO): Promise<Product | null> {
     try {
+      assertNoTemporaryGoogleProductMedia(data);
       console.log("🔵 ProductService.createProduct called");
 
       return await this.prisma.$transaction(async (tx) => {
@@ -316,6 +353,7 @@ export class ProductService {
   }
 
   async updateProduct(id: string, data: UpdateProductDTO): Promise<Product> {
+    assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
 
     return (await this.prisma.$transaction(async (tx) => {
@@ -402,15 +440,25 @@ export class ProductService {
         }
       }
 
-      // Handle media
+      // Synchronize product media without soft-deleting/recreating every row.
+      // Existing media is retained by stable URL/key identity; removed references
+      // are soft-deleted, and genuinely new/replaced images get new rows.
       if (data.media !== undefined) {
-        if (product.media?.length) {
-          for (const m of product.media) {
-            await this.productRepository.deleteMedia(m.id, tx);
-          }
-        }
-        for (const mediaItem of data.media) {
-          await this.productRepository.addMedia(productId, {
+        const existingMedia = product.media || [];
+        const incoming = data.media;
+        const retainedIds = new Set<string>();
+        const usedExistingIds = new Set<string>();
+
+        for (const mediaItem of incoming) {
+          const match = existingMedia.find((existing: any) => {
+            const id = String(existing.id);
+            if (usedExistingIds.has(id)) return false;
+            const sameKey = Boolean(mediaItem.key && existing.key && mediaItem.key === existing.key);
+            const sameUrl = Boolean(mediaItem.url && existing.url === mediaItem.url);
+            return sameKey || sameUrl;
+          });
+
+          const mediaData = {
             type: mediaItem.type || MediaType.IMAGE,
             url: mediaItem.url,
             key: mediaItem.key,
@@ -423,9 +471,24 @@ export class ProductService {
             duration: mediaItem.duration,
             width: mediaItem.width,
             height: mediaItem.height,
-            order: mediaItem.order,
-            isActive: mediaItem.isActive,
-          }, tx);
+            order: mediaItem.order ?? 0,
+            isActive: mediaItem.isActive ?? true,
+          };
+
+          if (match) {
+            const id = String(match.id);
+            usedExistingIds.add(id);
+            retainedIds.add(id);
+            await this.productRepository.updateMedia(match.id, mediaData as any, tx);
+          } else {
+            await this.productRepository.addMedia(productId, mediaData, tx);
+          }
+        }
+
+        for (const existing of existingMedia) {
+          if (!retainedIds.has(String(existing.id)) && !usedExistingIds.has(String(existing.id))) {
+            await this.productRepository.deleteMedia(existing.id, tx);
+          }
         }
       }
 
@@ -548,28 +611,47 @@ export class ProductService {
           );
         }
       } else if (targetIsMulti) {
-        // Remaining Multi-Variant: if variants passed, replace
+        // Synchronize by stable variant id first, then SKU. Do not destroy and
+        // recreate every variant on each edit: carts/orders/stock/media refer to IDs.
         if (data.variants !== undefined) {
-          if (product.variants?.length) {
-            for (const v of product.variants) {
-              await this.productRepository.deleteVariant(v.id, tx);
-            }
-          }
+          const matchedVariantIds = new Set<string>();
+          const existingVariants = product.variants || [];
+          const variantSignature = (variant: any): string => {
+            const attributes = variant.attributes && typeof variant.attributes === "object"
+              ? Object.fromEntries(Object.entries(variant.attributes).sort(([a], [b]) => a.localeCompare(b)))
+              : {};
+            return JSON.stringify({
+              size: String(variant.size ?? attributes.size ?? attributes.Size ?? "").trim().toLowerCase(),
+              color: String(variant.color ?? attributes.color ?? attributes.Color ?? "").trim().toLowerCase(),
+              fabric: String(variant.fabric ?? attributes.fabric ?? attributes.Fabric ?? "").trim().toLowerCase(),
+              attributes,
+            });
+          };
 
           for (const variant of data.variants) {
             const variantSku = variant.sku || this.generateSKU(
-              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${
-                variant.fabric || ""
-              }-${JSON.stringify(variant.attributes || {})}`
+              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${variant.fabric || ""}-${JSON.stringify(variant.attributes || {})}`
             );
+            const unmatchedVariants = existingVariants.filter(
+              (candidate: any) => !matchedVariantIds.has(String(candidate.id)),
+            );
+            const existingVariant =
+              unmatchedVariants.find((candidate: any) =>
+                variant.id && String(candidate.id) === String(variant.id),
+              ) ||
+              unmatchedVariants.find((candidate: any) =>
+                Boolean(variantSku && candidate.sku === variantSku),
+              ) ||
+              unmatchedVariants.find((candidate: any) =>
+                variantSignature(candidate) === variantSignature(variant),
+              );
 
             let vVolWeight: number | undefined;
             if (variant.weight && variant.length && variant.breadth && variant.height) {
               vVolWeight = (variant.length * variant.breadth * variant.height) / 5000;
             }
 
-            const createdVariant = await this.productRepository.addVariant({
-              productId,
+            const variantData = {
               attributes: variant.attributes,
               size: variant.size,
               color: variant.color,
@@ -583,11 +665,30 @@ export class ProductService {
               height: variant.height ?? (data.height ?? (product.height ? Number(product.height) : undefined)),
               volumetricWeight: vVolWeight,
               sku: variantSku,
-            }, tx);
+            };
 
-            if (variant.media?.length) {
-              for (const mediaItem of variant.media) {
-                await this.productRepository.addVariantMedia(createdVariant.id, {
+            const savedVariant = existingVariant
+              ? await this.productRepository.updateVariant(existingVariant.id, variantData, tx)
+              : await this.productRepository.addVariant({ productId, ...variantData }, tx);
+            matchedVariantIds.add(String(savedVariant.id));
+
+            // Reconcile variant media by key/URL. Keep unchanged rows and only
+            // soft-delete removed references, preserving order and metadata.
+            if (variant.media !== undefined) {
+              const oldMedia: any[] = existingVariant?.media || [];
+              const matchedMediaIds = new Set<string>();
+              const usedOldMediaIds = new Set<string>();
+
+              for (let mediaIndex = 0; mediaIndex < variant.media.length; mediaIndex++) {
+                const mediaItem = variant.media[mediaIndex];
+                const old = oldMedia.find((item: any) => {
+                  if (usedOldMediaIds.has(String(item.id))) return false;
+                  return Boolean(
+                    (mediaItem.key && item.key && mediaItem.key === item.key) ||
+                    (mediaItem.url && item.url === mediaItem.url)
+                  );
+                });
+                const mediaData = {
                   type: mediaItem.type || MediaType.IMAGE,
                   url: mediaItem.url,
                   key: mediaItem.key,
@@ -600,22 +701,43 @@ export class ProductService {
                   duration: mediaItem.duration,
                   width: mediaItem.width,
                   height: mediaItem.height,
-                  order: mediaItem.order,
-                  isActive: mediaItem.isActive,
-                }, tx);
+                  order: mediaItem.order ?? mediaIndex,
+                  isActive: mediaItem.isActive ?? true,
+                };
+                if (old) {
+                  usedOldMediaIds.add(String(old.id));
+                  matchedMediaIds.add(String(old.id));
+                  await this.productRepository.updateVariantMedia(old.id, mediaData as any, tx);
+                } else {
+                  await this.productRepository.addVariantMedia(savedVariant.id, mediaData, tx);
+                }
+              }
+
+              for (const old of oldMedia) {
+                if (!matchedMediaIds.has(String(old.id)) && !usedOldMediaIds.has(String(old.id))) {
+                  await this.productRepository.deleteVariantMedia(old.id, tx);
+                }
               }
             }
 
             if (variant.stock) {
               await this.productRepository.updateStock(
                 productId,
-                createdVariant.id,
+                savedVariant.id,
                 BigInt(variant.stock.warehouseId),
                 variant.stock.quantity,
                 variant.stock.lowStockThreshold || 10,
                 "Updated variant stock",
                 tx
               );
+            }
+          }
+
+          // Preserve variants that were submitted but matched via SKU/id; remove
+          // only variants explicitly omitted from the submitted replacement list.
+          for (const oldVariant of existingVariants) {
+            if (!matchedVariantIds.has(String(oldVariant.id))) {
+              await this.productRepository.deleteVariant(oldVariant.id, tx);
             }
           }
         }
@@ -672,6 +794,7 @@ export class ProductService {
   }
 
   async patchProduct(id: string, data: PatchProductDTO): Promise<Product> {
+    assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
 
     return (await this.prisma.$transaction(async (tx) => {
@@ -983,8 +1106,9 @@ export class ProductService {
       ...(product.variants?.flatMap((v) => 
         (v as any).media?.map((m: any) => m.url) ?? []
       ) ?? []),
-    ].filter(Boolean);
+    ].filter((url): url is string => Boolean(url) && !isTemporaryGoogleMediaUrl(url));
 
+    // Never treat a Drive proxy / Google thumbnail as an S3 object key.
     // ✅ Delete from S3 (non-fatal — still delete DB record if S3 fails)
     if (allUrls.length > 0) {
       try {
@@ -1012,7 +1136,39 @@ export class ProductService {
     if (!product) {
       throw new NotFoundError("Product not found");
     }
-    return product;
+
+    // Storefront compatibility: legacy fields (color/size/fabric) and dynamic
+    // attributes can describe the same option. Normalize attribute names and
+    // suppress duplicate representations so shoppers see each option only once.
+    const variants = (product as any).variants;
+    if (!Array.isArray(variants)) return product;
+
+    const normalizedVariants = variants.map((variant: any) => {
+      const raw = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+        ? variant.attributes as Record<string, unknown>
+        : {};
+      const attributes: Record<string, unknown> = {};
+      const entries = Object.entries(raw).sort(([left], [right]) => {
+        const leftKey = left.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const rightKey = right.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const leftCanonical = left === leftKey ? 0 : 1;
+        const rightCanonical = right === rightKey ? 0 : 1;
+        return leftCanonical - rightCanonical;
+      });
+
+      for (const [rawKey, value] of entries) {
+        const key = rawKey.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+        if (!key || key === "default") continue;
+        if (key === "color" && typeof variant.color === "string" && variant.color.trim()) continue;
+        if (key === "size" && typeof variant.size === "string" && variant.size.trim()) continue;
+        if (key === "fabric" && typeof variant.fabric === "string" && variant.fabric.trim()) continue;
+        if (!(key in attributes)) attributes[key] = value;
+      }
+
+      return { ...variant, attributes: Object.keys(attributes).length ? attributes : null };
+    });
+
+    return { ...product, variants: normalizedVariants };
   }
 
   async getProducts(params: {
@@ -1212,7 +1368,9 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
   }
 
   const where: Prisma.ProductWhereInput = {
-    // isActive intentionally omitted — show all products
+    // Admin can browse all statuses, or filter explicitly by active/inactive.
+    ...(params.isActive !== undefined ? { isActive: params.isActive } : {}),
+    ...(params.hasVariants !== undefined ? { hasVariants: params.hasVariants } : {}),
     ...(targetCategoryIds?.length && {
       categoryId: { in: targetCategoryIds },
     }),
@@ -1220,6 +1378,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       OR: [
         { name: { contains: params.search, mode: "insensitive" } },
         { description: { contains: params.search, mode: "insensitive" } },
+        { sku: { contains: params.search, mode: "insensitive" } },
       ],
     }),
   };
@@ -1342,6 +1501,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       isActive?: boolean;
     }
   ) {
+    assertNoTemporaryGoogleProductMedia({ media: [data] });
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new NotFoundError("Product not found");
@@ -1395,6 +1555,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       };
     }
   ): Promise<ProductVariant> {
+    assertNoTemporaryGoogleProductMedia({ variants: [{ media: data.media }] });
     const product = await this.productRepository.findById(BigInt(productId));
     if (!product) {
       throw new NotFoundError("Product not found");
@@ -1548,6 +1709,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       isActive?: boolean;
     }
   ) {
+    assertNoTemporaryGoogleProductMedia({ media: [data] });
     const variant = await this.productRepository.findVariantById(
       BigInt(variantId)
     );
@@ -1563,6 +1725,838 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
 
   async deleteVariantMedia(id: string) {
     await this.productRepository.deleteVariantMedia(BigInt(id));
+  }
+
+
+  /**
+   * Consolidate existing simple products into one variable product.
+   *
+   * Existing ProductVariant IDs/SKUs are reused instead of recreating variants.
+   * This preserves variant media, stock-adjustment history, cart links and
+   * historical OrderItem references. Source products are archived, never deleted.
+   */
+  async consolidateSimpleProducts(data: {
+    parentProductId: string;
+    attributeName: string;
+    products: Array<{ productId: string; attributeValue: string }>;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const ids = data.products.map((item) => BigInt(item.productId));
+    if (new Set(ids.map(String)).size !== ids.length) {
+      throw new ValidationError("Each product can only be selected once");
+    }
+    if (!ids.some((id) => id === parentId)) {
+      throw new ValidationError("The parent product must be one of the selected products");
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const selected = await tx.product.findMany({
+        where: { id: { in: ids } },
+        include: {
+          variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+          media: { orderBy: { order: "asc" } },
+          stock: true,
+          specifications: true,
+          homeSections: { select: { id: true } },
+          coupons: { select: { id: true } },
+        },
+      });
+      if (selected.length !== ids.length) {
+        const found = new Set(selected.map((item) => String(item.id)));
+        const missing = data.products.filter((item) => !found.has(item.productId)).map((item) => item.productId);
+        throw new NotFoundError(`Product(s) not found: ${missing.join(", ")}`);
+      }
+
+      const parent = selected.find((product) => product.id === parentId)!;
+      if (!parent.isActive) {
+        throw new ValidationError("Activate the parent product before consolidating variants");
+      }
+      if (selected.some((product) => product.hasVariants)) {
+        throw new ValidationError("Only simple products can be consolidated. Remove any variable product from the selection.");
+      }
+      if (selected.some((product) => !product.isActive)) {
+        throw new ValidationError("Only active simple products can be consolidated. Archived or inactive products cannot be selected.");
+      }
+      if (selected.some((product) => product.categoryId !== parent.categoryId)) {
+        throw new ValidationError("All selected products must belong to the same category");
+      }
+      if (selected.some((product) => product.variants.length !== 1)) {
+        throw new ValidationError("Every selected simple product must have exactly one existing default variant. Resolve missing or duplicate default variants first.");
+      }
+
+      const values = data.products.map((item) => item.attributeValue.trim().toLocaleLowerCase());
+      if (new Set(values).size !== values.length) {
+        throw new ValidationError("Variant values must be unique");
+      }
+
+      const itemById = new Map(data.products.map((item) => [item.productId, item]));
+      const variantByProductId = new Map(
+        selected.map((product) => [String(product.id), product.variants[0]]),
+      );
+      // Keep the parent SKU stable; price fields on the parent represent the
+      // lowest variant price so catalog cards can show a useful "from" price.
+      const minBasePrice = Math.min(...selected.map((product) => Number(product.basePrice)));
+      const minSellingPrice = Math.min(...selected.map((product) => Number(product.sellingPrice)));
+
+      // Turn each existing default variant into a real color/size/fabric/style
+      // variant and attach it to the parent product without changing its ID/SKU.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        const item = itemById.get(String(product.id))!;
+        const attributeValue = item.attributeValue.trim();
+        const rawAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? (variant.attributes as Record<string, unknown>)
+          : {};
+        const attributes: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(rawAttributes)) {
+          const normalizedKey = key.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+          if (!normalizedKey || normalizedKey === "default" || normalizedKey === data.attributeName) continue;
+          attributes[normalizedKey] = value;
+        }
+        attributes[data.attributeName] = attributeValue;
+        await tx.productVariant.update({
+          where: { id: variant.id },
+          data: {
+            productId: parentId,
+            attributes: attributes as Prisma.InputJsonValue,
+            color: data.attributeName === "color" ? attributeValue : (variant.color ?? undefined),
+            size: data.attributeName === "size" ? attributeValue : (variant.size ?? undefined),
+            fabric: data.attributeName === "fabric" ? attributeValue : (variant.fabric ?? undefined),
+          },
+        });
+      }
+
+      // Move existing product-level media to variant-level media. Keep the old
+      // media rows inactive for audit/history; do not upload duplicate files.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        for (const media of product.media) {
+          const alreadyOnVariant = variant.media.some((existingMedia) =>
+            Boolean(
+              (media.key && existingMedia.key && media.key === existingMedia.key) ||
+              (media.url && existingMedia.url === media.url)
+            )
+          );
+          if (alreadyOnVariant) continue;
+          await tx.productVariantMedia.create({
+            data: {
+              variantId: variant.id,
+              type: media.type,
+              url: media.url,
+              key: media.key,
+              thumbnailUrl: media.thumbnailUrl,
+              altText: media.altText,
+              title: media.title,
+              description: media.description,
+              mimeType: media.mimeType,
+              fileSize: media.fileSize,
+              duration: media.duration,
+              width: media.width,
+              height: media.height,
+              order: media.order,
+              isActive: media.isActive,
+            },
+          });
+        }
+        // Keep original product-media rows active for admin audit/history.
+        // Archived source products are inactive, so their media is not storefront-visible.
+      }
+
+      // Move stock to the retained parent and associate it with the existing
+      // variant. If product-level and variant-level stock collide, merge the
+      // quantity and re-point stock adjustments before removing the duplicate row.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        for (const stock of product.stock) {
+          const targetVariantId = stock.variantId ?? variant.id;
+          const existing = await tx.stock.findFirst({
+            where: {
+              productId: parentId,
+              variantId: targetVariantId,
+              warehouseId: stock.warehouseId,
+              NOT: { id: stock.id },
+            },
+          });
+          if (existing) {
+            await tx.stockAdjustment.updateMany({
+              where: { stockId: stock.id },
+              data: { stockId: existing.id },
+            });
+            await tx.stock.update({
+              where: { id: existing.id },
+              data: {
+                quantity: existing.quantity + stock.quantity,
+                lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({
+              where: { id: stock.id },
+              data: { productId: parentId, variantId: targetVariantId },
+            });
+          }
+        }
+      }
+
+      // Preserve active cart lines, moving each selected product to its existing
+      // variant. Merge quantities if a matching target line already exists.
+      for (const product of selected) {
+        const variant = variantByProductId.get(String(product.id))!;
+        const cartItems = await tx.cartItem.findMany({ where: { productId: product.id } });
+        for (const cartItem of cartItems) {
+          if (cartItem.productId === parentId && cartItem.variantId === variant.id) continue;
+          const duplicate = await tx.cartItem.findFirst({
+            where: {
+              cartId: cartItem.cartId,
+              productId: parentId,
+              variantId: variant.id,
+              NOT: { id: cartItem.id },
+            },
+          });
+          if (duplicate) {
+            await tx.cartItem.update({
+              where: { id: duplicate.id },
+              data: { quantity: duplicate.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({
+              where: { id: cartItem.id },
+              data: { productId: parentId, variantId: variant.id },
+            });
+          }
+        }
+      }
+
+      // Wishlist has a unique (wishlistId, productId) pair, so avoid duplicates.
+      for (const product of selected) {
+        if (product.id === parentId) continue;
+        const wishlistItems = await tx.wishlistItem.findMany({ where: { productId: product.id } });
+        for (const item of wishlistItems) {
+          const duplicate = await tx.wishlistItem.findFirst({
+            where: { wishlistId: item.wishlistId, productId: parentId },
+          });
+          if (duplicate) {
+            await tx.wishlistItem.delete({ where: { id: item.id } });
+          } else {
+            await tx.wishlistItem.update({
+              where: { id: item.id },
+              data: { productId: parentId },
+            });
+          }
+        }
+      }
+
+      // Reviews and product-view history describe the same catalog item after
+      // consolidation, so attach them to the retained parent rather than losing
+      // ratings/analytics when source products become inactive.
+      for (const product of selected) {
+        if (product.id === parentId) continue;
+        await tx.review.updateMany({
+          where: { productId: product.id },
+          data: { productId: parentId },
+        });
+        await tx.productView.updateMany({
+          where: { productId: product.id },
+          data: { productId: parentId },
+        });
+      }
+
+      // Repoint product availability requests while retaining their variant IDs.
+      for (const product of selected) {
+        await tx.productRequest.updateMany({
+          where: { productId: product.id },
+          data: {
+            productId: parentId,
+            variantId: variantByProductId.get(String(product.id))!.id,
+          },
+        });
+      }
+
+      // Keep historical order item productIds unchanged. Their variant IDs still
+      // resolve to the retained variant; archived source products remain available
+      // for old order details and reports.
+      const sectionIds = Array.from(new Set(selected.flatMap((product) => product.homeSections.map((section) => section.id.toString()))));
+      const couponIds = Array.from(new Set(selected.flatMap((product) => product.coupons.map((coupon) => coupon.id.toString()))));
+      await tx.product.update({
+        where: { id: parentId },
+        data: {
+          hasVariants: true,
+          basePrice: minBasePrice,
+          sellingPrice: minSellingPrice,
+          ...(sectionIds.length ? { homeSections: { connect: sectionIds.map((id) => ({ id: BigInt(id) })) } } : {}),
+          ...(couponIds.length ? { coupons: { connect: couponIds.map((id) => ({ id: BigInt(id) })) } } : {}),
+        },
+      });
+      const sourceIds = ids.filter((id) => id !== parentId);
+      for (const source of selected.filter((product) => product.id !== parentId)) {
+        await tx.product.update({
+          where: { id: source.id },
+          data: {
+            isActive: false,
+            ...(source.homeSections.length ? { homeSections: { disconnect: source.homeSections.map((section) => ({ id: section.id })) } } : {}),
+            ...(source.coupons.length ? { coupons: { disconnect: source.coupons.map((coupon) => ({ id: coupon.id })) } } : {}),
+          },
+        });
+      }
+
+      const result = await tx.product.findUnique({
+        where: { id: parentId },
+        include: {
+          category: true,
+          specifications: true,
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
+          stock: true,
+          variants: {
+            include: {
+              media: { where: { isActive: true }, orderBy: { order: "asc" } },
+              stock: true,
+            },
+            orderBy: { id: "asc" },
+          },
+        },
+      });
+      return {
+        product: result,
+        archivedProductIds: sourceIds.map(String),
+        variantsCreated: selected.length,
+      };
+    }, { timeout: 30000 });
+  }
+
+
+  /**
+   * Attach an existing active simple product to an existing variable product.
+   * Reuses its default variant and SKU; no media files are uploaded or duplicated in storage.
+   */
+  async addSimpleProductAsVariant(data: {
+    parentProductId: string;
+    sourceProductId: string;
+    attributeName: string;
+    attributeValue: string;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const sourceId = BigInt(data.sourceProductId);
+    const value = data.attributeValue.trim();
+    if (parentId === sourceId) {
+      throw new ValidationError("The source product and target product must be different");
+    }
+    if (!value) throw new ValidationError("Variant value is required");
+
+    return this.prisma.$transaction(async (tx) => {
+      const [parent, source] = await Promise.all([
+        tx.product.findUnique({
+          where: { id: parentId },
+          include: { variants: { include: { media: true, stock: true } } },
+        }),
+        tx.product.findUnique({
+          where: { id: sourceId },
+          include: {
+            variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            homeSections: { select: { id: true } },
+            coupons: { select: { id: true } },
+          },
+        }),
+      ]);
+
+      if (!parent) throw new NotFoundError("Target variable product not found");
+      if (!source) throw new NotFoundError("Source simple product not found");
+      if (!parent.isActive || !source.isActive) {
+        throw new ValidationError("Both products must be active before changing their structure");
+      }
+      if (!parent.hasVariants) {
+        throw new ValidationError("The target product must already be a variable product");
+      }
+      if (source.hasVariants) {
+        throw new ValidationError("Only a simple product can be added as an existing variant");
+      }
+      if (parent.categoryId !== source.categoryId) {
+        throw new ValidationError("Both products must belong to the same category");
+      }
+      if (source.variants.length !== 1) {
+        throw new ValidationError("The source simple product must have exactly one existing default variant");
+      }
+
+      const normalizedValue = value.toLocaleLowerCase();
+      const duplicate = parent.variants.some((variant) => {
+        const attrs = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? variant.attributes as Record<string, unknown>
+          : {};
+        const legacy = data.attributeName === "color" ? variant.color
+          : data.attributeName === "size" ? variant.size
+          : data.attributeName === "fabric" ? variant.fabric
+          : undefined;
+        const current = legacy ?? attrs[data.attributeName];
+        return typeof current === "string" && current.trim().toLocaleLowerCase() === normalizedValue;
+      });
+      if (duplicate) {
+        throw new ConflictError(`A variant with ${data.attributeName} "${value}" already exists`);
+      }
+
+      const variant = source.variants[0];
+      const oldAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+        ? { ...(variant.attributes as Record<string, unknown>) }
+        : {};
+      delete oldAttributes.default;
+      const attributes = { ...oldAttributes, [data.attributeName]: value };
+
+      await tx.productVariant.update({
+        where: { id: variant.id },
+        data: {
+          productId: parentId,
+          attributes: attributes as Prisma.InputJsonValue,
+          color: data.attributeName === "color" ? value : (variant.color ?? undefined),
+          size: data.attributeName === "size" ? value : (variant.size ?? undefined),
+          fabric: data.attributeName === "fabric" ? value : (variant.fabric ?? undefined),
+        },
+      });
+
+      for (const media of source.media) {
+        const alreadyExists = variant.media.some((existing) =>
+          Boolean((media.key && existing.key && media.key === existing.key) || media.url === existing.url)
+        );
+        if (alreadyExists) continue;
+        await tx.productVariantMedia.create({
+          data: {
+            variantId: variant.id, type: media.type, url: media.url, key: media.key,
+            thumbnailUrl: media.thumbnailUrl, altText: media.altText, title: media.title,
+            description: media.description, mimeType: media.mimeType, fileSize: media.fileSize,
+            duration: media.duration, width: media.width, height: media.height,
+            order: media.order, isActive: media.isActive,
+          },
+        });
+      }
+
+      for (const stock of await tx.stock.findMany({ where: { productId: sourceId } })) {
+        const targetVariantId = stock.variantId ?? variant.id;
+        const existing = await tx.stock.findFirst({
+          where: { productId: parentId, variantId: targetVariantId, warehouseId: stock.warehouseId, NOT: { id: stock.id } },
+        });
+        if (existing) {
+          await tx.stockAdjustment.updateMany({ where: { stockId: stock.id }, data: { stockId: existing.id } });
+          await tx.stock.update({
+            where: { id: existing.id },
+            data: { quantity: existing.quantity + stock.quantity, lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold) },
+          });
+          await tx.stock.delete({ where: { id: stock.id } });
+        } else {
+          await tx.stock.update({ where: { id: stock.id }, data: { productId: parentId, variantId: targetVariantId } });
+        }
+      }
+
+      for (const cartItem of await tx.cartItem.findMany({ where: { productId: sourceId } })) {
+        const duplicateCartItem = await tx.cartItem.findFirst({
+          where: { cartId: cartItem.cartId, productId: parentId, variantId: variant.id, NOT: { id: cartItem.id } },
+        });
+        if (duplicateCartItem) {
+          await tx.cartItem.update({ where: { id: duplicateCartItem.id }, data: { quantity: duplicateCartItem.quantity + cartItem.quantity } });
+          await tx.cartItem.delete({ where: { id: cartItem.id } });
+        } else {
+          await tx.cartItem.update({ where: { id: cartItem.id }, data: { productId: parentId, variantId: variant.id } });
+        }
+      }
+
+      for (const item of await tx.wishlistItem.findMany({ where: { productId: sourceId } })) {
+        const duplicateWishlist = await tx.wishlistItem.findFirst({ where: { wishlistId: item.wishlistId, productId: parentId } });
+        if (duplicateWishlist) await tx.wishlistItem.delete({ where: { id: item.id } });
+        else await tx.wishlistItem.update({ where: { id: item.id }, data: { productId: parentId } });
+      }
+
+      await tx.review.updateMany({ where: { productId: sourceId }, data: { productId: parentId } });
+      await tx.productView.updateMany({ where: { productId: sourceId }, data: { productId: parentId } });
+      await tx.productRequest.updateMany({
+        where: { productId: sourceId },
+        data: { productId: parentId, variantId: variant.id },
+      });
+
+      const basePrices = [...parent.variants.map((item) => Number(item.basePrice ?? parent.basePrice)), Number(variant.basePrice ?? source.basePrice)];
+      const sellingPrices = [...parent.variants.map((item) => Number(item.sellingPrice ?? item.price)), Number(variant.sellingPrice ?? variant.price)];
+      await tx.product.update({
+        where: { id: parentId },
+        data: {
+          basePrice: Math.min(...basePrices),
+          sellingPrice: Math.min(...sellingPrices),
+          ...(source.homeSections.length ? { homeSections: { connect: source.homeSections.map((item) => ({ id: item.id })) } } : {}),
+          ...(source.coupons.length ? { coupons: { connect: source.coupons.map((item) => ({ id: item.id })) } } : {}),
+        },
+      });
+      await tx.product.update({
+        where: { id: sourceId },
+        data: {
+          isActive: false,
+          ...(source.homeSections.length ? { homeSections: { disconnect: source.homeSections.map((item) => ({ id: item.id })) } } : {}),
+          ...(source.coupons.length ? { coupons: { disconnect: source.coupons.map((item) => ({ id: item.id })) } } : {}),
+        },
+      });
+
+      return {
+        product: await tx.product.findUnique({
+          where: { id: parentId },
+          include: { variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } } },
+        }),
+        archivedProductId: String(sourceId),
+        reusedVariantId: String(variant.id),
+        reusedSku: variant.sku,
+      };
+    }, { timeout: 30000 });
+  }
+
+  /**
+   * Extract one variant into a new simple product while preserving the variant ID/SKU.
+   * Require at least three variants before extraction so the source remains a valid
+   * variable product with at least two variants.
+   */
+  async extractVariantAsSimpleProduct(data: {
+    parentProductId: string;
+    variantId: string;
+    productName: string;
+    productSku?: string;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const variantId = BigInt(data.variantId);
+    const name = data.productName.trim();
+    if (!name) throw new ValidationError("New simple product name is required");
+
+    return this.prisma.$transaction(async (tx) => {
+      const parent = await tx.product.findUnique({
+        where: { id: parentId },
+        include: {
+          variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+          specifications: true,
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        },
+      });
+      if (!parent) throw new NotFoundError("Source variable product not found");
+      if (!parent.isActive || !parent.hasVariants) {
+        throw new ValidationError("Only an active variable product can have a variant extracted");
+      }
+      const variant = parent.variants.find((item) => item.id === variantId);
+      if (!variant) throw new NotFoundError("The selected variant does not belong to this variable product");
+
+      // If this variant originally came from a simple product that was consolidated,
+      // restore that exact archived product instead of inventing a replacement name/SKU.
+      // Consolidation keeps the source product row and its original name, slug, media,
+      // specifications and product SKU; the original variant SKU links the two records.
+      const archivedOriginal = await tx.product.findFirst({
+        where: {
+          sku: variant.sku,
+          categoryId: parent.categoryId,
+          isActive: false,
+          hasVariants: false,
+        },
+        include: {
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        },
+      });
+
+      if (archivedOriginal) {
+        const remaining = parent.variants.filter((item) => item.id !== variantId);
+
+        // Reattach the existing variant to the exact source product. No new product,
+        // product name, SKU, variant, or image file is created in this restoration path.
+        await tx.productVariant.update({
+          where: { id: variantId },
+          data: { productId: archivedOriginal.id },
+        });
+
+        // Keep stock rows and adjustments attached to the same variant and warehouse.
+        for (const stock of await tx.stock.findMany({
+          where: { productId: parentId, variantId },
+        })) {
+          const existing = await tx.stock.findFirst({
+            where: {
+              productId: archivedOriginal.id,
+              variantId,
+              warehouseId: stock.warehouseId,
+              NOT: { id: stock.id },
+            },
+          });
+          if (existing) {
+            await tx.stockAdjustment.updateMany({
+              where: { stockId: stock.id },
+              data: { stockId: existing.id },
+            });
+            await tx.stock.update({
+              where: { id: existing.id },
+              data: {
+                quantity: existing.quantity + stock.quantity,
+                lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({
+              where: { id: stock.id },
+              data: { productId: archivedOriginal.id },
+            });
+          }
+        }
+
+        // Move cart lines for this exact variant back to the restored product,
+        // merging duplicate cart lines rather than creating duplicates.
+        for (const cartItem of await tx.cartItem.findMany({
+          where: { productId: parentId, variantId },
+        })) {
+          const duplicate = await tx.cartItem.findFirst({
+            where: {
+              cartId: cartItem.cartId,
+              productId: archivedOriginal.id,
+              variantId,
+              NOT: { id: cartItem.id },
+            },
+          });
+          if (duplicate) {
+            await tx.cartItem.update({
+              where: { id: duplicate.id },
+              data: { quantity: duplicate.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({
+              where: { id: cartItem.id },
+              data: { productId: archivedOriginal.id },
+            });
+          }
+        }
+        await tx.productRequest.updateMany({
+          where: { productId: parentId, variantId },
+          data: { productId: archivedOriginal.id },
+        });
+
+        // Source product media was retained during consolidation. Deactivate only
+        // variant-media copies of those same files to avoid duplicate storefront photos.
+        for (const media of await tx.productVariantMedia.findMany({
+          where: { variantId, isActive: true },
+        })) {
+          const duplicateOnProduct = archivedOriginal.media.some((productMedia) =>
+            (productMedia.key && media.key && productMedia.key === media.key) ||
+            productMedia.url === media.url
+          );
+          if (duplicateOnProduct) {
+            await tx.productVariantMedia.update({
+              where: { id: media.id },
+              data: { isActive: false },
+            });
+          }
+        }
+
+        await tx.product.update({
+          where: { id: archivedOriginal.id },
+          data: {
+            isActive: true,
+            hasVariants: false,
+            basePrice: Number(variant.basePrice ?? parent.basePrice),
+            sellingPrice: Number(variant.sellingPrice ?? variant.price),
+            weight: variant.weight ?? archivedOriginal.weight,
+            length: variant.length ?? archivedOriginal.length,
+            breadth: variant.breadth ?? archivedOriginal.breadth,
+            height: variant.height ?? archivedOriginal.height,
+            volumetricWeight: variant.volumetricWeight ?? archivedOriginal.volumetricWeight,
+          },
+        });
+
+        if (remaining.length > 0) {
+          await tx.product.update({
+            where: { id: parentId },
+            data: {
+              hasVariants: remaining.length > 1,
+              basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+              sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+            },
+          });
+        } else {
+          // Preserve the parent record for historical references, but remove it from
+          // the live catalog because its final variant has been restored elsewhere.
+          await tx.product.update({
+            where: { id: parentId },
+            data: {
+              isActive: false,
+              hasVariants: false,
+              homeSections: { set: [] },
+              coupons: { set: [] },
+            },
+          });
+        }
+
+        return {
+          product: await tx.product.findUnique({
+            where: { id: archivedOriginal.id },
+            include: {
+              category: true,
+              specifications: true,
+              media: { where: { isActive: true }, orderBy: { order: "asc" } },
+              variants: { include: { media: { where: { isActive: true } }, stock: true } },
+              stock: true,
+            },
+          }),
+          remainingVariantCount: remaining.length,
+          extractedVariantId: String(variantId),
+          preservedVariantSku: variant.sku,
+          restoredOriginalProduct: true,
+        };
+      }
+
+      const slug = SlugUtil.generateSlug(name);
+      const slugConflict = await tx.product.findUnique({ where: { slug } });
+      if (slugConflict) throw new ConflictError(`A product with the name "${name}" already exists`);
+
+      let productSku = data.productSku?.trim();
+      if (productSku) {
+        const skuConflict = await tx.product.findUnique({ where: { sku: productSku } });
+        if (skuConflict) throw new ConflictError(`Product SKU "${productSku}" is already in use`);
+      } else {
+        productSku = this.generateSKU(name);
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const conflict = await tx.product.findUnique({ where: { sku: productSku } });
+          if (!conflict) break;
+          productSku = this.generateSKU(name);
+        }
+        if (await tx.product.findUnique({ where: { sku: productSku } })) {
+          throw new ConflictError("Could not generate a unique product SKU. Please provide one manually.");
+        }
+      }
+
+      const basePrice = Number(variant.basePrice ?? parent.basePrice);
+      const sellingPrice = Number(variant.sellingPrice ?? variant.price);
+      const newProduct = await tx.product.create({
+        data: {
+          name, slug, description: parent.description, categoryId: parent.categoryId,
+          basePrice, sellingPrice, sku: productSku, isActive: true, hasVariants: false,
+          hsnCode: parent.hsnCode, artisanName: parent.artisanName,
+          artisanAbout: parent.artisanAbout, artisanLocation: parent.artisanLocation,
+          metaTitle: parent.metaTitle, metaDesc: parent.metaDesc, schemaMarkup: parent.schemaMarkup,
+          weight: variant.weight ?? parent.weight, length: variant.length ?? parent.length,
+          breadth: variant.breadth ?? parent.breadth, height: variant.height ?? parent.height,
+          volumetricWeight: variant.volumetricWeight ?? parent.volumetricWeight,
+          allowOutOfStockOrders: parent.allowOutOfStockOrders,
+          hasVideoConsultation: parent.hasVideoConsultation,
+          videoPurchasingEnabled: parent.videoPurchasingEnabled,
+          videoConsultationNote: parent.videoConsultationNote,
+        },
+      });
+
+      if (parent.specifications.length) {
+        await tx.specification.createMany({
+          data: parent.specifications.map((spec) => ({ productId: newProduct.id, key: spec.key, value: spec.value })),
+        });
+      }
+
+      // Reparent the same variant; historical order and return product IDs remain unchanged.
+      await tx.productVariant.update({ where: { id: variantId }, data: { productId: newProduct.id } });
+      const inheritedMedia = [...parent.media, ...variant.media];
+      const seenMedia = new Set<string>();
+      for (const media of inheritedMedia) {
+        const identity = media.key ? `key:${media.key}` : `url:${media.url}`;
+        if (seenMedia.has(identity)) continue;
+        seenMedia.add(identity);
+        await tx.productMedia.create({
+          data: {
+            productId: newProduct.id, type: media.type, url: media.url, key: media.key,
+            thumbnailUrl: media.thumbnailUrl, altText: media.altText, title: media.title,
+            description: media.description, mimeType: media.mimeType, fileSize: media.fileSize,
+            duration: media.duration, width: media.width, height: media.height,
+            order: media.order, isActive: media.isActive,
+          },
+        });
+      }
+      await tx.stock.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+      await tx.cartItem.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+      await tx.productRequest.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+
+      const remaining = parent.variants.filter((item) => item.id !== variantId);
+      if (remaining.length > 0) {
+        // If one variant remains, the original product becomes a normal simple product.
+        // This lets admins extract from a two-variant product without leaving a broken catalog item.
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            hasVariants: remaining.length > 1,
+            basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+            sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+          },
+        });
+        if (remaining.length === 1) {
+          await tx.stock.updateMany({
+            where: { productId: parentId, variantId: null },
+            data: { variantId: remaining[0].id },
+          });
+        }
+      } else {
+        // The selected variant was the only one. Keep the old product record for
+        // historical references, but archive it so the new simple product is the live listing.
+        for (const stock of await tx.stock.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.stock.findFirst({
+            where: { productId: newProduct.id, variantId, warehouseId: stock.warehouseId, NOT: { id: stock.id } },
+          });
+          if (target) {
+            await tx.stockAdjustment.updateMany({ where: { stockId: stock.id }, data: { stockId: target.id } });
+            await tx.stock.update({
+              where: { id: target.id },
+              data: {
+                quantity: target.quantity + stock.quantity,
+                lowStockThreshold: Math.min(target.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({ where: { id: stock.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
+        for (const cartItem of await tx.cartItem.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.cartItem.findFirst({
+            where: { cartId: cartItem.cartId, productId: newProduct.id, variantId, NOT: { id: cartItem.id } },
+          });
+          if (target) {
+            await tx.cartItem.update({
+              where: { id: target.id },
+              data: { quantity: target.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({ where: { id: cartItem.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
+        await tx.productRequest.updateMany({
+          where: { productId: parentId, variantId: null },
+          data: { productId: newProduct.id, variantId },
+        });
+        await tx.review.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        await tx.productView.updateMany({ where: { productId: parentId }, data: { productId: newProduct.id } });
+        for (const wishlistItem of await tx.wishlistItem.findMany({ where: { productId: parentId } })) {
+          const duplicate = await tx.wishlistItem.findFirst({
+            where: { wishlistId: wishlistItem.wishlistId, productId: newProduct.id, NOT: { id: wishlistItem.id } },
+          });
+          if (duplicate) await tx.wishlistItem.delete({ where: { id: wishlistItem.id } });
+          else await tx.wishlistItem.update({ where: { id: wishlistItem.id }, data: { productId: newProduct.id } });
+        }
+        await tx.product.update({
+          where: { id: parentId },
+          data: {
+            isActive: false,
+            hasVariants: false,
+            homeSections: { set: [] },
+            coupons: { set: [] },
+          },
+        });
+      }
+
+      return {
+        product: await tx.product.findUnique({
+          where: { id: newProduct.id },
+          include: {
+            category: true, specifications: true,
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            variants: { include: { media: true, stock: true } },
+            stock: true,
+          },
+        }),
+        remainingVariantCount: remaining.length,
+        extractedVariantId: String(variantId),
+        preservedVariantSku: variant.sku,
+      };
+    }, { timeout: 30000 });
   }
 
   private generateSKU(name: string): string {

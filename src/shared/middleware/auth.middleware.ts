@@ -25,14 +25,19 @@ export const authenticate = async (
 ) => {
   try {
     const authHeader = req.headers.authorization;
+    let token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    if (!token && typeof req.query?.token === "string") {
+      token = req.query.token;
+    }
+    if (!token && (req as any).cookies?.accessToken) {
+      token = (req as any).cookies.accessToken;
+    }
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!token) {
       return res
         .status(401)
         .json({ success: false, message: "No token provided" });
     }
-
-    const token = authHeader.substring(7);
     const authService = container.resolve(AuthService);
     const payload = authService.verifyAccessToken(token);
 

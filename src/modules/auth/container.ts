@@ -10,9 +10,9 @@ import { AuthService } from "./application/services/auth.service.js";
 import { AdminService } from "./application/services/admin.service.js";
 import { AuthController } from "./presentation/auth.controller.js";
 import { AdminController } from "./presentation/admin.controller.js";
+import { DriveService } from "../media/infrastructure/drive.service.js";
 
 // Auth Module
-
 
 // Function to register Auth module
 export function registerAuthModule() {
@@ -32,6 +32,8 @@ export function registerAuthModule() {
   // Services
   container.registerSingleton(AuthService);
   container.registerSingleton(AdminService);
+  container.registerSingleton(DriveService);
+  container.register("DriveService", { useToken: DriveService });
 
   // Controllers
   container.registerSingleton(AuthController);

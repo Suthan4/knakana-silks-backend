@@ -180,6 +180,56 @@ export const PatchProductDTOSchema = UpdateProductDTOSchema.partial().extend({
 });
 export type PatchProductDTO = z.infer<typeof PatchProductDTOSchema>;
 
+
+/**
+ * Consolidate existing simple products into one variable product.
+ * Each selected product becomes one existing variant, retaining its SKU.
+ */
+export const ConsolidateSimpleProductsDTOSchema = z.object({
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")).pipe(z.string().min(1, "Attribute name must include letters or numbers")),
+  products: z.array(z.object({
+    productId: z.string().regex(/^[1-9]\d*$/, "Product ID must be a positive integer"),
+    attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
+  })).min(2, "Select at least two products to consolidate").max(100),
+}).superRefine((data, ctx) => {
+  const ids = data.products.map((item) => item.productId);
+  if (new Set(ids).size !== ids.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Each product can only be selected once", path: ["products"] });
+  }
+  if (!ids.includes(data.parentProductId)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The parent product must be one of the selected products", path: ["parentProductId"] });
+  }
+  const values = data.products.map((item) => item.attributeValue.trim().toLocaleLowerCase());
+  if (new Set(values).size !== values.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Variant values must be unique", path: ["products"] });
+  }
+});
+export type ConsolidateSimpleProductsDTO = z.infer<typeof ConsolidateSimpleProductsDTOSchema>;
+
+
+/** Attach an existing simple product to an existing variable product. */
+export const AddSimpleProductAsVariantDTOSchema = z.object({
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  sourceProductId: z.string().regex(/^[1-9]\d*$/, "Source product ID must be a positive integer"),
+  attributeName: z.string().trim().min(1, "Attribute name is required").max(60, "Attribute name must be 60 characters or fewer").transform((value) => value.toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "")).pipe(z.string().min(1, "Attribute name must include letters or numbers")),
+  attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
+}).superRefine((data, ctx) => {
+  if (data.parentProductId === data.sourceProductId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Source and target products must be different", path: ["sourceProductId"] });
+  }
+});
+export type AddSimpleProductAsVariantDTO = z.infer<typeof AddSimpleProductAsVariantDTOSchema>;
+
+/** Extract an existing variant as a standalone simple product. */
+export const ExtractVariantAsSimpleProductDTOSchema = z.object({
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
+  variantId: z.string().regex(/^[1-9]\d*$/, "Variant ID must be a positive integer"),
+  productName: z.string().trim().min(2, "Product name must contain at least 2 characters").max(180),
+  productSku: z.string().trim().min(2).max(100).optional(),
+});
+export type ExtractVariantAsSimpleProductDTO = z.infer<typeof ExtractVariantAsSimpleProductDTOSchema>;
+
 // Query Product DTO
 // Enhanced Product Query DTO with URL params support
 export const QueryProductDTOSchema = z.object({
@@ -201,8 +251,16 @@ export const QueryProductDTOSchema = z.object({
     ),
 
   // Product Flags
-  isActive: z.coerce.boolean().optional().default(true),
-  hasVariants: z.coerce.boolean().optional(),
+  // Query parameters arrive as strings; z.coerce.boolean() incorrectly treats "false" as true.
+  // Preserve explicit true/false and keep omitted values undefined for admin "all" filters.
+  isActive: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().optional()
+  ),
+  hasVariants: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().optional()
+  ),
 
   // Price Range
   minPrice: z.coerce.number().positive().optional(),

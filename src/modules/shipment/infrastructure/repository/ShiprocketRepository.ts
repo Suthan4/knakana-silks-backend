@@ -103,6 +103,13 @@ export class ShiprocketRepository implements IShiprocketRepository {
   }
 
   /**
+   * Print/fetch the manifest PDF url once Shiprocket has finished building it
+   */
+  async printManifest(orderIds: number[]): Promise<ManifestResponse> {
+    return this.shiprocketService.printManifest(orderIds);
+  }
+
+  /**
    * Check pincode serviceability
    */
   async checkPincodeServiceability(

@@ -51,6 +51,36 @@ router.put("/auth/profile", authenticate, (req, res) =>
 router.put("/auth/change-password", authenticate, (req, res) =>
   getAuthController().changePassword(req, res)
 );
+
+// ============ Google Drive OAuth Routes ============
+
+// Drive connection status — tells the frontend whether Drive is connected
+router.get(
+  "/auth/drive/status",
+  authenticate,
+  (req, res) => getAuthController().getDriveStatus(req, res)
+);
+
+router.get(
+  "/auth/google",
+  (req, res, next) => {
+    // If auth credentials present (Bearer token, cookie, or token query), authenticate
+    if (
+      req.headers.authorization ||
+      req.query.token ||
+      (req as any).cookies?.accessToken
+    ) {
+      return authenticate(req, res, next);
+    }
+    next();
+  },
+  (req, res) => getAuthController().redirectToGoogle(req, res)
+);
+
+router.get("/auth/google/callback", (req, res) =>
+  getAuthController().handleGoogleCallback(req, res)
+);
+
 router.post("/auth/newsletter/subscribe", async (req, res) => {
   try {
     const { email } = req.body;
@@ -106,6 +136,5 @@ router.put(
   authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN),
   (req, res) => getAdminController().toggleUserStatus(req, res)
 );
-
 
 export default router;

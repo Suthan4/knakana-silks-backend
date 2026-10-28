@@ -13,6 +13,9 @@ import {
   UpdateVariantDTOSchema,
   AddVariantMediaDTOSchema,
   UpdateStockDTOSchema,
+  ConsolidateSimpleProductsDTOSchema,
+  AddSimpleProductAsVariantDTOSchema,
+  ExtractVariantAsSimpleProductDTOSchema,
 } from "../../application/product.dto.js";
 
 import { CategoryCacheModule } from "@/modules/category/category.cache.js";
@@ -132,6 +135,8 @@ export class ProductController {
       const result = await this.productService.getProducts({
         ...restParams,
         ...parsedParams,
+        // Public catalog remains active-only by default; explicit false is preserved.
+        isActive: params.isActive ?? true,
         categoryIds,
       });
 
@@ -267,6 +272,82 @@ export class ProductController {
     });
   }
 }
+
+  /**
+   * Admin workflow: consolidate existing simple products into variants.
+   * Source products are archived by the service, not deleted.
+   */
+  async consolidateSimpleProducts(req: Request, res: Response) {
+    try {
+      const data = ConsolidateSimpleProductsDTOSchema.parse(req.body);
+      const result = await this.productService.consolidateSimpleProducts(data);
+      return res.status(200).json({
+        success: true,
+        message: `Consolidated ${result.variantsCreated} existing products into one variable product. Source products were archived.`,
+        data: result,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product consolidation request",
+          errors: error.errors,
+        });
+      }
+      const statusCode =
+        error.statusCode ||
+        (error.name === "NotFoundError" ? 404 :
+          error.name === "ConflictError" ? 409 :
+          error.name === "ValidationError" ? 400 : 500);
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || "Failed to consolidate products",
+      });
+    }
+  }
+
+
+  /** Add an existing simple product to a variable product without re-uploading media. */
+  async addSimpleProductAsVariant(req: Request, res: Response) {
+    try {
+      const data = AddSimpleProductAsVariantDTOSchema.parse(req.body);
+      const result = await this.productService.addSimpleProductAsVariant(data);
+      return res.status(200).json({
+        success: true,
+        message: "Simple product added as a variant. The original simple product was archived.",
+        data: result,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ success: false, message: "Invalid add-variant request", errors: error.errors });
+      }
+      const statusCode = error.statusCode ||
+        (error.name === "NotFoundError" ? 404 : error.name === "ConflictError" ? 409 :
+          error.name === "ValidationError" ? 400 : 500);
+      return res.status(statusCode).json({ success: false, message: error.message || "Failed to add simple product as a variant" });
+    }
+  }
+
+  /** Extract one existing variant into a new simple product. */
+  async extractVariantAsSimpleProduct(req: Request, res: Response) {
+    try {
+      const data = ExtractVariantAsSimpleProductDTOSchema.parse(req.body);
+      const result = await this.productService.extractVariantAsSimpleProduct(data);
+      return res.status(201).json({
+        success: true,
+        message: "Variant extracted into a new simple product. The original variable product retains at least two variants.",
+        data: result,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ success: false, message: "Invalid variant extraction request", errors: error.errors });
+      }
+      const statusCode = error.statusCode ||
+        (error.name === "NotFoundError" ? 404 : error.name === "ConflictError" ? 409 :
+          error.name === "ValidationError" ? 400 : 500);
+      return res.status(statusCode).json({ success: false, message: error.message || "Failed to extract variant" });
+    }
+  }
 
   async getProduct(req: Request, res: Response) {
     try {
