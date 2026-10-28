@@ -1725,6 +1725,8 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
           media: { orderBy: { order: "asc" } },
           stock: true,
           specifications: true,
+          homeSections: { select: { id: true } },
+          coupons: { select: { id: true } },
         },
       });
       if (selected.length !== ids.length) {
@@ -1934,19 +1936,27 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       // Keep historical order item productIds unchanged. Their variant IDs still
       // resolve to the retained variant; archived source products remain available
       // for old order details and reports.
+      const sectionIds = Array.from(new Set(selected.flatMap((product) => product.homeSections.map((section) => section.id.toString()))));
+      const couponIds = Array.from(new Set(selected.flatMap((product) => product.coupons.map((coupon) => coupon.id.toString()))));
       await tx.product.update({
         where: { id: parentId },
         data: {
           hasVariants: true,
           basePrice: minBasePrice,
           sellingPrice: minSellingPrice,
+          ...(sectionIds.length ? { homeSections: { connect: sectionIds.map((id) => ({ id: BigInt(id) })) } } : {}),
+          ...(couponIds.length ? { coupons: { connect: couponIds.map((id) => ({ id: BigInt(id) })) } } : {}),
         },
       });
       const sourceIds = ids.filter((id) => id !== parentId);
-      if (sourceIds.length) {
-        await tx.product.updateMany({
-          where: { id: { in: sourceIds } },
-          data: { isActive: false },
+      for (const source of selected.filter((product) => product.id !== parentId)) {
+        await tx.product.update({
+          where: { id: source.id },
+          data: {
+            isActive: false,
+            ...(source.homeSections.length ? { homeSections: { disconnect: source.homeSections.map((section) => ({ id: section.id })) } } : {}),
+            ...(source.coupons.length ? { coupons: { disconnect: source.coupons.map((coupon) => ({ id: coupon.id })) } } : {}),
+          },
         });
       }
 
