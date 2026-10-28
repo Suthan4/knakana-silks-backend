@@ -452,6 +452,23 @@ export class BulkImportJobService {
       throw new ValidationError("No products provided for bulk import job");
     }
 
+    // This is the final server-side safety gate shared by draft imports, direct
+    // bulk jobs, and retries. Validate against live catalog state before the
+    // background worker can download Drive files or upload anything to S3.
+    const preflight = await this.bulkProductService.validateParsedProducts(products);
+    const invalid = preflight.products.filter((product) => product.isValid === false);
+    if (invalid.length > 0) {
+      const details = invalid.slice(0, 4).map((product) => {
+        const messages = (product.errors || [])
+          .filter((error: any) => error.severity === "error")
+          .map((error: any) => error.message);
+        return `${product.name || product.productGroupId}: ${messages.join("; ") || "Please correct this product's validation errors"}`;
+      });
+      throw new ValidationError(
+        `Import paused before image upload: ${invalid.length} product(s) need correction. ${details.join(" | ")}`
+      );
+    }
+
     const jobId = uuidv4();
     const now = new Date().toISOString();
     const matchedCount = Array.isArray(imageMatches?.matched)
@@ -881,7 +898,42 @@ export class BulkImportJobService {
         const finalDraftStatus = hasFailures
           ? PrismaDraftStatus.DRAFT
           : PrismaDraftStatus.COMPLETED;
-        await this.draftRepo.update(rawJob.draftId, { status: finalDraftStatus });
+        const completedByGroup = new Map(rawJob.results.map((result) => [result.productGroupId, result]));
+        const persistedProducts = products.map((product) => {
+          const result = completedByGroup.get(product.productGroupId);
+          if (!result) return product;
+          return {
+            ...product,
+            _importStatus: result.status,
+            ...(result.status === "success" ? { productId: result.productId } : {}),
+            ...(result.status === "failed" ? { _importError: result.error } : {}),
+          };
+        });
+        const draft = await this.draftRepo.findById(rawJob.draftId);
+        const currentParsed = draft?.parsedData as any;
+        const currentProducts: BulkParsedProduct[] = Array.isArray(currentParsed)
+          ? currentParsed
+          : Array.isArray(currentParsed?.products)
+            ? currentParsed.products
+            : [];
+        const persistedByGroup = new Map(persistedProducts.map((product) => [product.productGroupId, product]));
+        const mergedProducts = currentProducts.map((product) =>
+          persistedByGroup.get(product.productGroupId) ?? product
+        );
+        const currentGroupIds = new Set(mergedProducts.map((product) => product.productGroupId));
+        for (const product of persistedProducts) {
+          if (!currentGroupIds.has(product.productGroupId)) mergedProducts.push(product);
+        }
+        const parsedPayload = Array.isArray(currentParsed)
+          ? mergedProducts
+          : currentParsed && typeof currentParsed === "object"
+            ? { ...currentParsed, products: mergedProducts }
+            : mergedProducts;
+        await this.draftRepo.update(rawJob.draftId, {
+          rawInput: JSON.stringify(mergedProducts, null, 2),
+          parsedData: parsedPayload,
+          status: finalDraftStatus,
+        });
       } catch (err: any) {
         console.warn("Failed to update draft " + rawJob.draftId + " on job finish:", err.message);
       }
@@ -906,25 +958,27 @@ export class BulkImportJobService {
       throw new ValidationError("There are no failed products to retry in this job");
     }
 
-    // Find original product details from draft if available
+    // Recover only failed products that still exist in the draft and were not skipped.
     let failedProducts: BulkParsedProduct[] = [];
+    let draftPayloadAvailable = false;
     if (parentJob.draftId) {
       const draft = await this.draftRepo.findById(parentJob.draftId);
       if (draft?.parsedData) {
+        draftPayloadAvailable = true;
         const parsedData = draft.parsedData as any;
         const productList: BulkParsedProduct[] = Array.isArray(parsedData)
           ? parsedData
           : Array.isArray(parsedData.products)
             ? parsedData.products
             : [];
-        failedProducts = productList.filter((product) =>
-          failedGroupIds.has(product.productGroupId)
+        failedProducts = productList.filter((product: any) =>
+          failedGroupIds.has(product.productGroupId) && product._importStatus !== "skipped"
         );
       }
     }
 
-    if (failedProducts.length === 0) {
-      // Reconstruct minimal representations if draft is not available
+    if (failedProducts.length === 0 && !draftPayloadAvailable) {
+      // Reconstruct minimal representations only when the original draft is unavailable
       failedProducts = parentJob.results
         .filter((r) => r.status === "failed")
         .map((r) => ({
@@ -941,6 +995,10 @@ export class BulkImportJobService {
           breadth: 10,
           height: 5,
         }));
+    }
+
+    if (failedProducts.length === 0) {
+      throw new ValidationError("There are no eligible failed products left to retry. Skipped or deleted draft items are excluded.");
     }
 
     return this.startJob({

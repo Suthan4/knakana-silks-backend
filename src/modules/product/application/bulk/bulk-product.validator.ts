@@ -832,6 +832,42 @@ export class BulkProductValidator {
       );
     }
 
+    // Detect collisions inside this import before media transfer. Product slugs are
+    // unique in the database, so two incoming names that normalize to the same slug
+    // must not both proceed to image upload and fail later during creation.
+    const seenSlugsInBatch = new Map<string, BulkParsedProduct>();
+    for (const product of productMap.values()) {
+      const slug = (product.seo?.slug || SlugUtil.generateSlug(product.name)).trim().toLocaleLowerCase("en-US");
+      if (!slug) continue;
+      const previous = seenSlugsInBatch.get(slug);
+      if (previous) {
+        const message = `Product "${product.name}" conflicts with "${previous.name}" because both resolve to the same URL slug "${slug}".`;
+        const error: BulkValidationError = {
+          sheet: "Products",
+          row: product.rowNumber,
+          productGroupId: product.productGroupId,
+          field: "Product Name / SEO Slug",
+          message,
+          fix: "Give these products distinct names or unique SEO slugs before importing.",
+          severity: "error",
+        };
+        errors.push(error);
+        product.errors = [...(product.errors || []), error];
+        product.isValid = false;
+        const previousError: BulkValidationError = {
+          ...error,
+          row: previous.rowNumber,
+          productGroupId: previous.productGroupId,
+          message: `Product "${previous.name}" conflicts with "${product.name}" because both resolve to the same URL slug "${slug}".`,
+        };
+        errors.push(previousError);
+        previous.errors = [...(previous.errors || []), previousError];
+        previous.isValid = false;
+      } else {
+        seenSlugsInBatch.set(slug, product);
+      }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // 5. DATABASE CONFLICT CHECKS (SKUs and Slugs)
     // ─────────────────────────────────────────────────────────────────────────

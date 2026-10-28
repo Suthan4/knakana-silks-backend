@@ -441,6 +441,44 @@ async matchDrive(
 }
 
 
+  // Remove or skip individual products without touching catalog records or storage.
+  async updateDraftItems(
+    id: string,
+    userId: bigint,
+    productGroupIds: string[],
+    action: "skip" | "delete"
+  ): Promise<BulkImportDraftResponse> {
+    const existing = await this.repo.findById(id);
+    if (!existing) throw new NotFoundError("Draft not found");
+    assertOwner(existing.userId, userId);
+    if (!productGroupIds.length) throw new ValidationError("Select at least one draft product");
+
+    const parsed = existing.parsedData as any;
+    const list: any[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.products) ? parsed.products : [];
+    const ids = new Set(productGroupIds.map((value) => String(value).trim()).filter(Boolean));
+    const matched = list.filter((product) => ids.has(String(product.productGroupId)));
+    if (matched.length !== ids.size) {
+      throw new ValidationError("One or more selected products could not be found in this draft. Refresh the draft and try again.");
+    }
+    if (matched.some((product) => product._importStatus === "success" || product.productId)) {
+      throw new ValidationError("A successfully imported product cannot be removed from the draft recovery list.");
+    }
+
+    const nextList = action === "delete"
+      ? list.filter((product) => !ids.has(String(product.productGroupId)))
+      : list.map((product) => ids.has(String(product.productGroupId))
+        ? { ...product, _importStatus: "skipped", _importSkipReason: "Skipped by administrator" }
+        : product);
+    const nextParsed = Array.isArray(parsed) ? nextList : { ...parsed, products: nextList };
+    const draft = await this.repo.update(id, {
+      parsedData: nextParsed as any,
+      status: nextList.length === 0 || nextList.every((product) => product._importStatus === "skipped")
+        ? "COMPLETED"
+        : "DRAFT",
+    });
+    return serialise(draft);
+  }
+
   // ── Start Background Import from Draft ────────────────────────────────────
 
   async startImportJob(id: string, userId: bigint): Promise<BulkImportJob> {
@@ -455,16 +493,44 @@ async matchDrive(
       throw new ValidationError("Draft has no products to import");
     }
 
-    const products = productList;
+    const products = productList.filter((product) =>
+      product._importStatus !== "skipped" && product._importStatus !== "success" && !product.productId
+    );
     if (products.length === 0) {
-      throw new ValidationError("No products in draft to import");
+      throw new ValidationError("There are no products left to import. Remaining items were already imported, skipped, or removed from this draft.");
     }
+
+    // Validate against current catalog state before any Drive download or S3 upload.
+    const preflight = await this.bulkProductService.validateParsedProducts(products);
+    const invalid = preflight.products.filter((product) => product.isValid === false);
+    if (invalid.length > 0) {
+      const details = invalid.slice(0, 4).map((product) => {
+        const messages = (product.errors || [])
+          .filter((error: any) => error.severity === "error")
+          .map((error: any) => error.message);
+        return `${product.name || product.productGroupId}: ${messages.join("; ") || "Please correct this product's validation errors"}`;
+      });
+      throw new ValidationError(
+        `Import paused before image upload: ${invalid.length} product(s) need correction. ${details.join(" | ")}`
+      );
+    }
+
+    const activeGroupIds = new Set(products.map((product) => String(product.productGroupId)));
+    const storedMatches = existing.imageMatches as any;
+    const filteredMatches = storedMatches && Array.isArray(storedMatches.matched)
+      ? {
+          ...storedMatches,
+          matched: storedMatches.matched.filter((entry: any) =>
+            activeGroupIds.has(String(entry.productGroupId))
+          ),
+        }
+      : storedMatches;
 
     return this.jobService.startJob({
       userId: userId.toString(),
       draftId: id,
       products,
-      imageMatches: existing.imageMatches as any,
+      imageMatches: filteredMatches,
       driveUserId: userId.toString(),
     });
   }
