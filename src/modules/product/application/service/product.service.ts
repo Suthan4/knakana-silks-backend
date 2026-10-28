@@ -1984,6 +1984,305 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     }, { timeout: 30000 });
   }
 
+
+  /**
+   * Attach an existing active simple product to an existing variable product.
+   * Reuses its default variant and SKU; no media files are uploaded or duplicated in storage.
+   */
+  async addSimpleProductAsVariant(data: {
+    parentProductId: string;
+    sourceProductId: string;
+    attributeName: "color" | "size" | "fabric" | "style";
+    attributeValue: string;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const sourceId = BigInt(data.sourceProductId);
+    const value = data.attributeValue.trim();
+    if (parentId === sourceId) {
+      throw new ValidationError("The source product and target product must be different");
+    }
+    if (!value) throw new ValidationError("Variant value is required");
+
+    return this.prisma.$transaction(async (tx) => {
+      const [parent, source] = await Promise.all([
+        tx.product.findUnique({
+          where: { id: parentId },
+          include: { variants: { include: { media: true, stock: true } } },
+        }),
+        tx.product.findUnique({
+          where: { id: sourceId },
+          include: {
+            variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            homeSections: { select: { id: true } },
+            coupons: { select: { id: true } },
+          },
+        }),
+      ]);
+
+      if (!parent) throw new NotFoundError("Target variable product not found");
+      if (!source) throw new NotFoundError("Source simple product not found");
+      if (!parent.isActive || !source.isActive) {
+        throw new ValidationError("Both products must be active before changing their structure");
+      }
+      if (!parent.hasVariants) {
+        throw new ValidationError("The target product must already be a variable product");
+      }
+      if (source.hasVariants) {
+        throw new ValidationError("Only a simple product can be added as an existing variant");
+      }
+      if (parent.categoryId !== source.categoryId) {
+        throw new ValidationError("Both products must belong to the same category");
+      }
+      if (source.variants.length !== 1) {
+        throw new ValidationError("The source simple product must have exactly one existing default variant");
+      }
+
+      const normalizedValue = value.toLocaleLowerCase();
+      const duplicate = parent.variants.some((variant) => {
+        const attrs = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+          ? variant.attributes as Record<string, unknown>
+          : {};
+        const current = data.attributeName === "color" ? variant.color
+          : data.attributeName === "size" ? variant.size
+          : data.attributeName === "fabric" ? variant.fabric
+          : attrs[data.attributeName];
+        return typeof current === "string" && current.trim().toLocaleLowerCase() === normalizedValue;
+      });
+      if (duplicate) {
+        throw new ConflictError(`A variant with ${data.attributeName} "${value}" already exists`);
+      }
+
+      const variant = source.variants[0];
+      const oldAttributes = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+        ? { ...(variant.attributes as Record<string, unknown>) }
+        : {};
+      delete oldAttributes.default;
+      const attributes = { ...oldAttributes, [data.attributeName]: value };
+
+      await tx.productVariant.update({
+        where: { id: variant.id },
+        data: {
+          productId: parentId,
+          attributes: attributes as Prisma.InputJsonValue,
+          color: data.attributeName === "color" ? value : (variant.color ?? undefined),
+          size: data.attributeName === "size" ? value : (variant.size ?? undefined),
+          fabric: data.attributeName === "fabric" ? value : (variant.fabric ?? undefined),
+        },
+      });
+
+      for (const media of source.media) {
+        const alreadyExists = variant.media.some((existing) =>
+          Boolean((media.key && existing.key && media.key === existing.key) || media.url === existing.url)
+        );
+        if (alreadyExists) continue;
+        await tx.productVariantMedia.create({
+          data: {
+            variantId: variant.id, type: media.type, url: media.url, key: media.key,
+            thumbnailUrl: media.thumbnailUrl, altText: media.altText, title: media.title,
+            description: media.description, mimeType: media.mimeType, fileSize: media.fileSize,
+            duration: media.duration, width: media.width, height: media.height,
+            order: media.order, isActive: media.isActive,
+          },
+        });
+      }
+
+      for (const stock of await tx.stock.findMany({ where: { productId: sourceId } })) {
+        const targetVariantId = stock.variantId ?? variant.id;
+        const existing = await tx.stock.findFirst({
+          where: { productId: parentId, variantId: targetVariantId, warehouseId: stock.warehouseId, NOT: { id: stock.id } },
+        });
+        if (existing) {
+          await tx.stockAdjustment.updateMany({ where: { stockId: stock.id }, data: { stockId: existing.id } });
+          await tx.stock.update({
+            where: { id: existing.id },
+            data: { quantity: existing.quantity + stock.quantity, lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold) },
+          });
+          await tx.stock.delete({ where: { id: stock.id } });
+        } else {
+          await tx.stock.update({ where: { id: stock.id }, data: { productId: parentId, variantId: targetVariantId } });
+        }
+      }
+
+      for (const cartItem of await tx.cartItem.findMany({ where: { productId: sourceId } })) {
+        const duplicateCartItem = await tx.cartItem.findFirst({
+          where: { cartId: cartItem.cartId, productId: parentId, variantId: variant.id, NOT: { id: cartItem.id } },
+        });
+        if (duplicateCartItem) {
+          await tx.cartItem.update({ where: { id: duplicateCartItem.id }, data: { quantity: duplicateCartItem.quantity + cartItem.quantity } });
+          await tx.cartItem.delete({ where: { id: cartItem.id } });
+        } else {
+          await tx.cartItem.update({ where: { id: cartItem.id }, data: { productId: parentId, variantId: variant.id } });
+        }
+      }
+
+      for (const item of await tx.wishlistItem.findMany({ where: { productId: sourceId } })) {
+        const duplicateWishlist = await tx.wishlistItem.findFirst({ where: { wishlistId: item.wishlistId, productId: parentId } });
+        if (duplicateWishlist) await tx.wishlistItem.delete({ where: { id: item.id } });
+        else await tx.wishlistItem.update({ where: { id: item.id }, data: { productId: parentId } });
+      }
+
+      await tx.review.updateMany({ where: { productId: sourceId }, data: { productId: parentId } });
+      await tx.productView.updateMany({ where: { productId: sourceId }, data: { productId: parentId } });
+      await tx.productRequest.updateMany({
+        where: { productId: sourceId },
+        data: { productId: parentId, variantId: variant.id },
+      });
+
+      const basePrices = [...parent.variants.map((item) => Number(item.basePrice ?? parent.basePrice)), Number(variant.basePrice ?? source.basePrice)];
+      const sellingPrices = [...parent.variants.map((item) => Number(item.sellingPrice ?? item.price)), Number(variant.sellingPrice ?? variant.price)];
+      await tx.product.update({
+        where: { id: parentId },
+        data: {
+          basePrice: Math.min(...basePrices),
+          sellingPrice: Math.min(...sellingPrices),
+          ...(source.homeSections.length ? { homeSections: { connect: source.homeSections.map((item) => ({ id: item.id })) } } : {}),
+          ...(source.coupons.length ? { coupons: { connect: source.coupons.map((item) => ({ id: item.id })) } } : {}),
+        },
+      });
+      await tx.product.update({
+        where: { id: sourceId },
+        data: {
+          isActive: false,
+          ...(source.homeSections.length ? { homeSections: { disconnect: source.homeSections.map((item) => ({ id: item.id })) } } : {}),
+          ...(source.coupons.length ? { coupons: { disconnect: source.coupons.map((item) => ({ id: item.id })) } } : {}),
+        },
+      });
+
+      return {
+        product: await tx.product.findUnique({
+          where: { id: parentId },
+          include: { variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } } },
+        }),
+        archivedProductId: String(sourceId),
+        reusedVariantId: String(variant.id),
+        reusedSku: variant.sku,
+      };
+    }, { timeout: 30000 });
+  }
+
+  /**
+   * Extract one variant into a new simple product while preserving the variant ID/SKU.
+   * Require at least three variants before extraction so the source remains a valid
+   * variable product with at least two variants.
+   */
+  async extractVariantAsSimpleProduct(data: {
+    parentProductId: string;
+    variantId: string;
+    productName: string;
+    productSku?: string;
+  }) {
+    const parentId = BigInt(data.parentProductId);
+    const variantId = BigInt(data.variantId);
+    const name = data.productName.trim();
+    if (!name) throw new ValidationError("New simple product name is required");
+
+    return this.prisma.$transaction(async (tx) => {
+      const parent = await tx.product.findUnique({
+        where: { id: parentId },
+        include: {
+          variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
+          specifications: true,
+        },
+      });
+      if (!parent) throw new NotFoundError("Source variable product not found");
+      if (!parent.isActive || !parent.hasVariants) {
+        throw new ValidationError("Only an active variable product can have a variant extracted");
+      }
+      const variant = parent.variants.find((item) => item.id === variantId);
+      if (!variant) throw new NotFoundError("The selected variant does not belong to this variable product");
+      if (parent.variants.length <= 2) {
+        throw new ValidationError("At least three variants are required. Extraction must leave at least two variants in the original variable product.");
+      }
+
+      const slug = SlugUtil.generateSlug(name);
+      const slugConflict = await tx.product.findUnique({ where: { slug } });
+      if (slugConflict) throw new ConflictError(`A product with the name "${name}" already exists`);
+
+      let productSku = data.productSku?.trim();
+      if (productSku) {
+        const skuConflict = await tx.product.findUnique({ where: { sku: productSku } });
+        if (skuConflict) throw new ConflictError(`Product SKU "${productSku}" is already in use`);
+      } else {
+        productSku = this.generateSKU(name);
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const conflict = await tx.product.findUnique({ where: { sku: productSku } });
+          if (!conflict) break;
+          productSku = this.generateSKU(name);
+        }
+        if (await tx.product.findUnique({ where: { sku: productSku } })) {
+          throw new ConflictError("Could not generate a unique product SKU. Please provide one manually.");
+        }
+      }
+
+      const basePrice = Number(variant.basePrice ?? parent.basePrice);
+      const sellingPrice = Number(variant.sellingPrice ?? variant.price);
+      const newProduct = await tx.product.create({
+        data: {
+          name, slug, description: parent.description, categoryId: parent.categoryId,
+          basePrice, sellingPrice, sku: productSku, isActive: true, hasVariants: false,
+          hsnCode: parent.hsnCode, artisanName: parent.artisanName,
+          artisanAbout: parent.artisanAbout, artisanLocation: parent.artisanLocation,
+          metaTitle: parent.metaTitle, metaDesc: parent.metaDesc, schemaMarkup: parent.schemaMarkup,
+          weight: variant.weight ?? parent.weight, length: variant.length ?? parent.length,
+          breadth: variant.breadth ?? parent.breadth, height: variant.height ?? parent.height,
+          volumetricWeight: variant.volumetricWeight ?? parent.volumetricWeight,
+          allowOutOfStockOrders: parent.allowOutOfStockOrders,
+          hasVideoConsultation: parent.hasVideoConsultation,
+          videoPurchasingEnabled: parent.videoPurchasingEnabled,
+          videoConsultationNote: parent.videoConsultationNote,
+        },
+      });
+
+      if (parent.specifications.length) {
+        await tx.specification.createMany({
+          data: parent.specifications.map((spec) => ({ productId: newProduct.id, key: spec.key, value: spec.value })),
+        });
+      }
+
+      // Reparent the same variant; historical order and return product IDs remain unchanged.
+      await tx.productVariant.update({ where: { id: variantId }, data: { productId: newProduct.id } });
+      for (const media of variant.media) {
+        await tx.productMedia.create({
+          data: {
+            productId: newProduct.id, type: media.type, url: media.url, key: media.key,
+            thumbnailUrl: media.thumbnailUrl, altText: media.altText, title: media.title,
+            description: media.description, mimeType: media.mimeType, fileSize: media.fileSize,
+            duration: media.duration, width: media.width, height: media.height,
+            order: media.order, isActive: media.isActive,
+          },
+        });
+      }
+      await tx.stock.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+      await tx.cartItem.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+      await tx.productRequest.updateMany({ where: { productId: parentId, variantId }, data: { productId: newProduct.id } });
+
+      const remaining = parent.variants.filter((item) => item.id !== variantId);
+      await tx.product.update({
+        where: { id: parentId },
+        data: {
+          basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+          sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+        },
+      });
+
+      return {
+        product: await tx.product.findUnique({
+          where: { id: newProduct.id },
+          include: {
+            category: true, specifications: true,
+            media: { where: { isActive: true }, orderBy: { order: "asc" } },
+            variants: { include: { media: true, stock: true } },
+            stock: true,
+          },
+        }),
+        remainingVariantCount: remaining.length,
+        extractedVariantId: String(variantId),
+        preservedVariantSku: variant.sku,
+      };
+    }, { timeout: 30000 });
+  }
+
   private generateSKU(name: string): string {
     const slug = SlugUtil.generateSlug(name).substring(0, 10).toUpperCase();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
