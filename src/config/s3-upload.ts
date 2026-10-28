@@ -41,7 +41,11 @@ export class S3UploadService {
   private s3Client: S3Client;
   private bucket: string;
   private stagingBucket: string;
-  private readonly prisma = getPrismaClient();
+  // Resolve Prisma lazily so services can be constructed in tests and contexts
+  // that do not need compression settings/database access yet.
+  private get prisma() {
+    return getPrismaClient();
+  }
 
   constructor() {
     const isProd =
