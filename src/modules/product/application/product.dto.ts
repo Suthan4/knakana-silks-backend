@@ -186,10 +186,10 @@ export type PatchProductDTO = z.infer<typeof PatchProductDTOSchema>;
  * Each selected product becomes one existing variant, retaining its SKU.
  */
 export const ConsolidateSimpleProductsDTOSchema = z.object({
-  parentProductId: z.string().min(1, "Choose the product to keep as the parent"),
+  parentProductId: z.string().regex(/^[1-9]\d*$/, "Parent product ID must be a positive integer"),
   attributeName: z.enum(["color", "size", "fabric", "style"]),
   products: z.array(z.object({
-    productId: z.string().min(1),
+    productId: z.string().regex(/^[1-9]\d*$/, "Product ID must be a positive integer"),
     attributeValue: z.string().trim().min(1, "Variant value is required").max(120),
   })).min(2, "Select at least two products to consolidate").max(100),
 }).superRefine((data, ctx) => {
