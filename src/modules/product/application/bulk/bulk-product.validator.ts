@@ -885,8 +885,8 @@ export class BulkProductValidator {
       if (slug) allSlugsToCheck.push(slug);
     }
 
-    if (allSkusToCheck.length > 0) {
-      const [existingProductsWithSku, existingVariantsWithSku] = await Promise.all([
+    if (allSkusToCheck.length > 0 || allSlugsToCheck.length > 0) {
+      const [existingProductsWithSku, existingVariantsWithSku, existingProductsWithSlug] = await Promise.all([
         prisma.product.findMany({
           // SKU uniqueness is treated case-insensitively by bulk validation.
           // Match that rule in the database query too; a plain "in" query on
@@ -898,6 +898,10 @@ export class BulkProductValidator {
           where: { sku: { in: allSkusToCheck.map((sku) => sku.trim()), mode: "insensitive" } },
           select: { id: true, sku: true, productId: true, product: { select: { name: true } } },
         }),
+        prisma.product.findMany({
+          where: { slug: { in: allSlugsToCheck.map((slug) => slug.trim()), mode: "insensitive" } },
+          select: { id: true, slug: true, name: true },
+        }),
       ]);
 
       const conflictSkuMap = new Map<string, string>();
@@ -908,11 +912,39 @@ export class BulkProductValidator {
         conflictSkuMap.set(ev.sku.trim().toLowerCase(), `Variant of "${ev.product.name}"`);
       }
 
+      const conflictSlugMap = new Map<string, { id: string; name: string }>();
+      for (const existing of existingProductsWithSlug) {
+        if (existing.slug) {
+          conflictSlugMap.set(existing.slug.trim().toLowerCase(), {
+            id: existing.id.toString(),
+            name: existing.name,
+          });
+        }
+      }
+
       for (const p of productMap.values()) {
-        if (p.sku && conflictSkuMap.has(p.sku.toLowerCase())) {
+        const incomingSlug = (p.seo?.slug || SlugUtil.generateSlug(p.name)).trim().toLowerCase();
+        const existingSlug = incomingSlug ? conflictSlugMap.get(incomingSlug) : undefined;
+        if (existingSlug && (!p.id || existingSlug.id !== String(p.id))) {
+          const err: BulkValidationError = {
+            sheet: "Products",
+            row: p.rowNumber,
+            productGroupId: p.productGroupId,
+            field: "Product Name / SEO Slug",
+            message: `URL slug "${incomingSlug}" already exists in database for product "${existingSlug.name}".`,
+            fix: "Use a distinct product name or provide a unique SEO slug before importing.",
+            severity: "error",
+          };
+          errors.push(err);
+          if (!p.errors) p.errors = [];
+          p.errors.push(err);
+          p.isValid = false;
+        }
+
+        if (p.sku && conflictSkuMap.has(p.sku.trim().toLowerCase())) {
           // If editing an existing product and the SKU matches this product, allow it
           const existingProduct = existingProductsWithSku.find(
-            (ep) => ep.sku.toLowerCase() === p.sku!.toLowerCase()
+            (ep) => ep.sku.trim().toLowerCase() === p.sku!.trim().toLowerCase()
           );
           if (p.id && existingProduct && existingProduct.id.toString() === String(p.id)) {
             // Self match - valid update
@@ -935,9 +967,9 @@ export class BulkProductValidator {
 
         if (p.variants) {
           for (const v of p.variants) {
-            if (v.sku && conflictSkuMap.has(v.sku.toLowerCase())) {
+            if (v.sku && conflictSkuMap.has(v.sku.trim().toLowerCase())) {
               const existingVar = existingVariantsWithSku.find(
-                (ev) => ev.sku.toLowerCase() === v.sku!.toLowerCase()
+                (ev) => ev.sku.trim().toLowerCase() === v.sku!.trim().toLowerCase()
               );
               if (
                 (p.id && existingVar && (existingVar as any).productId?.toString() === String(p.id)) ||
