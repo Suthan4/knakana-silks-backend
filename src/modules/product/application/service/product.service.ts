@@ -2235,6 +2235,168 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       const variant = parent.variants.find((item) => item.id === variantId);
       if (!variant) throw new NotFoundError("The selected variant does not belong to this variable product");
 
+      // If this variant originally came from a simple product that was consolidated,
+      // restore that exact archived product instead of inventing a replacement name/SKU.
+      // Consolidation keeps the source product row and its original name, slug, media,
+      // specifications and product SKU; the original variant SKU links the two records.
+      const archivedOriginal = await tx.product.findFirst({
+        where: {
+          sku: variant.sku,
+          categoryId: parent.categoryId,
+          isActive: false,
+          hasVariants: false,
+        },
+        include: {
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
+        },
+      });
+
+      if (archivedOriginal) {
+        const remaining = parent.variants.filter((item) => item.id !== variantId);
+
+        // Reattach the existing variant to the exact source product. No new product,
+        // product name, SKU, variant, or image file is created in this restoration path.
+        await tx.productVariant.update({
+          where: { id: variantId },
+          data: { productId: archivedOriginal.id },
+        });
+
+        // Keep stock rows and adjustments attached to the same variant and warehouse.
+        for (const stock of await tx.stock.findMany({
+          where: { productId: parentId, variantId },
+        })) {
+          const existing = await tx.stock.findFirst({
+            where: {
+              productId: archivedOriginal.id,
+              variantId,
+              warehouseId: stock.warehouseId,
+              NOT: { id: stock.id },
+            },
+          });
+          if (existing) {
+            await tx.stockAdjustment.updateMany({
+              where: { stockId: stock.id },
+              data: { stockId: existing.id },
+            });
+            await tx.stock.update({
+              where: { id: existing.id },
+              data: {
+                quantity: existing.quantity + stock.quantity,
+                lowStockThreshold: Math.min(existing.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({
+              where: { id: stock.id },
+              data: { productId: archivedOriginal.id },
+            });
+          }
+        }
+
+        // Move cart lines for this exact variant back to the restored product,
+        // merging duplicate cart lines rather than creating duplicates.
+        for (const cartItem of await tx.cartItem.findMany({
+          where: { productId: parentId, variantId },
+        })) {
+          const duplicate = await tx.cartItem.findFirst({
+            where: {
+              cartId: cartItem.cartId,
+              productId: archivedOriginal.id,
+              variantId,
+              NOT: { id: cartItem.id },
+            },
+          });
+          if (duplicate) {
+            await tx.cartItem.update({
+              where: { id: duplicate.id },
+              data: { quantity: duplicate.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({
+              where: { id: cartItem.id },
+              data: { productId: archivedOriginal.id },
+            });
+          }
+        }
+        await tx.productRequest.updateMany({
+          where: { productId: parentId, variantId },
+          data: { productId: archivedOriginal.id },
+        });
+
+        // Source product media was retained during consolidation. Deactivate only
+        // variant-media copies of those same files to avoid duplicate storefront photos.
+        for (const media of await tx.productVariantMedia.findMany({
+          where: { variantId, isActive: true },
+        })) {
+          const duplicateOnProduct = archivedOriginal.media.some((productMedia) =>
+            (productMedia.key && media.key && productMedia.key === media.key) ||
+            productMedia.url === media.url
+          );
+          if (duplicateOnProduct) {
+            await tx.productVariantMedia.update({
+              where: { id: media.id },
+              data: { isActive: false },
+            });
+          }
+        }
+
+        await tx.product.update({
+          where: { id: archivedOriginal.id },
+          data: {
+            isActive: true,
+            hasVariants: false,
+            basePrice: Number(variant.basePrice ?? parent.basePrice),
+            sellingPrice: Number(variant.sellingPrice ?? variant.price),
+            weight: variant.weight ?? archivedOriginal.weight,
+            length: variant.length ?? archivedOriginal.length,
+            breadth: variant.breadth ?? archivedOriginal.breadth,
+            height: variant.height ?? archivedOriginal.height,
+            volumetricWeight: variant.volumetricWeight ?? archivedOriginal.volumetricWeight,
+          },
+        });
+
+        if (remaining.length > 0) {
+          await tx.product.update({
+            where: { id: parentId },
+            data: {
+              hasVariants: remaining.length > 1,
+              basePrice: Math.min(...remaining.map((item) => Number(item.basePrice ?? parent.basePrice))),
+              sellingPrice: Math.min(...remaining.map((item) => Number(item.sellingPrice ?? item.price))),
+            },
+          });
+        } else {
+          // Preserve the parent record for historical references, but remove it from
+          // the live catalog because its final variant has been restored elsewhere.
+          await tx.product.update({
+            where: { id: parentId },
+            data: {
+              isActive: false,
+              hasVariants: false,
+              homeSections: { set: [] },
+              coupons: { set: [] },
+            },
+          });
+        }
+
+        return {
+          product: await tx.product.findUnique({
+            where: { id: archivedOriginal.id },
+            include: {
+              category: true,
+              specifications: true,
+              media: { where: { isActive: true }, orderBy: { order: "asc" } },
+              variants: { include: { media: { where: { isActive: true } }, stock: true } },
+              stock: true,
+            },
+          }),
+          remainingVariantCount: remaining.length,
+          extractedVariantId: String(variantId),
+          preservedVariantSku: variant.sku,
+          restoredOriginalProduct: true,
+        };
+      }
 
       const slug = SlugUtil.generateSlug(name);
       const slugConflict = await tx.product.findUnique({ where: { slug } });
