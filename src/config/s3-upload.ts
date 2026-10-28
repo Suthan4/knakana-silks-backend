@@ -98,7 +98,8 @@ export class S3UploadService {
    */
   async uploadFile(
     file: Express.Multer.File,
-    folder?: string
+    folder?: string,
+    uploadTypeOverride?: AssetCategory,
   ): Promise<S3UploadResult> {
     const isProd =
       process.env.NODE_ENV === "production" || process.env.NODE_ENV === "qa";
@@ -111,9 +112,10 @@ export class S3UploadService {
     try {
       // ── IMAGE PATH ──────────────────────────────────────────────────────────
       if (this.isImage(file.mimetype)) {
-        const assetCategory = KankanaImageOptimizer.resolveAssetCategory(
-          folder
-        ) as AssetCategory;
+        const resolvedCategory = KankanaImageOptimizer.resolveAssetCategory(folder) as AssetCategory;
+        const assetCategory = uploadTypeOverride && ["product", "category", "banner", "bulk"].includes(uploadTypeOverride)
+          ? uploadTypeOverride
+          : resolvedCategory;
 
         const setting = await this.prisma.imageCompressionSetting.findUnique({
           where: { uploadType: assetCategory },
