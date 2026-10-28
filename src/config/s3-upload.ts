@@ -162,7 +162,10 @@ export class S3UploadService {
     const originalName = path.basename(input.stagingKey).replace(/^[0-9a-f-]{36}-/i, "") || "image";
     const fileType = String(head.ContentType || "application/octet-stream");
     const allowedFolders = new Set(["products", "products/variants", "categories", "banners", "home-sections", "bulk"]);
-    const folder = input.folder && allowedFolders.has(input.folder) ? input.folder : "products";
+    if (input.folder && !allowedFolders.has(input.folder)) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Unsupported upload folder.", 400);
+    }
+    const folder = input.folder || "products";
     const uploadType = input.uploadType;
     const result = await this.uploadFile({
       fieldname: "file",
