@@ -440,15 +440,25 @@ export class ProductService {
         }
       }
 
-      // Handle media
+      // Synchronize product media without soft-deleting/recreating every row.
+      // Existing media is retained by stable URL/key identity; removed references
+      // are soft-deleted, and genuinely new/replaced images get new rows.
       if (data.media !== undefined) {
-        if (product.media?.length) {
-          for (const m of product.media) {
-            await this.productRepository.deleteMedia(m.id, tx);
-          }
-        }
-        for (const mediaItem of data.media) {
-          await this.productRepository.addMedia(productId, {
+        const existingMedia = product.media || [];
+        const incoming = data.media;
+        const retainedIds = new Set<string>();
+        const usedExistingIds = new Set<string>();
+
+        for (const mediaItem of incoming) {
+          const match = existingMedia.find((existing: any) => {
+            const id = String(existing.id);
+            if (usedExistingIds.has(id)) return false;
+            const sameKey = Boolean(mediaItem.key && existing.key && mediaItem.key === existing.key);
+            const sameUrl = Boolean(mediaItem.url && existing.url === mediaItem.url);
+            return sameKey || sameUrl;
+          });
+
+          const mediaData = {
             type: mediaItem.type || MediaType.IMAGE,
             url: mediaItem.url,
             key: mediaItem.key,
@@ -461,9 +471,24 @@ export class ProductService {
             duration: mediaItem.duration,
             width: mediaItem.width,
             height: mediaItem.height,
-            order: mediaItem.order,
-            isActive: mediaItem.isActive,
-          }, tx);
+            order: mediaItem.order ?? 0,
+            isActive: mediaItem.isActive ?? true,
+          };
+
+          if (match) {
+            const id = String(match.id);
+            usedExistingIds.add(id);
+            retainedIds.add(id);
+            await this.productRepository.updateMedia(match.id, mediaData as any, tx);
+          } else {
+            await this.productRepository.addMedia(productId, mediaData, tx);
+          }
+        }
+
+        for (const existing of existingMedia) {
+          if (!retainedIds.has(String(existing.id)) && !usedExistingIds.has(String(existing.id))) {
+            await this.productRepository.deleteMedia(existing.id, tx);
+          }
         }
       }
 
