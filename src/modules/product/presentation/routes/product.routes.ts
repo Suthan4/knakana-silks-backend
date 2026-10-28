@@ -275,6 +275,14 @@ router.post(
   (req, res) => getProductController().createProduct(req, res)
 );
 
+router.post(
+  "/admin/products/consolidate-variants",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().consolidateSimpleProducts(req, res)
+);
+
 router.get(
   "/admin/products",
   authenticate,
