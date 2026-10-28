@@ -1,10 +1,10 @@
 # Direct-to-S3 image upload setup
 
-The admin uploads an image to a short-lived staging/<admin-user-id>/... object using a presigned PUT URL. The browser then calls the authenticated finalize endpoint. Finalization validates the actual bytes and sends them through the existing compression policy before returning a permanent media URL. Do not save staging URLs in product records.
+The admin uploads an image to a short-lived staging/<admin-user-id>/... object in a **separate private S3 bucket** using a presigned PUT URL. Configure the backend environment variable AWS_S3_STAGING_BUCKET to that private bucket. In production the backend intentionally refuses direct uploads if this variable is missing; do not point it at the public product-media bucket. The browser then calls the authenticated finalize endpoint. Finalization validates the actual bytes and sends them through the existing compression policy before returning a permanent media URL. Do not save staging URLs in product records.
 
 ## S3 CORS
 
-Merge the following rule into the bucket's existing CORS configuration; do not overwrite other rules needed by the storefront or CDN.
+Apply the following rule to the **private staging bucket** CORS configuration; do not overwrite other rules needed by the storefront or CDN on the public media bucket.
 
 ```json
 [
@@ -34,7 +34,7 @@ If additional admin origins are used, add only the exact trusted origin. Do not 
 
 ## Lifecycle cleanup
 
-Configure an S3 lifecycle rule on prefix staging/ to expire objects after **1 day**. A browser may close after uploading but before finalize; this rule prevents abandoned staging files from accumulating. The finalizer deletes the staging object after the permanent object has been written successfully.
+Configure an S3 lifecycle rule on prefix staging/ in the private staging bucket to expire objects after **1 day**. A browser may close after uploading but before finalize; this rule prevents abandoned staging files from accumulating. The finalizer deletes the staging object after the permanent object has been written successfully.
 
 ## Limits and processing
 
