@@ -1752,13 +1752,10 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         throw new ValidationError("Variant values must be unique");
       }
 
-      const selectedById = new Map(selected.map((product) => [String(product.id), product]));
       const itemById = new Map(data.products.map((item) => [item.productId, item]));
       const variantByProductId = new Map(
         selected.map((product) => [String(product.id), product.variants[0]]),
       );
-      const parentVariant = variantByProductId.get(String(parentId))!;
-
       // Keep the parent SKU stable; price fields on the parent represent the
       // lowest variant price so catalog cards can show a useful "from" price.
       const minBasePrice = Math.min(...selected.map((product) => Number(product.basePrice)));
@@ -1908,7 +1905,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
           where: { productId: product.id },
           data: {
             productId: parentId,
-            variantId: { set: variantByProductId.get(String(product.id))!.id },
+            variantId: variantByProductId.get(String(product.id))!.id,
           },
         });
       }
