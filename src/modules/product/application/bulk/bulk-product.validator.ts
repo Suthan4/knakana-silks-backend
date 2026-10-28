@@ -873,6 +873,7 @@ export class BulkProductValidator {
     // ─────────────────────────────────────────────────────────────────────────
     const allSkusToCheck: string[] = [];
     const allSlugsToCheck: string[] = [];
+    const allProductNamesToCheck: string[] = [];
 
     for (const p of productMap.values()) {
       if (p.sku) allSkusToCheck.push(p.sku);
@@ -883,10 +884,11 @@ export class BulkProductValidator {
       }
       const slug = p.seo?.slug || SlugUtil.generateSlug(p.name);
       if (slug) allSlugsToCheck.push(slug);
+      if (p.name?.trim()) allProductNamesToCheck.push(p.name.trim());
     }
 
-    if (allSkusToCheck.length > 0 || allSlugsToCheck.length > 0) {
-      const [existingProductsWithSku, existingVariantsWithSku, existingProductsWithSlug] = await Promise.all([
+    if (allSkusToCheck.length > 0 || allSlugsToCheck.length > 0 || allProductNamesToCheck.length > 0) {
+      const [existingProductsWithSku, existingVariantsWithSku, existingProductsWithSlug, existingProductsWithName] = await Promise.all([
         prisma.product.findMany({
           // SKU uniqueness is treated case-insensitively by bulk validation.
           // Match that rule in the database query too; a plain "in" query on
@@ -901,6 +903,10 @@ export class BulkProductValidator {
         prisma.product.findMany({
           where: { slug: { in: allSlugsToCheck.map((slug) => slug.trim()), mode: "insensitive" } },
           select: { id: true, slug: true, name: true },
+        }),
+        prisma.product.findMany({
+          where: { name: { in: allProductNamesToCheck, mode: "insensitive" } },
+          select: { id: true, name: true },
         }),
       ]);
 
@@ -922,7 +928,70 @@ export class BulkProductValidator {
         }
       }
 
+      const normalizeProductName = (name: string) =>
+        name.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+
+      const existingNames = new Map<string, { id: string; name: string }>();
+      for (const existing of existingProductsWithName) {
+        existingNames.set(normalizeProductName(existing.name), {
+          id: existing.id.toString(),
+          name: existing.name,
+        });
+      }
+
+      // Product names are checked independently of SKU and slug. This catches
+      // duplicate names even when different SKUs or custom slugs are supplied.
+      const seenNamesInBatch = new Map<string, BulkParsedProduct>();
+      for (const product of productMap.values()) {
+        const normalizedName = normalizeProductName(product.name);
+        const previous = normalizedName ? seenNamesInBatch.get(normalizedName) : undefined;
+        if (previous) {
+          const error: BulkValidationError = {
+            sheet: "Products",
+            row: product.rowNumber,
+            productGroupId: product.productGroupId,
+            field: "Product Name",
+            message: `Product name "${product.name}" duplicates "${previous.name}" in this import.`,
+            fix: "Use a distinct product name, or combine the products as variants if they represent the same item in different colors or sizes.",
+            severity: "error",
+          };
+          errors.push(error);
+          product.errors = [...(product.errors || []), error];
+          product.isValid = false;
+
+          const previousError: BulkValidationError = {
+            ...error,
+            row: previous.rowNumber,
+            productGroupId: previous.productGroupId,
+            message: `Product name "${previous.name}" duplicates "${product.name}" in this import.`,
+          };
+          errors.push(previousError);
+          previous.errors = [...(previous.errors || []), previousError];
+          previous.isValid = false;
+        } else if (normalizedName) {
+          seenNamesInBatch.set(normalizedName, product);
+        }
+      }
+
       for (const p of productMap.values()) {
+        const normalizedName = normalizeProductName(p.name);
+        const existingName = normalizedName ? existingNames.get(normalizedName) : undefined;
+        if (existingName && (!p.id || existingName.id !== String(p.id))) {
+          const err: BulkValidationError = {
+            sheet: "Products",
+            row: p.rowNumber,
+            productGroupId: p.productGroupId,
+            field: "Product Name",
+            message: `Product name "${p.name}" already exists in the catalog as "${existingName.name}".`,
+            fix: "Check the existing product first. Rename the new product, or combine it with the existing product as variants if appropriate.",
+            severity: "error",
+          };
+          errors.push(err);
+          if (!p.errors) p.errors = [];
+          p.errors.push(err);
+          p.isValid = false;
+        }
+
         const incomingSlug = (p.seo?.slug || SlugUtil.generateSlug(p.name)).trim().toLowerCase();
         const existingSlug = incomingSlug ? conflictSlugMap.get(incomingSlug) : undefined;
         if (existingSlug && (!p.id || existingSlug.id !== String(p.id))) {
