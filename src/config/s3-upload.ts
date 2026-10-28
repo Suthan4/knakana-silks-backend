@@ -166,7 +166,10 @@ export class S3UploadService {
     if (!response.Body) {
       throw new ImageOptimizationError("INVALID_FILE_TYPE", "Staged image could not be read.", 422);
     }
-    const bytes = Buffer.from(await response.Body.transformToByteArray());
+    const rawBytes = await response.Body.transformToByteArray();
+    // Create a Buffer view over the SDK byte array instead of copying the entire
+    // 40–100 MB payload and doubling peak memory during finalization.
+    const bytes = Buffer.from(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
     if (bytes.length !== size || bytes.length > maxBytes) {
       throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image size verification failed.", 413, { expectedBytes: size, actualBytes: bytes.length });
     }
