@@ -201,7 +201,8 @@ export const QueryProductDTOSchema = z.object({
     ),
 
   // Product Flags
-  isActive: z.coerce.boolean().optional().default(true),
+  // Keep omitted status distinct from explicit true/false so admin can request all statuses.
+  isActive: z.coerce.boolean().optional(),
   hasVariants: z.coerce.boolean().optional(),
 
   // Price Range
