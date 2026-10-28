@@ -472,7 +472,6 @@ async matchDrive(
     const nextParsed = Array.isArray(parsed) ? nextList : { ...parsed, products: nextList };
     const draft = await this.repo.update(id, {
       parsedData: nextParsed as any,
-      rawInput: JSON.stringify(nextParsed, null, 2),
       status: nextList.length === 0 || nextList.every((product) => product._importStatus === "skipped")
         ? "COMPLETED"
         : "DRAFT",
@@ -514,11 +513,22 @@ async matchDrive(
       );
     }
 
+    const activeGroupIds = new Set(products.map((product) => String(product.productGroupId)));
+    const storedMatches = existing.imageMatches as any;
+    const filteredMatches = storedMatches && Array.isArray(storedMatches.matched)
+      ? {
+          ...storedMatches,
+          matched: storedMatches.matched.filter((entry: any) =>
+            activeGroupIds.has(String(entry.productGroupId))
+          ),
+        }
+      : storedMatches;
+
     return this.jobService.startJob({
       userId: userId.toString(),
       draftId: id,
       products,
-      imageMatches: existing.imageMatches as any,
+      imageMatches: filteredMatches,
       driveUserId: userId.toString(),
     });
   }
