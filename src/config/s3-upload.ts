@@ -124,7 +124,6 @@ export class S3UploadService {
       Bucket: this.bucket,
       Key: stagingKey,
       ContentType: input.fileType,
-      CacheControl: "no-store",
     });
     const expiresIn = 300;
     const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn });
