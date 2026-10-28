@@ -40,6 +40,7 @@ export interface S3UploadFileResult {
 export class S3UploadService {
   private s3Client: S3Client;
   private bucket: string;
+  private stagingBucket: string;
   private readonly prisma = getPrismaClient();
 
   constructor() {
@@ -68,6 +69,9 @@ export class S3UploadService {
           }
     );
     this.bucket = process.env.AWS_S3_BUCKET!;
+    // Production staging must use a separate private bucket; never place temporary
+    // uploads in the public product-media bucket.
+    this.stagingBucket = process.env.AWS_S3_STAGING_BUCKET || (isProd ? "" : this.bucket);
     if (!isProd) {
       this.ensureBucketExists();
     }
@@ -101,6 +105,9 @@ export class S3UploadService {
     folder?: string;
     uploadType?: AssetCategory;
   }): Promise<{ uploadUrl: string; stagingKey: string; expiresIn: number }> {
+    if (!this.stagingBucket) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Configure AWS_S3_STAGING_BUCKET as a separate private bucket before enabling direct uploads.", 503);
+    }
     const maxBytes = 100 * 1024 * 1024;
     const allowedImageTypes = new Set([
       "image/jpeg", "image/png", "image/webp", "image/tiff", "image/avif",
@@ -121,7 +128,7 @@ export class S3UploadService {
     const assetCategory = input.uploadType || KankanaImageOptimizer.resolveAssetCategory(folder);
     const stagingKey = `staging/${input.userId}/${assetCategory}/${randomUUID()}-${safeName}`;
     const command = new PutObjectCommand({
-      Bucket: this.bucket,
+      Bucket: this.stagingBucket,
       Key: stagingKey,
       ContentType: input.fileType,
     });
@@ -145,14 +152,17 @@ export class S3UploadService {
       throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Staging object does not belong to the authenticated uploader.", 403);
     }
 
-    const head = await this.s3Client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    if (!this.stagingBucket) {
+      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Direct uploads require a configured private staging bucket.", 503);
+    }
+    const head = await this.s3Client.send(new HeadObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
     const size = Number(head.ContentLength || 0);
     const maxBytes = 100 * 1024 * 1024;
     if (!size || size > maxBytes) {
       throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image is empty or exceeds the 100 MB processing limit.", 413, { sizeBytes: size, limitBytes: maxBytes });
     }
 
-    const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
     if (!response.Body) {
       throw new ImageOptimizationError("INVALID_FILE_TYPE", "Staged image could not be read.", 422);
     }
@@ -183,7 +193,7 @@ export class S3UploadService {
     } as Express.Multer.File, folder, uploadType);
 
     // Remove staging bytes only after the final object has been written.
-    await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
+    await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
     return result;
   }
 
