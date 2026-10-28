@@ -930,7 +930,7 @@ export class BulkImportJobService {
             ? { ...currentParsed, products: mergedProducts }
             : mergedProducts;
         await this.draftRepo.update(rawJob.draftId, {
-          rawInput: JSON.stringify(parsedPayload, null, 2),
+          rawInput: JSON.stringify(mergedProducts, null, 2),
           parsedData: parsedPayload,
           status: finalDraftStatus,
         });
