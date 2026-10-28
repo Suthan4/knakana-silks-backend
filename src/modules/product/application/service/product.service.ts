@@ -2043,10 +2043,11 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         const attrs = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
           ? variant.attributes as Record<string, unknown>
           : {};
-        const current = data.attributeName === "color" ? variant.color
+        const legacy = data.attributeName === "color" ? variant.color
           : data.attributeName === "size" ? variant.size
           : data.attributeName === "fabric" ? variant.fabric
-          : attrs[data.attributeName];
+          : undefined;
+        const current = legacy ?? attrs[data.attributeName];
         return typeof current === "string" && current.trim().toLocaleLowerCase() === normalizedValue;
       });
       if (duplicate) {
@@ -2183,6 +2184,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
         include: {
           variants: { include: { media: true, stock: true }, orderBy: { id: "asc" } },
           specifications: true,
+          media: { where: { isActive: true }, orderBy: { order: "asc" } },
         },
       });
       if (!parent) throw new NotFoundError("Source variable product not found");
@@ -2242,7 +2244,12 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
 
       // Reparent the same variant; historical order and return product IDs remain unchanged.
       await tx.productVariant.update({ where: { id: variantId }, data: { productId: newProduct.id } });
-      for (const media of variant.media) {
+      const inheritedMedia = [...parent.media, ...variant.media];
+      const seenMedia = new Set<string>();
+      for (const media of inheritedMedia) {
+        const identity = media.key ? `key:${media.key}` : `url:${media.url}`;
+        if (seenMedia.has(identity)) continue;
+        seenMedia.add(identity);
         await tx.productMedia.create({
           data: {
             productId: newProduct.id, type: media.type, url: media.url, key: media.key,
