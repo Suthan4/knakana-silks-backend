@@ -35,6 +35,7 @@ import { setupShipmentCronJobs } from "./modules/shipment/shipment.corn.setup.js
 import returnRoutes from "./modules/return/presentation/routes/return.routes.js";
 import stockRoutes from "./modules/stock/presentation/routes/stock.routes.js";
 import reviewRoutes from "./modules/review/presentation/routes/review.routes.js";
+import imageCompressionSettingsRoutes from "./modules/image-compression-settings/presentation/image-compression-settings.routes.js";
 import { httpLoggerMiddleware } from "./shared/middleware/http-logger.middleware.js";
 import { metricsHandler, metricsMiddleware } from "./shared/middleware/metrics.middleware.js";
 
@@ -129,6 +130,7 @@ app.options("*", cors(corsOptions));
   app.use("/api", searchRoutes);
   app.use("/api", shippingCalculatorRoutes);
   app.use("/api", reviewRoutes);
+  app.use("/api", imageCompressionSettingsRoutes);
 
   /* --------------------------------------------------
    * Health check
