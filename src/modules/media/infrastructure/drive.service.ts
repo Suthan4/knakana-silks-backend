@@ -495,8 +495,8 @@ export class DriveService {
 
   /**
    * Download a matched Drive image for the background bulk-import worker.
-   * Check metadata before allocating memory and apply the same 60 MB raw-file
-   * ceiling as the upload API.
+   * No application-level per-image byte limit is configured for now.
+   * Actual downloads still require sufficient memory and runtime capacity.
    */
   async downloadFileForImport(
     userId: string,
@@ -504,7 +504,6 @@ export class DriveService {
   ): Promise<{ buffer: Buffer; name: string; mimeType: string; size: number }> {
     const auth = await this.getOAuthClient(userId);
     const drive = google.drive({ version: "v3", auth });
-    const maxBytes = 60 * 1024 * 1024;
 
     const metadata: any = await drive.files.get({
       fileId,
@@ -518,13 +517,6 @@ export class DriveService {
     if (!mimeType.startsWith("image/")) {
       throw new AppError(422, `Drive file "${name}" is not an image (${mimeType}).`);
     }
-    if (declaredSize > maxBytes) {
-      throw new AppError(
-        413,
-        `Image "${name}" is ${(declaredSize / 1024 / 1024).toFixed(1)} MB; the per-image limit is 60 MB.`
-      );
-    }
-
     const response: any = await drive.files.get(
       { fileId, alt: "media", supportsAllDrives: true } as any,
       { responseType: "arraybuffer" }
@@ -541,10 +533,6 @@ export class DriveService {
     if (!buffer.length) {
       throw new AppError(502, `Google Drive returned an empty image for "${name}".`);
     }
-    if (buffer.length > maxBytes) {
-      throw new AppError(413, `Image "${name}" exceeds the 60 MB upload limit after download.`);
-    }
-
     return { buffer, name, mimeType, size: buffer.length };
   }
 
