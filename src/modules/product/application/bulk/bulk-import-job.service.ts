@@ -911,11 +911,24 @@ export class BulkImportJobService {
         });
         const draft = await this.draftRepo.findById(rawJob.draftId);
         const currentParsed = draft?.parsedData as any;
+        const currentProducts: BulkParsedProduct[] = Array.isArray(currentParsed)
+          ? currentParsed
+          : Array.isArray(currentParsed?.products)
+            ? currentParsed.products
+            : [];
+        const persistedByGroup = new Map(persistedProducts.map((product) => [product.productGroupId, product]));
+        const mergedProducts = currentProducts.map((product) =>
+          persistedByGroup.get(product.productGroupId) ?? product
+        );
+        const currentGroupIds = new Set(mergedProducts.map((product) => product.productGroupId));
+        for (const product of persistedProducts) {
+          if (!currentGroupIds.has(product.productGroupId)) mergedProducts.push(product);
+        }
         const parsedPayload = Array.isArray(currentParsed)
-          ? persistedProducts
+          ? mergedProducts
           : currentParsed && typeof currentParsed === "object"
-            ? { ...currentParsed, products: persistedProducts }
-            : persistedProducts;
+            ? { ...currentParsed, products: mergedProducts }
+            : mergedProducts;
         await this.draftRepo.update(rawJob.draftId, {
           rawInput: JSON.stringify(parsedPayload, null, 2),
           parsedData: parsedPayload,
