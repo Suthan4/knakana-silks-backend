@@ -105,7 +105,7 @@ export interface OptimizationResult {
 
 export class KankanaImageOptimizer {
   private static readonly MIN_RESOLUTION_PX = 600;
-  private static readonly MAX_COMPRESSION_ATTEMPTS = 6;
+  private static readonly MAX_COMPRESSION_ATTEMPTS = 10;
   private static readonly ALLOWED_SOURCE_MIMES = new Set([
     "image/jpeg",
     "image/png",
@@ -240,7 +240,7 @@ export class KankanaImageOptimizer {
 
     // ── STEP 4: Bounded Iterative Compression (Max 6 attempts) ──────────────
     let attempts = 0;
-    let minQ = 45;
+    let minQ = 30;
     let maxQ = 100;
     let currentQ = config.initialQuality;
 
@@ -273,9 +273,9 @@ export class KankanaImageOptimizer {
         closestCandidateQuality = currentQ;
       }
 
-      // Check if candidate strictly lands within the allowable asset boundaries
-      const isWithinBounds =
-        candidateSize >= config.minBytes && candidateSize <= config.maxBytes;
+      // The maximum is a hard delivery budget; the minimum is only a target.
+      // Never reject a visually good image just because it compresses below 400 KB.
+      const isWithinBounds = candidateSize <= config.maxBytes;
 
       if (isWithinBounds) {
         if (diffFromTarget < bestValidDiff) {
@@ -319,8 +319,7 @@ export class KankanaImageOptimizer {
       const fallbackBuffer = closestCandidateBuffer;
       const fallbackSize = fallbackBuffer ? fallbackBuffer.length : 0;
 
-      if (fallbackSize < config.minBytes) {
-        throw new ImageOptimizationError(
+      throw new ImageOptimizationError(
           "SIZE_POLICY_VIOLATION",
           `Source image cannot meet the minimum required asset boundary of ${(
             config.minBytes / 1024
