@@ -1740,6 +1740,9 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       if (selected.some((product) => product.hasVariants)) {
         throw new ValidationError("Only simple products can be consolidated. Remove any variable product from the selection.");
       }
+      if (selected.some((product) => !product.isActive)) {
+        throw new ValidationError("Only active simple products can be consolidated. Archived or inactive products cannot be selected.");
+      }
       if (selected.some((product) => product.categoryId !== parent.categoryId)) {
         throw new ValidationError("All selected products must belong to the same category");
       }
