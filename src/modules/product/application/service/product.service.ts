@@ -1136,7 +1136,39 @@ export class ProductService {
     if (!product) {
       throw new NotFoundError("Product not found");
     }
-    return product;
+
+    // Storefront compatibility: legacy fields (color/size/fabric) and dynamic
+    // attributes can describe the same option. Normalize attribute names and
+    // suppress duplicate representations so shoppers see each option only once.
+    const variants = (product as any).variants;
+    if (!Array.isArray(variants)) return product;
+
+    const normalizedVariants = variants.map((variant: any) => {
+      const raw = variant.attributes && typeof variant.attributes === "object" && !Array.isArray(variant.attributes)
+        ? variant.attributes as Record<string, unknown>
+        : {};
+      const attributes: Record<string, unknown> = {};
+      const entries = Object.entries(raw).sort(([left], [right]) => {
+        const leftKey = left.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const rightKey = right.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_");
+        const leftCanonical = left === leftKey ? 0 : 1;
+        const rightCanonical = right === rightKey ? 0 : 1;
+        return leftCanonical - rightCanonical;
+      });
+
+      for (const [rawKey, value] of entries) {
+        const key = rawKey.trim().toLocaleLowerCase().replace(/[\\s-]+/g, "_").replace(/[^\\p{L}\\p{N}_]/gu, "");
+        if (!key || key === "default") continue;
+        if (key === "color" && typeof variant.color === "string" && variant.color.trim()) continue;
+        if (key === "size" && typeof variant.size === "string" && variant.size.trim()) continue;
+        if (key === "fabric" && typeof variant.fabric === "string" && variant.fabric.trim()) continue;
+        if (!(key in attributes)) attributes[key] = value;
+      }
+
+      return { ...variant, attributes: Object.keys(attributes).length ? attributes : null };
+    });
+
+    return { ...product, variants: normalizedVariants };
   }
 
   async getProducts(params: {
