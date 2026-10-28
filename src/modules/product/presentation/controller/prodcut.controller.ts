@@ -13,6 +13,7 @@ import {
   UpdateVariantDTOSchema,
   AddVariantMediaDTOSchema,
   UpdateStockDTOSchema,
+  ConsolidateSimpleProductsDTOSchema,
 } from "../../application/product.dto.js";
 
 import { CategoryCacheModule } from "@/modules/category/category.cache.js";
@@ -269,6 +270,39 @@ export class ProductController {
     });
   }
 }
+
+  /**
+   * Admin workflow: consolidate existing simple products into variants.
+   * Source products are archived by the service, not deleted.
+   */
+  async consolidateSimpleProducts(req: Request, res: Response) {
+    try {
+      const data = ConsolidateSimpleProductsDTOSchema.parse(req.body);
+      const result = await this.productService.consolidateSimpleProducts(data);
+      return res.status(200).json({
+        success: true,
+        message: `Consolidated ${result.variantsCreated} existing products into one variable product. Source products were archived.`,
+        data: result,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product consolidation request",
+          errors: error.errors,
+        });
+      }
+      const statusCode =
+        error.statusCode ||
+        (error.name === "NotFoundError" ? 404 :
+          error.name === "ConflictError" ? 409 :
+          error.name === "ValidationError" ? 400 : 500);
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || "Failed to consolidate products",
+      });
+    }
+  }
 
   async getProduct(req: Request, res: Response) {
     try {
