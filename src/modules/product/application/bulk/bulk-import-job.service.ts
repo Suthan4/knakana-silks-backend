@@ -574,10 +574,9 @@ export class BulkImportJobService {
     }
 
     const uploadedByDriveId = new Map<string, UploadedDriveImage>();
-    // Four selected images can be sent through one multi-file S3 upload call.
-    // Keep batches bounded to avoid excessive per-request overhead without
-    // downloading every original from Drive at once.
-    const batchSize = 4;
+    // Large camera originals can be 40–60 MB each. Process one source at a time
+    // so Drive buffers and Sharp processing do not multiply peak memory usage.
+    const batchSize = 1;
 
     if (entriesToUpload.length > 0 || mappingFailures.length > 0) {
       rawJob.stage = "uploading_images";
@@ -684,7 +683,8 @@ export class BulkImportJobService {
               : 0;
             rawJob.currentFile = item.file.name;
             await this.saveJob(rawJob);
-          }
+          },
+          "bulk"
         );
       }
 
