@@ -1808,14 +1808,8 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
             },
           });
         }
-        // Keep the retained parent's product-level media active for existing
-        // catalog cards/SEO; only archive media on source products.
-        if (product.id !== parentId && product.media.length) {
-          await tx.productMedia.updateMany({
-            where: { productId: product.id },
-            data: { isActive: false },
-          });
-        }
+        // Keep original product-media rows active for admin audit/history.
+        // Archived source products are inactive, so their media is not storefront-visible.
       }
 
       // Move stock to the retained parent and associate it with the existing
@@ -1902,6 +1896,21 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
             });
           }
         }
+      }
+
+      // Reviews and product-view history describe the same catalog item after
+      // consolidation, so attach them to the retained parent rather than losing
+      // ratings/analytics when source products become inactive.
+      for (const product of selected) {
+        if (product.id === parentId) continue;
+        await tx.review.updateMany({
+          where: { productId: product.id },
+          data: { productId: parentId },
+        });
+        await tx.productView.updateMany({
+          where: { productId: product.id },
+          data: { productId: parentId },
+        });
       }
 
       // Repoint product availability requests while retaining their variant IDs.
