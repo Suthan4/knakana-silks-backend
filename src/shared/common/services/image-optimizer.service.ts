@@ -238,122 +238,54 @@ export class KankanaImageOptimizer {
       m2: 2.0,
     });
 
-    // ── STEP 4: Bounded Iterative Compression (Max 6 attempts) ──────────────
+    // ── STEP 4: Predictable WebP export ────────────────────────────────────
+    // Product/catalog images use a fixed quality of 70. If the result exceeds
+    // the preferred byte budget, progressively reduce dimensions before upload.
+    // The size budget is a target, never a reason to reject an otherwise valid image.
+    const exportQuality = 70;
     let attempts = 0;
-    let minQ = 30;
-    let maxQ = 100;
-    let currentQ = config.initialQuality;
+    let exportDimension = Math.min(config.maxDimension, Math.max(width, height));
+    let finalBuffer: Buffer | null = null;
+    let finalMetadata: sharp.Metadata | null = null;
 
-    let bestValidBuffer: Buffer | null = null;
-    let bestValidQuality = currentQ;
-    let bestValidDiff = Infinity;
-
-    let closestCandidateBuffer: Buffer | null = null;
-    let closestCandidateQuality = currentQ;
-    let closestCandidateDiff = Infinity;
-
-    while (attempts < this.MAX_COMPRESSION_ATTEMPTS) {
+    while (attempts < 12) {
       attempts++;
-
-      const candidateBuffer = await basePipeline
+      const candidate = await basePipeline
         .clone()
+        .resize({
+          width: exportDimension,
+          height: exportDimension,
+          fit: sharp.fit.inside,
+          withoutEnlargement: true,
+          kernel: sharp.kernel.lanczos3,
+        })
         .webp({
-          quality: currentQ,
+          quality: exportQuality,
           effort: 6,
-          smartSubsample: true, // Prevents gold/silver zari bleeding into rich fabrics
+          smartSubsample: true,
         })
         .toBuffer();
 
-      const candidateSize = candidateBuffer.length;
-      const diffFromTarget = Math.abs(candidateSize - config.targetBytes);
+      finalBuffer = candidate;
+      finalMetadata = await sharp(candidate).metadata();
 
-      if (diffFromTarget < closestCandidateDiff) {
-        closestCandidateDiff = diffFromTarget;
-        closestCandidateBuffer = candidateBuffer;
-        closestCandidateQuality = currentQ;
-      }
-
-      // The maximum is a hard delivery budget; the minimum is only a target.
-      // Never reject a visually good image just because it compresses below 400 KB.
-      const isWithinBounds = candidateSize <= config.maxBytes;
-
-      if (isWithinBounds) {
-        if (diffFromTarget < bestValidDiff) {
-          bestValidDiff = diffFromTarget;
-          bestValidBuffer = candidateBuffer;
-          bestValidQuality = currentQ;
-        }
-
-        // Target convergence check: if within 5% of targetBytes, break early
-        if (diffFromTarget <= config.targetBytes * 0.05) {
-          break;
-        }
-
-        // Steer towards targetBytes within allowable boundary
-        if (candidateSize < config.targetBytes) {
-          minQ = currentQ + 1;
-        } else {
-          maxQ = currentQ - 1;
-        }
-      } else {
-        // Outside boundaries: adjust bounds to navigate towards the window
-        if (candidateSize > config.maxBytes) {
-          maxQ = currentQ - 1;
-        } else {
-          minQ = currentQ + 1;
-        }
-      }
-
-      if (minQ > maxQ) {
+      if (candidate.length <= config.maxBytes || exportDimension <= this.MIN_RESOLUTION_PX) {
         break;
       }
 
-      currentQ = Math.round((minQ + maxQ) / 2);
+      // Keep Q70 fixed. Reduce pixel dimensions in small steps rather than
+      // degrading compression quality unpredictably for detailed fabric.
+      exportDimension = Math.max(
+        this.MIN_RESOLUTION_PX,
+        Math.floor(exportDimension * 0.9),
+      );
     }
 
-    // ── STEP 5: Validate Final File Size Against Boundary Policy ────────────
-    const finalBuffer = bestValidBuffer;
-    const finalQuality = bestValidQuality;
-
-    if (!finalBuffer) {
-      const fallbackBuffer = closestCandidateBuffer;
-      const fallbackSize = fallbackBuffer ? fallbackBuffer.length : 0;
-
+    if (!finalBuffer || !finalMetadata) {
       throw new ImageOptimizationError(
-          "SIZE_POLICY_VIOLATION",
-          `Source image cannot meet the minimum required asset boundary of ${(
-            config.minBytes / 1024
-          ).toFixed(0)} KB for ${config.label} (achieved ${(
-            fallbackSize / 1024
-          ).toFixed(
-            1
-          )} KB at quality Q=${closestCandidateQuality}). Artificial padding, synthetic noise, or upscaling is strictly forbidden. Please provide a higher-resolution master photograph with richer detail.`,
-          422,
-          {
-            achievedBytes: fallbackSize,
-            minRequiredBytes: config.minBytes,
-            qualityAttempted: closestCandidateQuality,
-            attempts,
-          }
-        );
-      }
-
-      throw new ImageOptimizationError(
-        "SIZE_POLICY_VIOLATION",
-        `Image cannot be compressed below the maximum asset boundary of ${(
-          config.maxBytes / 1024
-        ).toFixed(0)} KB for ${config.label} (achieved ${(
-          fallbackSize / 1024
-        ).toFixed(
-          1
-        )} KB at quality Q=${closestCandidateQuality}) without compromising luxury silk saree thread integrity.`,
+        "INVALID_FILE_TYPE",
+        "Image processing did not produce an output image.",
         422,
-        {
-          achievedBytes: fallbackSize,
-          maxAllowedBytes: config.maxBytes,
-          qualityAttempted: closestCandidateQuality,
-          attempts,
-        }
       );
     }
 
@@ -372,7 +304,6 @@ export class KankanaImageOptimizer {
       );
     }
 
-    const finalMetadata = await sharp(finalBuffer).metadata();
     if (finalMetadata.format !== "webp") {
       throw new ImageOptimizationError(
         "SECURITY_VALIDATION_FAILED",
@@ -388,7 +319,7 @@ export class KankanaImageOptimizer {
       size: finalSize,
       width: finalMetadata.width || width,
       height: finalMetadata.height || height,
-      qualityUsed: finalQuality,
+      qualityUsed: exportQuality,
       attempts,
       targetBoundary: {
         minBytes: config.minBytes,
