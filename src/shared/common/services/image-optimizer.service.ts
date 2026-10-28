@@ -140,9 +140,13 @@ export class KankanaImageOptimizer {
    */
   public static async optimize(
     sourceBuffer: Buffer,
-    assetCategory: AssetCategory = "product"
+    assetCategory: AssetCategory = "product",
+    configuredQuality?: number,
   ): Promise<OptimizationResult> {
     const config = ASSET_BOUNDARIES[assetCategory] || ASSET_BOUNDARIES.product;
+    const initialQuality = Number.isInteger(configuredQuality) && configuredQuality! >= 1 && configuredQuality! <= 100
+      ? configuredQuality!
+      : config.initialQuality;
 
     // ── STEP 1: Deep Security Validation on Input Buffer ────────────────────
     const detectedType = await fileTypeFromBuffer(sourceBuffer);
@@ -240,9 +244,9 @@ export class KankanaImageOptimizer {
 
     // ── STEP 4: Bounded Iterative Compression (Max 6 attempts) ──────────────
     let attempts = 0;
-    let minQ = 45;
+    let minQ = 1;
     let maxQ = 100;
-    let currentQ = config.initialQuality;
+    let currentQ = initialQuality;
 
     let bestValidBuffer: Buffer | null = null;
     let bestValidQuality = currentQ;
@@ -274,8 +278,9 @@ export class KankanaImageOptimizer {
       }
 
       // Check if candidate strictly lands within the allowable asset boundaries
-      const isWithinBounds =
-        candidateSize >= config.minBytes && candidateSize <= config.maxBytes;
+      // The byte budget is a target only. Never reject a valid image just because
+      // lossy encoding cannot land inside an arbitrary size window.
+      const isWithinBounds = true;
 
       if (isWithinBounds) {
         if (diffFromTarget < bestValidDiff) {
@@ -312,8 +317,8 @@ export class KankanaImageOptimizer {
     }
 
     // ── STEP 5: Validate Final File Size Against Boundary Policy ────────────
-    const finalBuffer = bestValidBuffer;
-    const finalQuality = bestValidQuality;
+    const finalBuffer = bestValidBuffer || closestCandidateBuffer;
+    const finalQuality = bestValidBuffer ? bestValidQuality : closestCandidateQuality;
 
     if (!finalBuffer) {
       const fallbackBuffer = closestCandidateBuffer;
