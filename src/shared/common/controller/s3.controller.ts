@@ -94,6 +94,64 @@ export class CommonController {
     }
   };
 
+  /** Issue a short-lived URL for a private staging upload. */
+  createStagedUpload = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Authentication required." });
+        return;
+      }
+      const { fileName, fileType, fileSize, folder, uploadType } = req.body ?? {};
+      if (typeof fileName !== "string" || typeof fileType !== "string" || !Number.isSafeInteger(fileSize)) {
+        res.status(400).json({ success: false, message: "fileName, fileType, and integer fileSize are required." });
+        return;
+      }
+      if (uploadType !== undefined && !["product", "category", "banner", "bulk"].includes(uploadType)) {
+        res.status(400).json({ success: false, message: "Unsupported uploadType." });
+        return;
+      }
+      const result = await this.s3Service.createStagedUpload({
+        userId: req.user.userId,
+        fileName,
+        fileType,
+        fileSize,
+        folder: typeof folder === "string" ? folder : undefined,
+        uploadType,
+      });
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      this.handleError(res, error, "createStagedUpload");
+    }
+  };
+
+  /** Validate and process the staged upload through the normal image pipeline. */
+  finalizeStagedUpload = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Authentication required." });
+        return;
+      }
+      const { stagingKey, folder, uploadType } = req.body ?? {};
+      if (typeof stagingKey !== "string" || !stagingKey) {
+        res.status(400).json({ success: false, message: "stagingKey is required." });
+        return;
+      }
+      if (uploadType !== undefined && !["product", "category", "banner", "bulk"].includes(uploadType)) {
+        res.status(400).json({ success: false, message: "Unsupported uploadType." });
+        return;
+      }
+      const result = await this.s3Service.finalizeStagedUpload({
+        userId: req.user.userId,
+        stagingKey,
+        folder: typeof folder === "string" ? folder : undefined,
+        uploadType,
+      });
+      res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      this.handleError(res, error, "finalizeStagedUpload");
+    }
+  };
+
   /**
    * Delete a single file
    * DELETE /api/upload
