@@ -118,7 +118,7 @@ export class S3UploadService {
     // No configured per-image byte ceiling for now. Keep validating that the
     // declared size is a positive safe integer; actual S3 size is checked on finalize.
     if (!Number.isSafeInteger(input.fileSize) || input.fileSize <= 0) {
-      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Image size must be a positive integer.", 400);
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Image size must be a positive integer.", 400);
     }
     if (!allowedImageTypes.has(input.fileType)) {
       throw new ImageOptimizationError("INVALID_FILE_TYPE", "Unsupported image format for direct upload.", 422);
@@ -163,7 +163,7 @@ export class S3UploadService {
     const head = await this.s3Client.send(new HeadObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
     const size = Number(head.ContentLength || 0);
     if (!Number.isSafeInteger(size) || size <= 0) {
-      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Staged image is empty or has an invalid size.", 422, { sizeBytes: size });
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image is empty or has an invalid size.", 422, { sizeBytes: size });
     }
 
     const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.stagingBucket, Key: input.stagingKey }));
@@ -175,7 +175,7 @@ export class S3UploadService {
     // large payload and doubling peak memory during finalization.
     const bytes = Buffer.from(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
     if (bytes.length !== size) {
-      throw new ImageOptimizationError("INVALID_FILE_SIZE", "Staged image size verification failed.", 422, { expectedBytes: size, actualBytes: bytes.length });
+      throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image size verification failed.", 422, { expectedBytes: size, actualBytes: bytes.length });
     }
 
     const originalName = path.basename(input.stagingKey).replace(/^[0-9a-f-]{36}-/i, "") || "image";
