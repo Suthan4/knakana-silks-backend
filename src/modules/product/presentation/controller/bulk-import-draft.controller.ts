@@ -251,6 +251,23 @@ export class BulkImportDraftController {
     }
   }
 
+  // ── POST /api/products/bulk/job/:jobId/cancel ──────────────────────────────
+
+  async cancelJob(req: Request, res: Response): Promise<void> {
+    try {
+      const jobId = String(req.params.jobId);
+      const userId = req.user!.userId;
+      const job = await this.jobService.cancelJob(jobId, userId);
+      res.status(200).json({
+        success: true,
+        message: job.status === "cancelled" ? "Job is already finished." : "Cancellation requested. The current safe operation will finish before the job stops.",
+        data: { ...job, jobId: job.id, draftId: job.draftId, startedAt: job.createdAt },
+      });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
   // ── GET /api/products/bulk/drive/folders ──────────────────────────────────
 
   async listDriveFolders(req: Request, res: Response): Promise<void> {
