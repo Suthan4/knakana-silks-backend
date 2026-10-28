@@ -117,9 +117,11 @@ export class S3UploadService {
           ? uploadTypeOverride
           : resolvedCategory;
 
+        // Do not swallow database failures here: silently falling back to compression
+        // could violate an administrator's explicit "compression disabled" setting.
         const setting = await this.prisma.imageCompressionSetting.findUnique({
           where: { uploadType: assetCategory },
-        }).catch(() => null);
+        });
         const defaultQuality = assetCategory === "category" || assetCategory === "banner" ? 85 : 70;
         const compressionEnabled = setting?.imgCompressionEnabled ?? true;
         const quality = setting?.imgQuality ?? defaultQuality;
