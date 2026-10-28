@@ -125,7 +125,7 @@ export class KankanaImageOptimizer {
     if (normalized.includes("banner") || normalized.includes("hero")) {
       return "banner";
     }
-    if (normalized.includes("category")) {
+    if (normalized.includes("categor")) {
       return "category";
     }
     if (normalized.includes("bulk")) {
