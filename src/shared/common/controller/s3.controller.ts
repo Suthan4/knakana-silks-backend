@@ -48,7 +48,8 @@ export class CommonController {
       }
 
       const folder: string | undefined = req.body.folder || undefined;
-      const result = await this.s3Service.uploadFile(req.file, folder);
+      const uploadType = req.body.uploadType;
+      const result = await this.s3Service.uploadFile(req.file, folder, uploadType);
 
       res.json({
         success: true,
@@ -81,7 +82,7 @@ export class CommonController {
 
       const folder: string | undefined = req.body.folder || undefined;
       const files = req.files as Express.Multer.File[];
-      const results = await this.s3Service.uploadFiles(files, folder);
+      const results = await Promise.all(files.map((file) => this.s3Service.uploadFile(file, folder, req.body.uploadType)));
 
       res.json({
         success: true,
