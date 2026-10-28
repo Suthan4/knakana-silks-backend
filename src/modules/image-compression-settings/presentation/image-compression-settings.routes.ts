@@ -4,7 +4,7 @@ import { UserRole } from "@/generated/prisma/enums.js";
 import { getPrismaClient } from "@/lib/database/prisma.js";
 
 const router = Router();
-const prisma = getPrismaClient();
+const prisma = getPrismaClient;
 
 const DEFAULTS = [
   { uploadType: "product", imgCompressionEnabled: true, imgQuality: 70 },
