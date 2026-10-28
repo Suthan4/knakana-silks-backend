@@ -101,7 +101,6 @@ export class S3UploadService {
     const maxBytes = 100 * 1024 * 1024;
     const allowedImageTypes = new Set([
       "image/jpeg", "image/png", "image/webp", "image/tiff", "image/avif",
-      "image/heic", "image/heif",
     ]);
     if (!Number.isSafeInteger(input.fileSize) || input.fileSize <= 0 || input.fileSize > maxBytes) {
       throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Image must be between 1 byte and 100 MB.", 413, { limitBytes: maxBytes });
@@ -118,13 +117,6 @@ export class S3UploadService {
       Bucket: this.bucket,
       Key: stagingKey,
       ContentType: input.fileType,
-      Metadata: {
-        "uploader-id": input.userId,
-        "original-name": safeName,
-        "expected-size": String(input.fileSize),
-        "upload-folder": folder,
-        "upload-type": input.uploadType || KankanaImageOptimizer.resolveAssetCategory(folder),
-      },
       CacheControl: "no-store",
     });
     const expiresIn = 300;
@@ -153,9 +145,6 @@ export class S3UploadService {
     if (!size || size > maxBytes) {
       throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image is empty or exceeds the 100 MB processing limit.", 413, { sizeBytes: size, limitBytes: maxBytes });
     }
-    if (head.Metadata?.["uploader-id"] !== input.userId) {
-      throw new ImageOptimizationError("SECURITY_VALIDATION_FAILED", "Staging metadata does not match the authenticated uploader.", 403);
-    }
 
     const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this.bucket, Key: input.stagingKey }));
     if (!response.Body) {
@@ -166,10 +155,11 @@ export class S3UploadService {
       throw new ImageOptimizationError("SIZE_POLICY_VIOLATION", "Staged image size verification failed.", 413, { expectedBytes: size, actualBytes: bytes.length });
     }
 
-    const originalName = head.Metadata?.["original-name"] || "image";
+    const originalName = path.basename(input.stagingKey).replace(/^[0-9a-f-]{36}-/i, "") || "image";
     const fileType = String(head.ContentType || "application/octet-stream");
-    const folder = input.folder || head.Metadata?.["upload-folder"] || "products";
-    const uploadType = input.uploadType || (head.Metadata?.["upload-type"] as AssetCategory | undefined);
+    const allowedFolders = new Set(["products", "products/variants", "categories", "banners", "home-sections", "bulk"]);
+    const folder = input.folder && allowedFolders.has(input.folder) ? input.folder : "products";
+    const uploadType = input.uploadType;
     const result = await this.uploadFile({
       fieldname: "file",
       originalname: originalName,
