@@ -611,28 +611,27 @@ export class ProductService {
           );
         }
       } else if (targetIsMulti) {
-        // Remaining Multi-Variant: if variants passed, replace
+        // Synchronize by stable variant id first, then SKU. Do not destroy and
+        // recreate every variant on each edit: carts/orders/stock/media refer to IDs.
         if (data.variants !== undefined) {
-          if (product.variants?.length) {
-            for (const v of product.variants) {
-              await this.productRepository.deleteVariant(v.id, tx);
-            }
-          }
+          const matchedVariantIds = new Set<string>();
+          const existingVariants = product.variants || [];
 
           for (const variant of data.variants) {
             const variantSku = variant.sku || this.generateSKU(
-              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${
-                variant.fabric || ""
-              }-${JSON.stringify(variant.attributes || {})}`
+              `${data.name || product.name}-${variant.size || ""}-${variant.color || ""}-${variant.fabric || ""}-${JSON.stringify(variant.attributes || {})}`
             );
+            const existingVariant = existingVariants.find((candidate: any) => {
+              if (variant.id && String(candidate.id) === String(variant.id)) return true;
+              return Boolean(variantSku && candidate.sku === variantSku);
+            });
 
             let vVolWeight: number | undefined;
             if (variant.weight && variant.length && variant.breadth && variant.height) {
               vVolWeight = (variant.length * variant.breadth * variant.height) / 5000;
             }
 
-            const createdVariant = await this.productRepository.addVariant({
-              productId,
+            const variantData = {
               attributes: variant.attributes,
               size: variant.size,
               color: variant.color,
@@ -646,11 +645,30 @@ export class ProductService {
               height: variant.height ?? (data.height ?? (product.height ? Number(product.height) : undefined)),
               volumetricWeight: vVolWeight,
               sku: variantSku,
-            }, tx);
+            };
 
-            if (variant.media?.length) {
-              for (const mediaItem of variant.media) {
-                await this.productRepository.addVariantMedia(createdVariant.id, {
+            const savedVariant = existingVariant
+              ? await this.productRepository.updateVariant(existingVariant.id, variantData, tx)
+              : await this.productRepository.addVariant({ productId, ...variantData }, tx);
+            matchedVariantIds.add(String(savedVariant.id));
+
+            // Reconcile variant media by key/URL. Keep unchanged rows and only
+            // soft-delete removed references, preserving order and metadata.
+            if (variant.media !== undefined) {
+              const oldMedia: any[] = existingVariant?.media || [];
+              const matchedMediaIds = new Set<string>();
+              const usedOldMediaIds = new Set<string>();
+
+              for (let mediaIndex = 0; mediaIndex < variant.media.length; mediaIndex++) {
+                const mediaItem = variant.media[mediaIndex];
+                const old = oldMedia.find((item: any) => {
+                  if (usedOldMediaIds.has(String(item.id))) return false;
+                  return Boolean(
+                    (mediaItem.key && item.key && mediaItem.key === item.key) ||
+                    (mediaItem.url && item.url === mediaItem.url)
+                  );
+                });
+                const mediaData = {
                   type: mediaItem.type || MediaType.IMAGE,
                   url: mediaItem.url,
                   key: mediaItem.key,
@@ -663,22 +681,43 @@ export class ProductService {
                   duration: mediaItem.duration,
                   width: mediaItem.width,
                   height: mediaItem.height,
-                  order: mediaItem.order,
-                  isActive: mediaItem.isActive,
-                }, tx);
+                  order: mediaItem.order ?? mediaIndex,
+                  isActive: mediaItem.isActive ?? true,
+                };
+                if (old) {
+                  usedOldMediaIds.add(String(old.id));
+                  matchedMediaIds.add(String(old.id));
+                  await this.productRepository.updateVariantMedia(old.id, mediaData as any, tx);
+                } else {
+                  await this.productRepository.addVariantMedia(savedVariant.id, mediaData, tx);
+                }
+              }
+
+              for (const old of oldMedia) {
+                if (!matchedMediaIds.has(String(old.id)) && !usedOldMediaIds.has(String(old.id))) {
+                  await this.productRepository.deleteVariantMedia(old.id, tx);
+                }
               }
             }
 
             if (variant.stock) {
               await this.productRepository.updateStock(
                 productId,
-                createdVariant.id,
+                savedVariant.id,
                 BigInt(variant.stock.warehouseId),
                 variant.stock.quantity,
                 variant.stock.lowStockThreshold || 10,
                 "Updated variant stock",
                 tx
               );
+            }
+          }
+
+          // Preserve variants that were submitted but matched via SKU/id; remove
+          // only variants explicitly omitted from the submitted replacement list.
+          for (const oldVariant of existingVariants) {
+            if (!matchedVariantIds.has(String(oldVariant.id))) {
+              await this.productRepository.deleteVariant(oldVariant.id, tx);
             }
           }
         }
