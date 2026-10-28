@@ -489,15 +489,19 @@ export class BulkImportJobService {
         console.error("Background bulk job " + jobId + " crashed:", err);
         const current = this.memoryStore.get(jobId);
         if (current) {
-          current.status = "failed";
-          current.stage =
-            current.stage === "preparing_images" || current.stage === "uploading_images"
-              ? "images_failed"
-              : "failed";
-          current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
-          current.completedAt = new Date().toISOString();
-          current.currentFile = undefined;
-          await this.saveJob(current);
+          if (current.cancelRequested) {
+            await this.finishCancelledJob(current);
+          } else {
+            current.status = "failed";
+            current.stage =
+              current.stage === "preparing_images" || current.stage === "uploading_images"
+                ? "images_failed"
+                : "failed";
+            current.error = err instanceof Error ? err.message : String(err || "Background job crashed");
+            current.completedAt = new Date().toISOString();
+            current.currentFile = undefined;
+            await this.saveJob(current);
+          }
         }
       });
     });
@@ -804,6 +808,7 @@ export class BulkImportJobService {
       return;
     }
 
+    if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
     rawJob.stage = "importing_products";
     rawJob.currentFile = undefined;
     const imageProgressBase = rawJob.imagesTotal > 0 ? 40 : 0;
@@ -856,6 +861,7 @@ export class BulkImportJobService {
       await this.saveJob(rawJob);
     }
 
+    if (await this.isCancellationRequested(jobId)) { await this.finishCancelledJob(rawJob); return; }
     rawJob.completedAt = new Date().toISOString();
     rawJob.progress = 100;
     rawJob.currentFile = undefined;
