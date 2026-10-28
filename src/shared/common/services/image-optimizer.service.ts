@@ -242,126 +242,19 @@ export class KankanaImageOptimizer {
       m2: 2.0,
     });
 
-    // ── STEP 4: Bounded Iterative Compression (Max 6 attempts) ──────────────
-    let attempts = 0;
-    let minQ = 1;
-    let maxQ = 100;
-    let currentQ = initialQuality;
-
-    let bestValidBuffer: Buffer | null = null;
-    let bestValidQuality = currentQ;
-    let bestValidDiff = Infinity;
-
-    let closestCandidateBuffer: Buffer | null = null;
-    let closestCandidateQuality = currentQ;
-    let closestCandidateDiff = Infinity;
-
-    while (attempts < this.MAX_COMPRESSION_ATTEMPTS) {
-      attempts++;
-
-      const candidateBuffer = await basePipeline
-        .clone()
-        .webp({
-          quality: currentQ,
-          effort: 6,
-          smartSubsample: true, // Prevents gold/silver zari bleeding into rich fabrics
-        })
-        .toBuffer();
-
-      const candidateSize = candidateBuffer.length;
-      const diffFromTarget = Math.abs(candidateSize - config.targetBytes);
-
-      if (diffFromTarget < closestCandidateDiff) {
-        closestCandidateDiff = diffFromTarget;
-        closestCandidateBuffer = candidateBuffer;
-        closestCandidateQuality = currentQ;
-      }
-
-      // Check if candidate strictly lands within the allowable asset boundaries
-      // The byte budget is a target only. Never reject a valid image just because
-      // lossy encoding cannot land inside an arbitrary size window.
-      const isWithinBounds = true;
-
-      if (isWithinBounds) {
-        if (diffFromTarget < bestValidDiff) {
-          bestValidDiff = diffFromTarget;
-          bestValidBuffer = candidateBuffer;
-          bestValidQuality = currentQ;
-        }
-
-        // Target convergence check: if within 5% of targetBytes, break early
-        if (diffFromTarget <= config.targetBytes * 0.05) {
-          break;
-        }
-
-        // Steer towards targetBytes within allowable boundary
-        if (candidateSize < config.targetBytes) {
-          minQ = currentQ + 1;
-        } else {
-          maxQ = currentQ - 1;
-        }
-      } else {
-        // Outside boundaries: adjust bounds to navigate towards the window
-        if (candidateSize > config.maxBytes) {
-          maxQ = currentQ - 1;
-        } else {
-          minQ = currentQ + 1;
-        }
-      }
-
-      if (minQ > maxQ) {
-        break;
-      }
-
-      currentQ = Math.round((minQ + maxQ) / 2);
-    }
-
-    // ── STEP 5: Validate Final File Size Against Boundary Policy ────────────
-    const finalBuffer = bestValidBuffer || closestCandidateBuffer;
-    const finalQuality = bestValidBuffer ? bestValidQuality : closestCandidateQuality;
-
-    if (!finalBuffer) {
-      const fallbackBuffer = closestCandidateBuffer;
-      const fallbackSize = fallbackBuffer ? fallbackBuffer.length : 0;
-
-      if (fallbackSize < config.minBytes) {
-        throw new ImageOptimizationError(
-          "SIZE_POLICY_VIOLATION",
-          `Source image cannot meet the minimum required asset boundary of ${(
-            config.minBytes / 1024
-          ).toFixed(0)} KB for ${config.label} (achieved ${(
-            fallbackSize / 1024
-          ).toFixed(
-            1
-          )} KB at quality Q=${closestCandidateQuality}). Artificial padding, synthetic noise, or upscaling is strictly forbidden. Please provide a higher-resolution master photograph with richer detail.`,
-          422,
-          {
-            achievedBytes: fallbackSize,
-            minRequiredBytes: config.minBytes,
-            qualityAttempted: closestCandidateQuality,
-            attempts,
-          }
-        );
-      }
-
-      throw new ImageOptimizationError(
-        "SIZE_POLICY_VIOLATION",
-        `Image cannot be compressed below the maximum asset boundary of ${(
-          config.maxBytes / 1024
-        ).toFixed(0)} KB for ${config.label} (achieved ${(
-          fallbackSize / 1024
-        ).toFixed(
-          1
-        )} KB at quality Q=${closestCandidateQuality}) without compromising luxury silk saree thread integrity.`,
-        422,
-        {
-          achievedBytes: fallbackSize,
-          maxAllowedBytes: config.maxBytes,
-          qualityAttempted: closestCandidateQuality,
-          attempts,
-        }
-      );
-    }
+    // ── STEP 4: Encode once at the configured quality ───────────────────────
+    // Output size is a target, not a validation boundary. Do not repeatedly
+    // re-encode the same image or reject valid images for missing a size window.
+    const finalQuality = initialQuality;
+    const attempts = 1;
+    const finalBuffer = await basePipeline
+      .clone()
+      .webp({
+        quality: finalQuality,
+        effort: 6,
+        smartSubsample: true,
+      })
+      .toBuffer();
 
     const finalSize = finalBuffer.length;
 
