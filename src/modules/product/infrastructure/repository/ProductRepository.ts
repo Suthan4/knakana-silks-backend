@@ -13,6 +13,7 @@ import {
 import { MediaType } from "@/generated/prisma/enums.js";
 import { AdminProductWithRelations, IProductRepository, PaginatedProductParams, ProductWithRelations } from "../interface/Iproductrepository.js";
 import { QueryProductDTO } from "../../application/product.dto.js";
+import { ConflictError } from "@/shared/utils/errors.js";
 
 const standardProductInclude = {
   category: true,
@@ -404,6 +405,29 @@ export class ProductRepository implements IProductRepository {
 
   async deleteVariant(id: bigint, tx?: Prisma.TransactionClient): Promise<void> {
     const client = this.getClient(tx);
+    const variant = await client.productVariant.findUnique({
+      where: { id },
+      select: {
+        sku: true,
+        _count: {
+          select: {
+            cartItems: true,
+            orderItems: true,
+            returnItems: true,
+            productRequests: true,
+          },
+        },
+      },
+    });
+    if (!variant) return;
+
+    const references = variant._count.cartItems + variant._count.orderItems +
+      variant._count.returnItems + variant._count.productRequests;
+    if (references > 0) {
+      throw new ConflictError(
+        `Cannot remove variant "${variant.sku}" because it is referenced by ${references} cart, order, return, or product-request record(s). Keep the variant and update its details instead.`,
+      );
+    }
     await client.productVariant.delete({ where: { id } });
   }
 
