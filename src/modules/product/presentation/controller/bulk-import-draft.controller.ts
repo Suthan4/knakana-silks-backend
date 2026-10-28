@@ -180,6 +180,39 @@ export class BulkImportDraftController {
     }
   }
 
+  // ── PATCH /api/products/bulk/draft/:id/items ──────────────────────────────
+  async updateDraftItems(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user?.userId) {
+        res.status(401).json({ success: false, message: "Unauthorized: Missing authentication" });
+        return;
+      }
+      const id = String(req.params.id);
+      const userId = BigInt(req.user.userId);
+      const productGroupIds = Array.isArray(req.body?.productGroupIds)
+        ? req.body.productGroupIds.map((value: unknown) => String(value).trim()).filter(Boolean)
+        : [];
+      const action = req.body?.action;
+      if (!productGroupIds.length || !["skip", "delete"].includes(action)) {
+        res.status(400).json({
+          success: false,
+          message: "Choose one or more products and select either skip or delete-from-draft.",
+        });
+        return;
+      }
+      const draft = await this.service.updateDraftItems(id, userId, productGroupIds, action);
+      res.status(200).json({
+        success: true,
+        message: action === "skip"
+          ? `${productGroupIds.length} product(s) skipped. They will not be imported or retried.`
+          : `${productGroupIds.length} product(s) removed from this draft. Catalog products and existing images were not deleted.`,
+        data: draft,
+      });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
   // ── POST /api/products/bulk/draft/:id/import ──────────────────────────────
 
   async startDraftImport(req: Request, res: Response): Promise<void> {
