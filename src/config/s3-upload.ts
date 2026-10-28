@@ -233,10 +233,11 @@ export class S3UploadService {
    */
   async uploadFiles(
     files: Express.Multer.File[],
-    folder?: string
+    folder?: string,
+    uploadTypeOverride?: AssetCategory,
   ): Promise<S3UploadResult[]> {
     console.log(`📤 Uploading ${files.length} file(s)…`);
-    const uploadPromises = files.map((file) => this.uploadFile(file, folder));
+    const uploadPromises = files.map((file) => this.uploadFile(file, folder, uploadTypeOverride));
     return Promise.all(uploadPromises);
   }
 
@@ -248,13 +249,14 @@ export class S3UploadService {
   async uploadFilesWithResults(
     files: Express.Multer.File[],
     folder?: string,
-    onFileResult?: (index: number, result: S3UploadFileResult) => Promise<void> | void
+    onFileResult?: (index: number, result: S3UploadFileResult) => Promise<void> | void,
+    uploadTypeOverride?: AssetCategory,
   ): Promise<S3UploadFileResult[]> {
     return Promise.all(
       files.map(async (file, index): Promise<S3UploadFileResult> => {
         let fileResult: S3UploadFileResult;
         try {
-          const result = await this.uploadFile(file, folder);
+          const result = await this.uploadFile(file, folder, uploadTypeOverride);
           fileResult = { originalname: file.originalname, success: true, result };
         } catch (error: any) {
           fileResult = {

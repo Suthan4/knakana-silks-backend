@@ -16,13 +16,12 @@ const DEFAULTS = [
 const allowedTypes = new Set(DEFAULTS.map((setting) => setting.uploadType));
 
 async function ensureDefaults() {
-  for (const setting of DEFAULTS) {
-    await prisma.imageCompressionSetting.upsert({
-      where: { uploadType: setting.uploadType },
-      create: setting,
-      update: {},
-    });
-  }
+  // One idempotent database round-trip instead of four sequential upserts on
+  // every settings read/save. Existing administrator choices are never overwritten.
+  await prisma.imageCompressionSetting.createMany({
+    data: [...DEFAULTS],
+    skipDuplicates: true,
+  });
 }
 
 router.get(
