@@ -172,7 +172,7 @@ export class S3UploadService {
     }
     const rawBytes = await response.Body.transformToByteArray();
     // Create a Buffer view over the SDK byte array instead of copying the entire
-    // 40–100 MB payload and doubling peak memory during finalization.
+    // large payload and doubling peak memory during finalization.
     const bytes = Buffer.from(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
     if (bytes.length !== size) {
       throw new ImageOptimizationError("INVALID_FILE_SIZE", "Staged image size verification failed.", 422, { expectedBytes: size, actualBytes: bytes.length });
