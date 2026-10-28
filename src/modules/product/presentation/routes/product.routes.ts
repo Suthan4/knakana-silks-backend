@@ -162,6 +162,14 @@ router.post(
   (req, res) => getDraftController().matchDrive(req, res)
 );
 
+router.patch(
+  "/products/bulk/draft/:id/items",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().updateDraftItems(req, res)
+);
+
 router.post(
   "/products/bulk/draft/:id/import",
   authenticate,
