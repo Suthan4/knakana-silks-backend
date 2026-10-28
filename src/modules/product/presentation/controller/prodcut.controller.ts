@@ -132,6 +132,8 @@ export class ProductController {
       const result = await this.productService.getProducts({
         ...restParams,
         ...parsedParams,
+        // Public catalog remains active-only by default; explicit false is preserved.
+        isActive: params.isActive ?? true,
         categoryIds,
       });
 

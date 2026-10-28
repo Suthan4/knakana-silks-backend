@@ -1336,7 +1336,9 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
   }
 
   const where: Prisma.ProductWhereInput = {
-    // isActive intentionally omitted — show all products
+    // Admin can browse all statuses, or filter explicitly by active/inactive.
+    ...(params.isActive !== undefined ? { isActive: params.isActive } : {}),
+    ...(params.hasVariants !== undefined ? { hasVariants: params.hasVariants } : {}),
     ...(targetCategoryIds?.length && {
       categoryId: { in: targetCategoryIds },
     }),
@@ -1344,6 +1346,7 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       OR: [
         { name: { contains: params.search, mode: "insensitive" } },
         { description: { contains: params.search, mode: "insensitive" } },
+        { sku: { contains: params.search, mode: "insensitive" } },
       ],
     }),
   };
