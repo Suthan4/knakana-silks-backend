@@ -2292,14 +2292,38 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
       } else {
         // The selected variant was the only one. Keep the old product record for
         // historical references, but archive it so the new simple product is the live listing.
-        await tx.stock.updateMany({
-          where: { productId: parentId, variantId: null },
-          data: { productId: newProduct.id, variantId },
-        });
-        await tx.cartItem.updateMany({
-          where: { productId: parentId, variantId: null },
-          data: { productId: newProduct.id, variantId },
-        });
+        for (const stock of await tx.stock.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.stock.findFirst({
+            where: { productId: newProduct.id, variantId, warehouseId: stock.warehouseId, NOT: { id: stock.id } },
+          });
+          if (target) {
+            await tx.stockAdjustment.updateMany({ where: { stockId: stock.id }, data: { stockId: target.id } });
+            await tx.stock.update({
+              where: { id: target.id },
+              data: {
+                quantity: target.quantity + stock.quantity,
+                lowStockThreshold: Math.min(target.lowStockThreshold, stock.lowStockThreshold),
+              },
+            });
+            await tx.stock.delete({ where: { id: stock.id } });
+          } else {
+            await tx.stock.update({ where: { id: stock.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
+        for (const cartItem of await tx.cartItem.findMany({ where: { productId: parentId, variantId: null } })) {
+          const target = await tx.cartItem.findFirst({
+            where: { cartId: cartItem.cartId, productId: newProduct.id, variantId, NOT: { id: cartItem.id } },
+          });
+          if (target) {
+            await tx.cartItem.update({
+              where: { id: target.id },
+              data: { quantity: target.quantity + cartItem.quantity },
+            });
+            await tx.cartItem.delete({ where: { id: cartItem.id } });
+          } else {
+            await tx.cartItem.update({ where: { id: cartItem.id }, data: { productId: newProduct.id, variantId } });
+          }
+        }
         await tx.productRequest.updateMany({
           where: { productId: parentId, variantId: null },
           data: { productId: newProduct.id, variantId },
