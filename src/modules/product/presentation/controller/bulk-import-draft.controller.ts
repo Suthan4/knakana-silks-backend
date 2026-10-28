@@ -236,6 +236,17 @@ export class BulkImportDraftController {
 
   // ── POST /api/products/bulk/job/:jobId/retry ──────────────────────────────
 
+  async cancelJob(req: Request, res: Response): Promise<void> {
+    try {
+      const jobId = String(req.params.jobId);
+      const userId = req.user!.userId;
+      const job = await this.jobService.cancelJob(jobId, userId);
+      res.status(200).json({ success: true, message: "Cancellation requested", data: { ...job, jobId: job.id } });
+    } catch (err: any) {
+      handleError(err, res);
+    }
+  }
+
   async retryJob(req: Request, res: Response): Promise<void> {
     try {
       const jobId = String(req.params.jobId);

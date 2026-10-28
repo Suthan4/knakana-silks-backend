@@ -188,6 +188,14 @@ router.get(
 );
 
 router.post(
+  "/products/bulk/job/:jobId/cancel",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "create"),
+  (req, res) => getDraftController().cancelJob(req, res)
+);
+
+router.post(
   "/products/bulk/job/:jobId/retry",
   authenticate,
   adminCatalogWriteLimiter,

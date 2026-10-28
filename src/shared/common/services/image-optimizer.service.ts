@@ -105,7 +105,7 @@ export interface OptimizationResult {
 
 export class KankanaImageOptimizer {
   private static readonly MIN_RESOLUTION_PX = 600;
-  private static readonly MAX_COMPRESSION_ATTEMPTS = 6;
+  private static readonly MAX_COMPRESSION_ATTEMPTS = 10;
   private static readonly ALLOWED_SOURCE_MIMES = new Set([
     "image/jpeg",
     "image/png",
@@ -271,7 +271,6 @@ export class KankanaImageOptimizer {
       );
     }
 
-    const finalMetadata = await sharp(finalBuffer).metadata();
     if (finalMetadata.format !== "webp") {
       throw new ImageOptimizationError(
         "SECURITY_VALIDATION_FAILED",
@@ -287,7 +286,7 @@ export class KankanaImageOptimizer {
       size: finalSize,
       width: finalMetadata.width || width,
       height: finalMetadata.height || height,
-      qualityUsed: finalQuality,
+      qualityUsed: exportQuality,
       attempts,
       targetBoundary: {
         minBytes: config.minBytes,
