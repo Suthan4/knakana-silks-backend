@@ -1371,6 +1371,9 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     // Admin can browse all statuses, or filter explicitly by active/inactive.
     ...(params.isActive !== undefined ? { isActive: params.isActive } : {}),
     ...(params.hasVariants !== undefined ? { hasVariants: params.hasVariants } : {}),
+    ...(params.allowOutOfStockOrders !== undefined
+      ? { allowOutOfStockOrders: params.allowOutOfStockOrders }
+      : {}),
     ...(targetCategoryIds?.length && {
       categoryId: { in: targetCategoryIds },
     }),
