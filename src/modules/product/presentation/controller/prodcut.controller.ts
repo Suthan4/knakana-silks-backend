@@ -16,6 +16,7 @@ import {
   ConsolidateSimpleProductsDTOSchema,
   AddSimpleProductAsVariantDTOSchema,
   ExtractVariantAsSimpleProductDTOSchema,
+  BulkUpdateOutOfStockOrdersDTOSchema,
 } from "../../application/product.dto.js";
 
 import { CategoryCacheModule } from "@/modules/category/category.cache.js";
@@ -277,6 +278,27 @@ export class ProductController {
    * Admin workflow: consolidate existing simple products into variants.
    * Source products are archived by the service, not deleted.
    */
+  async bulkUpdateAllowOutOfStockOrders(req: Request, res: Response) {
+    try {
+      const data = BulkUpdateOutOfStockOrdersDTOSchema.parse(req.body);
+      const result = await this.productService.bulkUpdateAllowOutOfStockOrders(
+        data.productIds,
+        data.allowOutOfStockOrders,
+      );
+      return res.status(200).json({
+        success: true,
+        message: `Updated out-of-stock ordering for ${result.updatedCount} product(s).`,
+        data: result,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ success: false, message: "Invalid bulk product update", errors: error.errors });
+      }
+      const statusCode = error.statusCode || (error.name === "NotFoundError" ? 404 : 500);
+      return res.status(statusCode).json({ success: false, message: error.message || "Failed to update products" });
+    }
+  }
+
   async consolidateSimpleProducts(req: Request, res: Response) {
     try {
       const data = ConsolidateSimpleProductsDTOSchema.parse(req.body);
