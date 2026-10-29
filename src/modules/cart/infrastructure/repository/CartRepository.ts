@@ -224,6 +224,12 @@ async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
   }
 
   async getItemCount(cartId: bigint): Promise<number> {
-    return this.prisma.cartItem.count({ where: { cartId } });
+    // Header/cart badge represents quantity, not the number of database rows.
+    // This remains correct when legacy duplicate rows have been consolidated.
+    const result = await this.prisma.cartItem.aggregate({
+      where: { cartId },
+      _sum: { quantity: true },
+    });
+    return result._sum.quantity ?? 0;
   }
 }
