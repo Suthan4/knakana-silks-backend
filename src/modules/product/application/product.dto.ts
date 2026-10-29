@@ -403,3 +403,15 @@ export const UpdateStockDTOSchema = z.object({
 });
 
 export type UpdateStockDTO = z.infer<typeof UpdateStockDTOSchema>;
+
+
+// Bulk update the product-level out-of-stock ordering setting.
+export const BulkUpdateOutOfStockOrdersDTOSchema = z.object({
+  productIds: z.array(z.string().regex(/^\\d+$/, "Product IDs must be numeric")).min(1).max(100),
+  allowOutOfStockOrders: z.boolean(),
+}).superRefine((data, ctx) => {
+  if (new Set(data.productIds).size !== data.productIds.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["productIds"], message: "Duplicate product IDs are not allowed" });
+  }
+});
+export type BulkUpdateOutOfStockOrdersDTO = z.infer<typeof BulkUpdateOutOfStockOrdersDTOSchema>;
