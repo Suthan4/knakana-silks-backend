@@ -49,6 +49,82 @@ export class CartRepository implements ICartRepository {
     });
   }
 
+  async addOrIncrementItem(data: {
+    cartId: bigint;
+    productId: bigint;
+    variantId?: bigint;
+    quantity: number;
+  }): Promise<CartItem> {
+    const lockKey = `${data.cartId}:${data.productId}:${data.variantId?.toString() ?? "simple"}`;
+
+    // PostgreSQL advisory transaction locks serialize concurrent Add to Cart
+    // requests for the same cart/product/variant, including simple products
+    // where variantId is NULL and ordinary UNIQUE constraints allow duplicates.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
+
+      const matching = await tx.cartItem.findMany({
+        where: {
+          cartId: data.cartId,
+          productId: data.productId,
+          variantId: data.variantId ?? null,
+        },
+        orderBy: { id: "asc" },
+      });
+
+      if (matching.length > 0) {
+        const primary = matching[0];
+        const totalQuantity =
+          matching.reduce((sum, item) => sum + Number(item.quantity || 0), 0) + data.quantity;
+
+        const updated = await tx.cartItem.update({
+          where: { id: primary.id },
+          data: { quantity: totalQuantity },
+          include: {
+            product: {
+              include: {
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
+              },
+            },
+            variant: true,
+          },
+        });
+
+        const duplicateIds = matching.slice(1).map((item) => item.id);
+        if (duplicateIds.length > 0) {
+          await tx.cartItem.deleteMany({ where: { id: { in: duplicateIds } } });
+        }
+
+        return updated;
+      }
+
+      return tx.cartItem.create({
+        data: {
+          cartId: data.cartId,
+          productId: data.productId,
+          variantId: data.variantId ?? null,
+          quantity: data.quantity,
+        },
+        include: {
+          product: {
+            include: {
+              media: {
+                take: 1,
+                where: { isActive: true },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          variant: true,
+        },
+      });
+    });
+  }
+
   async updateItem(id: bigint, quantity: number): Promise<CartItem> {
     return this.prisma.cartItem.update({
       where: { id },
@@ -113,8 +189,11 @@ async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
               sellingPrice: true,
               basePrice: true,
               slug:true,
-              sku: true, 
-              categoryId: true, // ✅ CRITICAL FIX: Needed for coupon validation
+              sku: true,
+              categoryId: true, // Needed for coupon validation
+              isActive: true,
+              hasVariants: true,
+              allowOutOfStockOrders: true,
               media: {
                 take: 1,
                 where: { isActive: true },
@@ -148,6 +227,12 @@ async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
   }
 
   async getItemCount(cartId: bigint): Promise<number> {
-    return this.prisma.cartItem.count({ where: { cartId } });
+    // Header/cart badge represents quantity, not the number of database rows.
+    // This remains correct when legacy duplicate rows have been consolidated.
+    const result = await this.prisma.cartItem.aggregate({
+      where: { cartId },
+      _sum: { quantity: true },
+    });
+    return result._sum.quantity ?? 0;
   }
 }
