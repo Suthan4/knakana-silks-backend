@@ -283,6 +283,14 @@ router.post(
   (req, res) => getProductController().createProduct(req, res)
 );
 
+router.patch(
+  "/admin/products/bulk/out-of-stock-orders",
+  authenticate,
+  adminCatalogWriteLimiter,
+  checkPermission("products", "update"),
+  (req, res) => getProductController().bulkUpdateAllowOutOfStockOrders(req, res)
+);
+
 router.post(
   "/admin/products/consolidate-variants",
   authenticate,
