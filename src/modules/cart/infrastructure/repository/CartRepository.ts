@@ -61,7 +61,16 @@ export class CartRepository implements ICartRepository {
     // requests for the same cart/product/variant, including simple products
     // where variantId is NULL and ordinary UNIQUE constraints allow duplicates.
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
+      // The advisory-lock function returns PostgreSQL `void`. Do not expose
+      // that column to Prisma result deserialization; return a supported integer
+      // column from the outer query while forcing the lock CTE to execute.
+      await tx.$queryRaw<Array<{ locked: number }>>`
+        WITH advisory_lock AS MATERIALIZED (
+          SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)
+        )
+        SELECT 1::int AS locked
+        FROM advisory_lock
+      `;
 
       const matching = await tx.cartItem.findMany({
         where: {
