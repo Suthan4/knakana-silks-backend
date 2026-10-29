@@ -32,18 +32,36 @@ export class CartService {
       };
     }
 
-    // Calculate subtotal
-    const subtotal = cart.items.reduce((sum, item) => {
+    // Legacy carts can contain duplicate rows for the same product/variant.
+    // Normalize the read response to one visible line and a summed quantity.
+    const groupedItems = new Map<string, typeof cart.items>();
+    for (const item of cart.items) {
+      const key = `${item.productId.toString()}::${item.variantId?.toString() ?? ""}`;
+      const group = groupedItems.get(key) ?? [];
+      group.push(item);
+      groupedItems.set(key, group);
+    }
+
+    const items = Array.from(groupedItems.values()).map((group) => {
+      const primary = group[0];
+      return {
+        ...primary,
+        quantity: group.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      };
+    });
+
+    const subtotal = items.reduce((sum, item) => {
       const price =
-            item.variant?.sellingPrice ??
-            item.variant?.price ??
-            item.product.sellingPrice;
+        item.variant?.sellingPrice ??
+        item.variant?.price ??
+        item.product.sellingPrice;
       return sum + Number(price) * item.quantity;
     }, 0);
 
     return {
       ...cart,
-      totalItems: cart.items.length,
+      items,
+      totalItems: items.reduce((sum, item) => sum + item.quantity, 0),
       subtotal,
     };
   }
@@ -65,82 +83,81 @@ export class CartService {
     if (!product.isActive) {
       throw new Error("Product is not available");
     }
-    // ✅ CRITICAL FIX: Properly check for existing item
-    const variantIdBigInt = variantId ? BigInt(variantId) : undefined
-     console.log("🔍 Checking for existing cart item:", {
-    cartId: cart.id.toString(),
-    productId,
-    variantId: variantId || "none",
-  })
-    // Check if item already exists in cart
-    const existingItem = await this.cartRepository.findItem(
-      cart.id,
-      BigInt(productId),
-      variantId ? BigInt(variantId) : undefined
+    // Consolidate any legacy duplicate rows before incrementing quantity.
+    // This also prevents additional duplicates if the cart already contains them.
+    const cartWithItems = await this.cartRepository.getCartWithItems(BigInt(userId));
+    const variantIdBigInt = variantId ? BigInt(variantId) : undefined;
+    const matchingItems = (cartWithItems?.items ?? []).filter(
+      (item) =>
+        item.productId === BigInt(productId) &&
+        (item.variantId ?? null) === (variantIdBigInt ?? null),
     );
-      console.log("📦 Existing item found:", !!existingItem);
 
+    if (matchingItems.length > 0) {
+      const primary = matchingItems[0];
+      const nextQuantity =
+        matchingItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0) + quantity;
+      const updated = await this.cartRepository.updateItem(primary.id, nextQuantity);
 
-    if (existingItem) {
-      // Update quantity
-       console.log("✏️ Updating existing item quantity:", {
-      oldQuantity: existingItem.quantity,
-      newQuantity: existingItem.quantity + quantity,
-    });
-    
-      return this.cartRepository.updateItem(
-        existingItem.id,
-        existingItem.quantity + quantity
-      );
+      for (const duplicate of matchingItems.slice(1)) {
+        await this.cartRepository.removeItem(duplicate.id);
+      }
+      return updated;
     }
-
-    // Add new item
-    console.log("➕ Adding new cart item");
 
     return this.cartRepository.addItem({
       cartId: cart.id,
       productId: BigInt(productId),
-      variantId: variantId ? BigInt(variantId) : undefined,
+      variantId: variantIdBigInt,
       quantity,
     });
   }
 
   async updateCartItem(userId: string, itemId: string, quantity: number) {
-    // Get cart with items to verify ownership
-    const cartWithItems = await this.cartRepository.getCartWithItems(
-      BigInt(userId)
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw new Error("Quantity must be a positive integer");
+    }
+
+    const cartWithItems = await this.cartRepository.getCartWithItems(BigInt(userId));
+    if (!cartWithItems) throw new Error("Cart not found");
+
+    const item = cartWithItems.items.find((candidate) => candidate.id === BigInt(itemId));
+    if (!item) throw new Error("Cart item not found");
+
+    const matchingItems = cartWithItems.items.filter(
+      (candidate) =>
+        candidate.productId === item.productId &&
+        (candidate.variantId ?? null) === (item.variantId ?? null),
     );
+    const updated = await this.cartRepository.updateItem(item.id, quantity);
 
-    if (!cartWithItems) {
-      throw new Error("Cart not found");
+    // One visible line should represent exactly one product + variant.
+    for (const duplicate of matchingItems) {
+      if (duplicate.id !== item.id) {
+        await this.cartRepository.removeItem(duplicate.id);
+      }
     }
 
-    const item = cartWithItems.items.find((i) => i.id === BigInt(itemId));
-
-    if (!item) {
-      throw new Error("Cart item not found");
-    }
-
-    return this.cartRepository.updateItem(BigInt(itemId), quantity);
+    return updated;
   }
 
   async removeFromCart(userId: string, itemId: string) {
-    // Get cart with items to verify ownership
-    const cartWithItems = await this.cartRepository.getCartWithItems(
-      BigInt(userId)
+    const cartWithItems = await this.cartRepository.getCartWithItems(BigInt(userId));
+    if (!cartWithItems) throw new Error("Cart not found");
+
+    const item = cartWithItems.items.find((candidate) => candidate.id === BigInt(itemId));
+    if (!item) throw new Error("Cart item not found");
+
+    // Remove all legacy rows representing this product/variant, not only the
+    // first duplicate row selected by the UI.
+    const matchingItems = cartWithItems.items.filter(
+      (candidate) =>
+        candidate.productId === item.productId &&
+        (candidate.variantId ?? null) === (item.variantId ?? null),
     );
-
-    if (!cartWithItems) {
-      throw new Error("Cart not found");
+    for (const duplicate of matchingItems) {
+      await this.cartRepository.removeItem(duplicate.id);
     }
-
-    const item = cartWithItems.items.find((i) => i.id === BigInt(itemId));
-
-    if (!item) {
-      throw new Error("Cart item not found");
-    }
-
-    await this.cartRepository.removeItem(BigInt(itemId));
   }
 
   async clearCart(userId: string) {
