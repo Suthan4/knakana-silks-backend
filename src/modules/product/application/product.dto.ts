@@ -261,6 +261,10 @@ export const QueryProductDTOSchema = z.object({
     (value) => value === "true" ? true : value === "false" ? false : value,
     z.boolean().optional()
   ),
+  allowOutOfStockOrders: z.preprocess(
+    (value) => value === "true" ? true : value === "false" ? false : value,
+    z.boolean().optional()
+  ),
 
   // Price Range
   minPrice: z.coerce.number().positive().optional(),
