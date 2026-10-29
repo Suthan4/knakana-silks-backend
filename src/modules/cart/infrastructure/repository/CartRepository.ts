@@ -189,8 +189,11 @@ async getCartWithItems(userId: bigint): Promise<CartWithItems | null> {
               sellingPrice: true,
               basePrice: true,
               slug:true,
-              sku: true, 
-              categoryId: true, // ✅ CRITICAL FIX: Needed for coupon validation
+              sku: true,
+              categoryId: true, // Needed for coupon validation
+              isActive: true,
+              hasVariants: true,
+              allowOutOfStockOrders: true,
               media: {
                 take: 1,
                 where: { isActive: true },
