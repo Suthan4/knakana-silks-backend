@@ -83,32 +83,10 @@ export class CartService {
     if (!product.isActive) {
       throw new Error("Product is not available");
     }
-    // Consolidate any legacy duplicate rows before incrementing quantity.
-    // This also prevents additional duplicates if the cart already contains them.
-    const cartWithItems = await this.cartRepository.getCartWithItems(BigInt(userId));
-    const variantIdBigInt = variantId ? BigInt(variantId) : undefined;
-    const matchingItems = (cartWithItems?.items ?? []).filter(
-      (item) =>
-        item.productId === BigInt(productId) &&
-        (item.variantId ?? null) === (variantIdBigInt ?? null),
-    );
-
-    if (matchingItems.length > 0) {
-      const primary = matchingItems[0];
-      const nextQuantity =
-        matchingItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0) + quantity;
-      const updated = await this.cartRepository.updateItem(primary.id, nextQuantity);
-
-      for (const duplicate of matchingItems.slice(1)) {
-        await this.cartRepository.removeItem(duplicate.id);
-      }
-      return updated;
-    }
-
-    return this.cartRepository.addItem({
+    return this.cartRepository.addOrIncrementItem({
       cartId: cart.id,
       productId: BigInt(productId),
-      variantId: variantIdBigInt,
+      variantId: variantId ? BigInt(variantId) : undefined,
       quantity,
     });
   }
