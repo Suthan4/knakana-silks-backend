@@ -2562,6 +2562,26 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     }, { timeout: 30000 });
   }
 
+  async bulkUpdateAllowOutOfStockOrders(productIds: string[], allowOutOfStockOrders: boolean) {
+    const ids = productIds.map((id) => BigInt(id));
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.product.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      });
+      if (existing.length !== ids.length) {
+        const found = new Set(existing.map((product) => product.id.toString()));
+        const missing = productIds.filter((id) => !found.has(id));
+        throw new NotFoundError(`Products not found: ${missing.join(", ")}`);
+      }
+      const result = await tx.product.updateMany({
+        where: { id: { in: ids } },
+        data: { allowOutOfStockOrders },
+      });
+      return { updatedCount: result.count, allowOutOfStockOrders };
+    });
+  }
+
   private generateSKU(name: string): string {
     const slug = SlugUtil.generateSlug(name).substring(0, 10).toUpperCase();
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
