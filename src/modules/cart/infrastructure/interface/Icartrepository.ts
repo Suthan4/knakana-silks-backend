@@ -21,6 +21,7 @@ export interface ICartRepository {
     variantId?: bigint;
     quantity: number;
   }): Promise<CartItem>;
+  addOrIncrementItem(data: { cartId: bigint; productId: bigint; variantId?: bigint; quantity: number }): Promise<CartItem>;
   updateItem(id: bigint, quantity: number): Promise<CartItem>;
   removeItem(id: bigint): Promise<void>;
   findItem(
