@@ -14,6 +14,53 @@ export enum StockAdjustmentReason {
   RESTOCKING = "RESTOCKING",
 }
 
+
+
+/**
+ * Single order-stock policy shared by preview validation and final reservation.
+ * Backorder-enabled products ignore the threshold but are still limited to
+ * one unit while physical stock is positive and below that threshold.
+ */
+function getOrderStockValidationError(params: {
+  productName: string;
+  available: number;
+  threshold: number;
+  allowOutOfStockOrders: boolean;
+  requestedQuantity: number;
+}): string | null {
+  const {
+    productName,
+    available,
+    threshold,
+    allowOutOfStockOrders,
+    requestedQuantity,
+  } = params;
+
+  if (!Number.isInteger(requestedQuantity) || requestedQuantity < 1) {
+    return "Please select a valid quantity.";
+  }
+
+  if (available <= 0) {
+    return `${productName} is out of stock.`;
+  }
+
+  const isBelowThreshold = threshold > 0 && available < threshold;
+
+  if (isBelowThreshold && !allowOutOfStockOrders) {
+    return `${productName} is out of stock.`;
+  }
+
+  if (isBelowThreshold && allowOutOfStockOrders && requestedQuantity > 1) {
+    return `Only 1 item of ${productName} can be ordered.`;
+  }
+
+  if (requestedQuantity > available) {
+    return `Only ${available} item(s) of ${productName} are available.`;
+  }
+
+  return null;
+}
+
 interface StockAdjustmentParams {
   productId: bigint;
   variantId?: bigint;
@@ -109,12 +156,13 @@ export class StockManagementService {
       if (!Number.isInteger(item.quantity) || item.quantity < 1) {
         throw new Error("Please select a valid quantity.");
       }
-      const key = `${item.productId.toString()}:${item.variantId?.toString() ?? "simple"}`;
+      const variantId = item.variantId ?? item.variant?.id ?? undefined;
+      const key = `${item.productId.toString()}:${variantId?.toString() ?? "simple"}`;
       const current = grouped.get(key);
       if (current) current.quantity += item.quantity;
       else grouped.set(key, {
         productId: item.productId,
-        variantId: item.variantId ?? undefined,
+        variantId,
         quantity: item.quantity,
       });
     }
@@ -136,22 +184,30 @@ export class StockManagementService {
         throw new Error(`${product?.name ?? "This product"} is no longer available.`);
       }
       const available = Math.max(0, Number(stock?.quantity ?? 0));
-      if (!stock || available <= 0) {
-        throw new Error(`${product.name} is out of stock.`);
-      }
-
       const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
-      const isBelowThreshold = threshold > 0 && available < threshold;
-      if (isBelowThreshold && !product.allowOutOfStockOrders) {
-        throw new Error(`${product.name} is out of stock.`);
-      }
-      if (isBelowThreshold && product.allowOutOfStockOrders && item.quantity > 1) {
-        throw new Error(`Only 1 item of ${product.name} can be ordered.`);
-      }
-      if (item.quantity > available) {
-        throw new Error(
-          `Only ${available} item(s) of ${product.name} are available.`,
-        );
+      const allowOutOfStockOrders = product.allowOutOfStockOrders === true;
+      const validationError = getOrderStockValidationError({
+        productName: product.name,
+        available,
+        threshold,
+        allowOutOfStockOrders,
+        requestedQuantity: item.quantity,
+      });
+
+      if (validationError) {
+        console.warn("[ORDER_STOCK_VALIDATION]", {
+          phase: "preview-or-prepayment-validation",
+          productId: item.productId.toString(),
+          variantId: item.variantId?.toString() ?? null,
+          warehouseId: warehouseId.toString(),
+          stockRecordFound: Boolean(stock),
+          available,
+          threshold,
+          allowOutOfStockOrders,
+          requestedQuantity: item.quantity,
+          reason: validationError,
+        });
+        throw new Error(validationError);
       }
     }
   }
@@ -169,12 +225,13 @@ export class StockManagementService {
         if (!Number.isInteger(item.quantity) || item.quantity < 1) {
           throw new Error("Please select a valid quantity.");
         }
-        const key = `${item.productId.toString()}:${item.variantId?.toString() ?? "simple"}`;
+        const variantId = item.variantId ?? item.variant?.id ?? undefined;
+        const key = `${item.productId.toString()}:${variantId?.toString() ?? "simple"}`;
         const current = grouped.get(key);
         if (current) current.quantity += item.quantity;
         else grouped.set(key, {
           productId: item.productId,
-          variantId: item.variantId ?? undefined,
+          variantId,
           quantity: item.quantity,
           name: item.product?.name ?? "This product",
         });
@@ -198,23 +255,31 @@ export class StockManagementService {
         });
 
         const available = Math.max(0, Number(stock?.quantity ?? 0));
-        if (!stock || available <= 0) {
-          throw new Error(`${product.name} is out of stock.`);
-        }
-
-        // Recheck the same policy atomically at final reservation.
+        // Recheck the exact same policy atomically at final reservation.
         const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
-        const isBelowThreshold = threshold > 0 && available < threshold;
-        if (isBelowThreshold && !product.allowOutOfStockOrders) {
-          throw new Error(`${product.name} is out of stock.`);
-        }
-        if (isBelowThreshold && product.allowOutOfStockOrders && item.quantity > 1) {
-          throw new Error(`Only 1 item of ${product.name} can be ordered.`);
-        }
-        if (item.quantity > available) {
-          throw new Error(
-            `Only ${available} item(s) of ${product.name} are available.`,
-          );
+        const allowOutOfStockOrders = product.allowOutOfStockOrders === true;
+        const validationError = getOrderStockValidationError({
+          productName: product.name,
+          available,
+          threshold,
+          allowOutOfStockOrders,
+          requestedQuantity: item.quantity,
+        });
+
+        if (validationError) {
+          console.warn("[ORDER_STOCK_VALIDATION]", {
+            phase: "final-stock-reservation",
+            productId: item.productId.toString(),
+            variantId: item.variantId?.toString() ?? null,
+            warehouseId: warehouseId.toString(),
+            stockRecordFound: Boolean(stock),
+            available,
+            threshold,
+            allowOutOfStockOrders,
+            requestedQuantity: item.quantity,
+            reason: validationError,
+          });
+          throw new Error(validationError);
         }
 
         // Conditional decrement prevents two concurrent checkouts from both
