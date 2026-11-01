@@ -123,7 +123,7 @@ export class StockManagementService {
       const [product, stock] = await Promise.all([
         this.prisma.product.findUnique({
           where: { id: item.productId },
-          select: { name: true, isActive: true },
+          select: { name: true, isActive: true, allowOutOfStockOrders: true },
         }),
         this.stockRepository.findByProductAndWarehouse(
           item.productId,
@@ -140,8 +140,13 @@ export class StockManagementService {
         throw new Error(`${product.name} is out of stock.`);
       }
 
-      // lowStockThreshold is an inventory alert threshold, not a sales limit.
-      // Any physically available quantity remains purchasable.
+      const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
+      if (product.allowOutOfStockOrders && item.quantity > 1) {
+        throw new Error(`Only 1 item of ${product.name} can be ordered.`);
+      }
+      if (!product.allowOutOfStockOrders && threshold > 0 && available < threshold) {
+        throw new Error(`${product.name} is out of stock.`);
+      }
       if (item.quantity > available) {
         throw new Error(
           `Only ${available} item(s) of ${product.name} are available.`,
@@ -177,7 +182,7 @@ export class StockManagementService {
       for (const item of grouped.values()) {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
-          select: { name: true, isActive: true },
+          select: { name: true, isActive: true, allowOutOfStockOrders: true },
         });
         if (!product || !product.isActive) {
           throw new Error(`${product?.name ?? item.name} is no longer available.`);
@@ -196,8 +201,14 @@ export class StockManagementService {
           throw new Error(`${product.name} is out of stock.`);
         }
 
-        // Recheck actual quantity inside the reservation transaction.
-        // Low-stock thresholds must not block purchases of available stock.
+        // Recheck the same policy atomically at final reservation.
+        const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
+        if (product.allowOutOfStockOrders && item.quantity > 1) {
+          throw new Error(`Only 1 item of ${product.name} can be ordered.`);
+        }
+        if (!product.allowOutOfStockOrders && threshold > 0 && available < threshold) {
+          throw new Error(`${product.name} is out of stock.`);
+        }
         if (item.quantity > available) {
           throw new Error(
             `Only ${available} item(s) of ${product.name} are available.`,
