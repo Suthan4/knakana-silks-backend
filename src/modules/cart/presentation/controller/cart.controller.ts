@@ -7,9 +7,10 @@ import { AddToCartDTOSchema, UpdateCartItemDTOSchema } from "../../application/d
 function sendCartError(res: Response, error: unknown) {
   const value = error as { statusCode?: number; message?: string };
   const status = Number.isInteger(value?.statusCode) ? value.statusCode! : 400;
+  const validationMessage = (error as any)?.issues?.[0]?.message;
   res.status(status).json({
     success: false,
-    message: value?.message || "Unable to process your cart request. Please try again.",
+    message: validationMessage || value?.message || "Unable to process your cart request. Please try again.",
     code: (value as any)?.code,
   });
 }
