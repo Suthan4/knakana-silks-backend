@@ -87,6 +87,14 @@ export class CartRepository implements ICartRepository {
         orderBy: { id: "asc" },
       });
 
+      if (matching.length === 0 && data.maxQuantity !== undefined && data.quantity > data.maxQuantity) {
+        throw new CartStockLimitError(
+          data.maxQuantity === 1
+            ? "Only 1 item can be ordered for this low-stock product."
+            : `Only ${data.maxQuantity} item(s) are available.`,
+        );
+      }
+
       if (matching.length > 0) {
         const primary = matching[0];
         const totalQuantity =
