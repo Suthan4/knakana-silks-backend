@@ -5,6 +5,11 @@ import {
   ICartRepository,
 } from "../interface/Icartrepository.js";
 
+class CartStockLimitError extends Error {
+  statusCode = 409;
+  code = "CART_STOCK_LIMIT";
+}
+
 @injectable()
 export class CartRepository implements ICartRepository {
   constructor(@inject(PrismaClient) private prisma: PrismaClient) {}
@@ -88,7 +93,7 @@ export class CartRepository implements ICartRepository {
           matching.reduce((sum, item) => sum + Number(item.quantity || 0), 0) + data.quantity;
 
         if (data.maxQuantity !== undefined && totalQuantity > data.maxQuantity) {
-          throw new Error(
+          throw new CartStockLimitError(
             data.maxQuantity === 1
               ? "Only 1 item can be ordered for this low-stock product."
               : `Only ${data.maxQuantity} item(s) are available.`,
@@ -167,7 +172,7 @@ export class CartRepository implements ICartRepository {
       const totalExisting = matching.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
       const totalAfterUpdate = quantity + totalExisting - Number(current.quantity || 0);
       if (maxQuantity !== undefined && totalAfterUpdate > maxQuantity) {
-        throw new Error(
+        throw new CartStockLimitError(
           maxQuantity === 1
             ? "Only 1 item can be ordered for this low-stock product."
             : `Only ${maxQuantity} item(s) are available.`,
