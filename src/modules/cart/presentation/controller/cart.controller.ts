@@ -4,6 +4,16 @@ import { CartService } from "../../application/service/cart.service.js";
 import { AddToCartDTOSchema, UpdateCartItemDTOSchema } from "../../application/dtos/cart.dto.js";
 
 
+function sendCartError(res: Response, error: unknown) {
+  const value = error as { statusCode?: number; message?: string };
+  const status = Number.isInteger(value?.statusCode) ? value.statusCode! : 400;
+  res.status(status).json({
+    success: false,
+    message: value?.message || "Unable to process your cart request. Please try again.",
+    code: (value as any)?.code,
+  });
+}
+
 @injectable()
 export class CartController {
   constructor(@inject(CartService) private cartService: CartService) {}
@@ -18,7 +28,7 @@ export class CartController {
         data: cart,
       });
     } catch (error: any) {
-      res.status(error?.statusCode ?? 400).json({ success: false, message: error?.message ?? "Unable to process cart request." });
+      sendCartError(res, error);
     }
   }
 
@@ -40,7 +50,7 @@ export class CartController {
         data: item,
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      sendCartError(res, error);
     }
   }
 
@@ -69,7 +79,7 @@ export class CartController {
         data: item,
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      sendCartError(res, error);
     }
   }
 
@@ -91,7 +101,7 @@ export class CartController {
         message: "Item removed from cart",
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      sendCartError(res, error);
     }
   }
 
@@ -105,7 +115,7 @@ export class CartController {
         message: "Cart cleared",
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      sendCartError(res, error);
     }
   }
 
@@ -119,7 +129,7 @@ export class CartController {
         data: { count },
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      sendCartError(res, error);
     }
   }
 }
