@@ -26,28 +26,14 @@ function validateStock(
     throw new CartValidationError("Please select a valid quantity.");
   }
 
-  const { available, threshold, isBelowThreshold } = getStockState(stockRows);
+  const { available } = getStockState(stockRows);
   const totalRequested = currentQuantity + requestedQuantity;
   const productName = product.name || "This product";
 
-  // Zero stock is always unavailable, even when back-ordering is enabled.
+  // A low-stock threshold is a display warning, not an out-of-stock state.
+  // Customers may purchase any quantity that is physically available.
   if (available <= 0) {
     throw new CartValidationError(`${productName} is out of stock.`);
-  }
-
-  if (isBelowThreshold) {
-    if (!product.allowOutOfStockOrders) {
-      throw new CartValidationError(
-        `${productName} is out of stock. Only quantities above the stock threshold can be ordered.`,
-      );
-    }
-
-    if (totalRequested > 1) {
-      throw new CartValidationError(
-        `${productName} has limited availability. Only 1 item can be ordered.`,
-      );
-    }
-    return;
   }
 
   if (totalRequested > available) {
@@ -143,8 +129,8 @@ export class CartService {
     const stockRows = product.hasVariants
       ? product.variants.find((entry) => entry.id === BigInt(variantId!))?.stock
       : product.stock;
-    const { available, isBelowThreshold } = getStockState(stockRows);
-    const maxQuantity = isBelowThreshold && product.allowOutOfStockOrders ? 1 : available;
+    const { available } = getStockState(stockRows);
+    const maxQuantity = available;
 
     return this.cartRepository.addOrIncrementItem({
       cartId: cart.id,
@@ -183,9 +169,8 @@ export class CartService {
     const quantityToValidate = existingQuantity || 1;
     validateStock(product, product.stock, quantityToValidate);
 
-    const { available, isBelowThreshold } = getStockState(product.stock);
-    const maxQuantity =
-      isBelowThreshold && product.allowOutOfStockOrders ? 1 : available;
+    const { available } = getStockState(product.stock);
+    const maxQuantity = available;
 
     return this.cartRepository.addIfNotExists({
       cartId: cart.id,
@@ -212,8 +197,8 @@ export class CartService {
 
     const stockRows = item.variantId ? item.variant?.stock : item.product.stock;
     validateStock(item.product, stockRows, quantity);
-    const { available, isBelowThreshold } = getStockState(stockRows);
-    const maxQuantity = isBelowThreshold && item.product.allowOutOfStockOrders ? 1 : available;
+    const { available } = getStockState(stockRows);
+    const maxQuantity = available;
 
     const matchingItems = cartWithItems.items.filter(
       (candidate) =>
