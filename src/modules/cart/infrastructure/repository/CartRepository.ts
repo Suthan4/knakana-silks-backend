@@ -54,6 +54,102 @@ export class CartRepository implements ICartRepository {
     });
   }
 
+  /**
+   * Move-to-cart operation: create a quantity-1 line only when it does not
+   * already exist. Existing quantity is preserved and never incremented.
+   */
+  async addIfNotExists(data: {
+    cartId: bigint;
+    productId: bigint;
+    variantId?: bigint;
+    quantity: number;
+    maxQuantity?: number;
+  }): Promise<{ item: CartItem; alreadyInCart: boolean }> {
+    const lockKey = `${data.cartId}:${data.productId}:${data.variantId?.toString() ?? "simple"}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ locked: number }>>`
+        WITH advisory_lock AS MATERIALIZED (
+          SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)
+        )
+        SELECT 1::int AS locked FROM advisory_lock
+      `;
+
+      const matching = await tx.cartItem.findMany({
+        where: {
+          cartId: data.cartId,
+          productId: data.productId,
+          variantId: data.variantId ?? null,
+        },
+        orderBy: { id: "asc" },
+      });
+
+      const existingQuantity = matching.reduce(
+        (sum, row) => sum + Number(row.quantity || 0),
+        0,
+      );
+      const quantityToPreserve = existingQuantity || data.quantity;
+      if (data.maxQuantity !== undefined && quantityToPreserve > data.maxQuantity) {
+        throw new CartStockLimitError(
+          data.maxQuantity === 1
+            ? "Only 1 item can be ordered for this low-stock product."
+            : `Only ${data.maxQuantity} item(s) are available.`,
+        );
+      }
+
+      if (matching.length > 0) {
+        const primary = matching[0];
+        const preservedQuantity = existingQuantity;
+        const item = await tx.cartItem.update({
+          where: { id: primary.id },
+          data: { quantity: preservedQuantity },
+          include: {
+            product: {
+              include: {
+                media: {
+                  take: 1,
+                  where: { isActive: true },
+                  orderBy: { order: "asc" },
+                },
+              },
+            },
+            variant: true,
+          },
+        });
+
+        const duplicateIds = matching.slice(1).map((row) => row.id);
+        if (duplicateIds.length) {
+          await tx.cartItem.deleteMany({ where: { id: { in: duplicateIds } } });
+        }
+
+        return { item, alreadyInCart: true };
+      }
+
+      const item = await tx.cartItem.create({
+        data: {
+          cartId: data.cartId,
+          productId: data.productId,
+          variantId: data.variantId ?? null,
+          quantity: data.quantity,
+        },
+        include: {
+          product: {
+            include: {
+              media: {
+                take: 1,
+                where: { isActive: true },
+                orderBy: { order: "asc" },
+              },
+            },
+          },
+          variant: true,
+        },
+      });
+
+      return { item, alreadyInCart: false };
+    });
+  }
+
   async addOrIncrementItem(data: {
     cartId: bigint;
     productId: bigint;
@@ -158,16 +254,21 @@ export class CartRepository implements ICartRepository {
 
   async updateItem(id: bigint, quantity: number, maxQuantity?: number): Promise<CartItem> {
     return this.prisma.$transaction(async (tx) => {
-      const current = await tx.cartItem.findUnique({ where: { id } });
-      if (!current) throw new Error("Cart item not found.");
+      const initial = await tx.cartItem.findUnique({ where: { id } });
+      if (!initial) throw new Error("Cart item not found.");
 
-      const lockKey = `${current.cartId}:${current.productId}:${current.variantId?.toString() ?? "simple"}`;
+      const lockKey = `${initial.cartId}:${initial.productId}:${initial.variantId?.toString() ?? "simple"}`;
       await tx.$queryRaw<Array<{ locked: number }>>`
         WITH advisory_lock AS MATERIALIZED (
           SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)
         )
         SELECT 1::int AS locked FROM advisory_lock
       `;
+
+      // Re-read after obtaining the lock so quantity calculations use the
+      // latest committed value rather than a stale pre-lock snapshot.
+      const current = await tx.cartItem.findUnique({ where: { id } });
+      if (!current) throw new Error("Cart item not found.");
 
       const matching = await tx.cartItem.findMany({
         where: {

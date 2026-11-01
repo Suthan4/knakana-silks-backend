@@ -13,7 +13,7 @@ function getStockState(stockRows: StockRow[] | undefined) {
   const rows = stockRows ?? [];
   const available = rows.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) || 0), 0);
   const threshold = rows.reduce((sum, row) => sum + Math.max(0, Number(row.lowStockThreshold) || 0), 0);
-  return { available, threshold, isBelowThreshold: available < threshold };
+  return { available, threshold, isBelowThreshold: available > 0 && threshold > 0 && available <= threshold };
 }
 
 function validateStock(
@@ -151,6 +151,46 @@ export class CartService {
       productId: BigInt(productId),
       variantId: variantId ? BigInt(variantId) : undefined,
       quantity,
+      maxQuantity,
+    });
+  }
+
+  /**
+   * Dedicated wishlist move-to-cart operation.
+   * Existing cart quantity is preserved; a missing item is created at quantity 1.
+   */
+  async moveWishlistProductToCart(userId: string, productId: string) {
+    const product = await this.productRepository.findById(BigInt(productId));
+    if (!product) throw new CartValidationError("Product not found.");
+    if (!product.isActive) {
+      throw new CartValidationError("This product is no longer available.");
+    }
+    if (product.hasVariants) {
+      throw new CartValidationError(
+        "Please select a product variant from the product page before moving it to your cart.",
+      );
+    }
+
+    const cart = await this.getOrCreateCart(userId);
+    const cartWithItems = await this.cartRepository.getCartWithItems(BigInt(userId));
+    const existingQuantity = cartWithItems?.items
+      .filter(
+        (item) =>
+          item.productId === BigInt(productId) && item.variantId == null,
+      )
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
+
+    const quantityToValidate = existingQuantity || 1;
+    validateStock(product, product.stock, quantityToValidate);
+
+    const { available, isBelowThreshold } = getStockState(product.stock);
+    const maxQuantity =
+      isBelowThreshold && product.allowOutOfStockOrders ? 1 : available;
+
+    return this.cartRepository.addIfNotExists({
+      cartId: cart.id,
+      productId: BigInt(productId),
+      quantity: 1,
       maxQuantity,
     });
   }
