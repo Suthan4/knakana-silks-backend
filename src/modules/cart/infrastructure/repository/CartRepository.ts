@@ -63,6 +63,7 @@ export class CartRepository implements ICartRepository {
     productId: bigint;
     variantId?: bigint;
     quantity: number;
+    maxQuantity?: number;
   }): Promise<{ item: CartItem; alreadyInCart: boolean }> {
     const lockKey = `${data.cartId}:${data.productId}:${data.variantId?.toString() ?? "simple"}`;
 
@@ -83,12 +84,22 @@ export class CartRepository implements ICartRepository {
         orderBy: { id: "asc" },
       });
 
+      const existingQuantity = matching.reduce(
+        (sum, row) => sum + Number(row.quantity || 0),
+        0,
+      );
+      const quantityToPreserve = existingQuantity || data.quantity;
+      if (data.maxQuantity !== undefined && quantityToPreserve > data.maxQuantity) {
+        throw new CartStockLimitError(
+          data.maxQuantity === 1
+            ? "Only 1 item can be ordered for this low-stock product."
+            : `Only ${data.maxQuantity} item(s) are available.`,
+        );
+      }
+
       if (matching.length > 0) {
         const primary = matching[0];
-        const preservedQuantity = matching.reduce(
-          (sum, row) => sum + Number(row.quantity || 0),
-          0,
-        );
+        const preservedQuantity = existingQuantity;
         const item = await tx.cartItem.update({
           where: { id: primary.id },
           data: { quantity: preservedQuantity },
