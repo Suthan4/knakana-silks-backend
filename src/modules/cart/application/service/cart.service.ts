@@ -36,15 +36,14 @@ function validateStock(
 
   // Backorder-enabled products bypass the threshold but are capped at one
   // item. Otherwise, stock below threshold is not purchasable.
-  if (product.allowOutOfStockOrders) {
+  if (isBelowThreshold) {
+    if (!product.allowOutOfStockOrders) {
+      throw new CartValidationError(`${productName} is out of stock.`);
+    }
     if (totalRequested > 1) {
       throw new CartValidationError(`Only 1 item of ${productName} can be ordered.`);
     }
     return;
-  }
-
-  if (threshold > 0 && isBelowThreshold) {
-    throw new CartValidationError(`${productName} is out of stock.`);
   }
 
   if (totalRequested > available) {
@@ -141,7 +140,7 @@ export class CartService {
       ? product.variants.find((entry) => entry.id === BigInt(variantId!))?.stock
       : product.stock;
     const { available } = getStockState(stockRows);
-    const maxQuantity = product.allowOutOfStockOrders ? 1 : available;
+    const maxQuantity = product.allowOutOfStockOrders && getStockState(stockRows).isBelowThreshold ? 1 : available;
 
     return this.cartRepository.addOrIncrementItem({
       cartId: cart.id,
@@ -181,7 +180,7 @@ export class CartService {
     validateStock(product, product.stock, quantityToValidate);
 
     const { available } = getStockState(product.stock);
-    const maxQuantity = product.allowOutOfStockOrders ? 1 : available;
+    const maxQuantity = product.allowOutOfStockOrders && getStockState(product.stock).isBelowThreshold ? 1 : available;
 
     return this.cartRepository.addIfNotExists({
       cartId: cart.id,
@@ -209,7 +208,7 @@ export class CartService {
     const stockRows = item.variantId ? item.variant?.stock : item.product.stock;
     validateStock(item.product, stockRows, quantity);
     const { available } = getStockState(stockRows);
-    const maxQuantity = item.product.allowOutOfStockOrders ? 1 : available;
+    const maxQuantity = item.product.allowOutOfStockOrders && getStockState(stockRows).isBelowThreshold ? 1 : available;
 
     const matchingItems = cartWithItems.items.filter(
       (candidate) =>
