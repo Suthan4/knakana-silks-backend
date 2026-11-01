@@ -1,13 +1,15 @@
 import { injectable, inject } from "tsyringe";
 import { IWishlistRepository } from "../../infrastructure/interface/Iwishlistrepository.js";
 import { IProductRepository } from "@/modules/product/infrastructure/interface/Iproductrepository.js";
+import { CartService } from "@/modules/cart/application/service/cart.service.js";
 
 @injectable()
 export class WishlistService {
   constructor(
     @inject("IWishlistRepository")
     private wishlistRepository: IWishlistRepository,
-    @inject("IProductRepository") private productRepository: IProductRepository
+    @inject("IProductRepository") private productRepository: IProductRepository,
+    @inject(CartService) private cartService: CartService
   ) {}
 
   async getOrCreateWishlist(userId: string) {
@@ -103,6 +105,36 @@ export class WishlistService {
     }
 
     await this.wishlistRepository.removeItem(BigInt(itemId));
+  }
+
+  /**
+   * Dedicated move-to-cart flow. The cart operation is idempotent for an
+   * existing product, so retrying after a wishlist deletion failure cannot
+   * increment its quantity.
+   */
+  async moveItemToCart(userId: string, itemId: string) {
+    const wishlist = await this.wishlistRepository.getWishlistWithItems(
+      BigInt(userId),
+    );
+    const wishlistItem = wishlist?.items.find(
+      (item) => item.id === BigInt(itemId),
+    );
+
+    if (!wishlistItem) {
+      throw new Error("Wishlist item not found.");
+    }
+
+    const result = await this.cartService.moveWishlistProductToCart(
+      userId,
+      wishlistItem.productId.toString(),
+    );
+
+    await this.wishlistRepository.removeItem(wishlistItem.id);
+
+    return {
+      cartItem: result.item,
+      alreadyInCart: result.alreadyInCart,
+    };
   }
 
   async clearWishlist(userId: string) {
