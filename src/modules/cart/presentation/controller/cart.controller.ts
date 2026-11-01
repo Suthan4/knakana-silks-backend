@@ -18,7 +18,7 @@ export class CartController {
         data: cart,
       });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(error?.statusCode ?? 400).json({ success: false, message: error?.message ?? "Unable to process cart request." });
     }
   }
 
