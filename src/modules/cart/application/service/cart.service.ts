@@ -1,6 +1,7 @@
 import { injectable, inject } from "tsyringe";
 import { ICartRepository } from "../../infrastructure/interface/Icartrepository.js";
 import { IProductRepository } from "@/modules/product/infrastructure/interface/Iproductrepository.js";
+import { PrismaClient } from "@/generated/prisma/client.js";
 
 class CartValidationError extends Error {
   statusCode = 409;
@@ -57,8 +58,38 @@ function validateStock(
 export class CartService {
   constructor(
     @inject("ICartRepository") private cartRepository: ICartRepository,
-    @inject("IProductRepository") private productRepository: IProductRepository
+    @inject("IProductRepository") private productRepository: IProductRepository,
+    @inject(PrismaClient) private prisma: PrismaClient
   ) {}
+
+  /**
+   * Cart mutations and order preview/reservation must use the same warehouse.
+   * Orders ship from the active default-pickup warehouse, falling back to the
+   * first active warehouse when no default is configured.
+   */
+  private async getPickupWarehouseId(): Promise<bigint | null> {
+    const defaultWarehouse = await this.prisma.warehouse.findFirst({
+      where: { isDefaultPickup: true, isActive: true },
+      select: { id: true },
+    });
+    if (defaultWarehouse) return defaultWarehouse.id;
+
+    const fallbackWarehouse = await this.prisma.warehouse.findFirst({
+      where: { isActive: true },
+      orderBy: { id: "asc" },
+      select: { id: true },
+    });
+    return fallbackWarehouse?.id ?? null;
+  }
+
+  private filterPickupWarehouseStock<T extends { warehouseId: bigint }>(
+    rows: T[] | undefined,
+    warehouseId: bigint | null,
+  ): T[] {
+    if (!rows) return [];
+    if (!warehouseId) return rows;
+    return rows.filter((row) => row.warehouseId === warehouseId);
+  }
 
   async getOrCreateCart(userId: string) {
     const userIdBigInt = BigInt(userId);
@@ -78,8 +109,23 @@ export class CartService {
       return { items: [], totalItems: 0, subtotal: 0 };
     }
 
-    const groupedItems = new Map<string, typeof cart.items>();
-    for (const item of cart.items) {
+    const pickupWarehouseId = await this.getPickupWarehouseId();
+    const pickupItems = cart.items.map((item) => ({
+      ...item,
+      product: {
+        ...item.product,
+        stock: this.filterPickupWarehouseStock(item.product.stock, pickupWarehouseId),
+      },
+      variant: item.variant
+        ? {
+            ...item.variant,
+            stock: this.filterPickupWarehouseStock(item.variant.stock, pickupWarehouseId),
+          }
+        : item.variant,
+    }));
+
+    const groupedItems = new Map<string, typeof pickupItems>();
+    for (const item of pickupItems) {
       const key = `${item.productId.toString()}::${item.variantId?.toString() ?? ""}`;
       const group = groupedItems.get(key) ?? [];
       group.push(item);
@@ -126,21 +172,27 @@ export class CartService {
       const currentQuantity = existingRows?.items
         .filter((item) => item.productId === BigInt(productId) && item.variantId === BigInt(variantId))
         .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
-      validateStock(product, variant.stock, quantity, currentQuantity);
+      const pickupWarehouseId = await this.getPickupWarehouseId();
+      const pickupStock = this.filterPickupWarehouseStock(variant.stock, pickupWarehouseId);
+      validateStock(product, pickupStock, quantity, currentQuantity);
     } else {
       if (variantId) throw new CartValidationError("This product does not have selectable variants.");
       const existingRows = await this.cartRepository.getCartWithItems(BigInt(userId));
       const currentQuantity = existingRows?.items
         .filter((item) => item.productId === BigInt(productId) && item.variantId == null)
         .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
-      validateStock(product, product.stock, quantity, currentQuantity);
+      const pickupWarehouseId = await this.getPickupWarehouseId();
+      const pickupStock = this.filterPickupWarehouseStock(product.stock, pickupWarehouseId);
+      validateStock(product, pickupStock, quantity, currentQuantity);
     }
 
-    const stockRows = product.hasVariants
+    const pickupWarehouseId = await this.getPickupWarehouseId();
+    const rawStockRows = product.hasVariants
       ? product.variants.find((entry) => entry.id === BigInt(variantId!))?.stock
       : product.stock;
-    const { available } = getStockState(stockRows);
-    const maxQuantity = product.allowOutOfStockOrders && getStockState(stockRows).isBelowThreshold ? 1 : available;
+    const stockRows = this.filterPickupWarehouseStock(rawStockRows, pickupWarehouseId);
+    const stockState = getStockState(stockRows);
+    const maxQuantity = product.allowOutOfStockOrders && stockState.isBelowThreshold ? 1 : stockState.available;
 
     return this.cartRepository.addOrIncrementItem({
       cartId: cart.id,
@@ -177,10 +229,12 @@ export class CartService {
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
 
     const quantityToValidate = existingQuantity || 1;
-    validateStock(product, product.stock, quantityToValidate);
+    const pickupWarehouseId = await this.getPickupWarehouseId();
+    const stockRows = this.filterPickupWarehouseStock(product.stock, pickupWarehouseId);
+    validateStock(product, stockRows, quantityToValidate);
 
-    const { available } = getStockState(product.stock);
-    const maxQuantity = product.allowOutOfStockOrders && getStockState(product.stock).isBelowThreshold ? 1 : available;
+    const stockState = getStockState(stockRows);
+    const maxQuantity = product.allowOutOfStockOrders && stockState.isBelowThreshold ? 1 : stockState.available;
 
     return this.cartRepository.addIfNotExists({
       cartId: cart.id,
@@ -205,10 +259,12 @@ export class CartService {
       throw new CartValidationError(`${item.product.name} is no longer available.`);
     }
 
-    const stockRows = item.variantId ? item.variant?.stock : item.product.stock;
+    const pickupWarehouseId = await this.getPickupWarehouseId();
+    const rawStockRows = item.variantId ? item.variant?.stock : item.product.stock;
+    const stockRows = this.filterPickupWarehouseStock(rawStockRows, pickupWarehouseId);
     validateStock(item.product, stockRows, quantity);
-    const { available } = getStockState(stockRows);
-    const maxQuantity = item.product.allowOutOfStockOrders && getStockState(stockRows).isBelowThreshold ? 1 : available;
+    const stockState = getStockState(stockRows);
+    const maxQuantity = item.product.allowOutOfStockOrders && stockState.isBelowThreshold ? 1 : stockState.available;
 
     const matchingItems = cartWithItems.items.filter(
       (candidate) =>
