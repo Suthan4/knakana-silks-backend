@@ -139,7 +139,7 @@ export class StockManagementService {
       const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
       if (!stock || available <= 0) throw new Error(`${product.name} is out of stock.`);
 
-      const belowThreshold = available < threshold;
+      const belowThreshold = available > 0 && threshold > 0 && available <= threshold;
       if (belowThreshold && !product.allowOutOfStockOrders) {
         throw new Error(`${product.name} is out of stock.`);
       }
@@ -201,7 +201,7 @@ export class StockManagementService {
           throw new Error(`${product.name} is out of stock.`);
         }
 
-        const belowThreshold = available < threshold;
+        const belowThreshold = available > 0 && threshold > 0 && available <= threshold;
         if (belowThreshold && !product.allowOutOfStockOrders) {
           throw new Error(`${product.name} is out of stock.`);
         }
