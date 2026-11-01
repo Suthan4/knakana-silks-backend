@@ -634,12 +634,26 @@ console.log("pickupWarehouse",pickupWarehouse);
     console.log(`✅ Stock reserved for order ${order.orderNumber}`);
   } catch (error) {
     console.error("❌ Stock reservation failed:", error);
-    // Rollback: Cancel order if stock reservation fails
+    // The payment is already captured at this point. Cancel the order and
+    // immediately attempt a full refund so an out-of-stock order is not charged.
     await this.orderRepository.update(order.id, {
       status: OrderStatus.CANCELLED,
     });
+
+    try {
+      await this.razorpayService.refundPayment(
+        params.razorpay_payment_id,
+        Math.round(Number(notes.total) * 100),
+      );
+    } catch (refundError) {
+      console.error("❌ Automatic refund failed after stock reservation failure:", refundError);
+      throw new Error(
+        "Stock changed before order confirmation. Your order was cancelled, but the refund could not be started automatically. Please contact support with your payment ID.",
+      );
+    }
+
     throw new Error(
-      "Failed to reserve stock. Order cancelled. Please contact support."
+      "Stock changed before order confirmation. Your order was cancelled and a refund has been initiated. Please allow your bank's processing time.",
     );
   }
 
