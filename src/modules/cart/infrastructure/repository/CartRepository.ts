@@ -54,6 +54,7 @@ export class CartRepository implements ICartRepository {
     productId: bigint;
     variantId?: bigint;
     quantity: number;
+    maxQuantity?: number;
   }): Promise<CartItem> {
     const lockKey = `${data.cartId}:${data.productId}:${data.variantId?.toString() ?? "simple"}`;
 
@@ -85,6 +86,14 @@ export class CartRepository implements ICartRepository {
         const primary = matching[0];
         const totalQuantity =
           matching.reduce((sum, item) => sum + Number(item.quantity || 0), 0) + data.quantity;
+
+        if (data.maxQuantity !== undefined && totalQuantity > data.maxQuantity) {
+          throw new Error(
+            data.maxQuantity === 1
+              ? "Only 1 item can be ordered for this low-stock product."
+              : `Only ${data.maxQuantity} item(s) are available.`,
+          );
+        }
 
         const updated = await tx.cartItem.update({
           where: { id: primary.id },
@@ -134,11 +143,41 @@ export class CartRepository implements ICartRepository {
     });
   }
 
-  async updateItem(id: bigint, quantity: number): Promise<CartItem> {
-    return this.prisma.cartItem.update({
-      where: { id },
-      data: { quantity },
-      include: {
+  async updateItem(id: bigint, quantity: number, maxQuantity?: number): Promise<CartItem> {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.cartItem.findUnique({ where: { id } });
+      if (!current) throw new Error("Cart item not found.");
+
+      const lockKey = `${current.cartId}:${current.productId}:${current.variantId?.toString() ?? "simple"}`;
+      await tx.$queryRaw<Array<{ locked: number }>>`
+        WITH advisory_lock AS MATERIALIZED (
+          SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)
+        )
+        SELECT 1::int AS locked FROM advisory_lock
+      `;
+
+      const matching = await tx.cartItem.findMany({
+        where: {
+          cartId: current.cartId,
+          productId: current.productId,
+          variantId: current.variantId,
+        },
+        orderBy: { id: "asc" },
+      });
+      const totalExisting = matching.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+      const totalAfterUpdate = quantity + totalExisting - Number(current.quantity || 0);
+      if (maxQuantity !== undefined && totalAfterUpdate > maxQuantity) {
+        throw new Error(
+          maxQuantity === 1
+            ? "Only 1 item can be ordered for this low-stock product."
+            : `Only ${maxQuantity} item(s) are available.`,
+        );
+      }
+
+      const updated = await tx.cartItem.update({
+        where: { id },
+        data: { quantity },
+        include: {
         product: {
           include: {
             media: {
@@ -149,7 +188,14 @@ export class CartRepository implements ICartRepository {
           },
         },
         variant: true,
-      },
+        },
+      });
+
+      const duplicateIds = matching.filter((row) => row.id !== id).map((row) => row.id);
+      if (duplicateIds.length) {
+        await tx.cartItem.deleteMany({ where: { id: { in: duplicateIds } } });
+      }
+      return updated;
     });
   }
 
