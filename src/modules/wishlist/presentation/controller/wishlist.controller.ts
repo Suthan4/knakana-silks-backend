@@ -44,6 +44,40 @@ export class WishlistController {
     }
   }
 
+  async moveItemToCart(req: Request, res: Response) {
+    try {
+      const userId = req.user!.userId;
+      const { itemId } = req.params;
+
+      if (!itemId || Array.isArray(itemId)) {
+        res.status(400).json({
+          success: false,
+          message: "Wishlist item ID is required.",
+        });
+        return;
+      }
+
+      const result = await this.wishlistService.moveItemToCart(userId, itemId);
+
+      res.json({
+        success: true,
+        message: result.alreadyInCart
+          ? "Item is already in your cart. Quantity unchanged."
+          : "Item moved to cart.",
+        data: result,
+      });
+    } catch (error: any) {
+      const status = Number.isInteger(error?.statusCode)
+        ? error.statusCode
+        : 400;
+      res.status(status).json({
+        success: false,
+        message: error?.message || "Unable to move item to cart.",
+        code: error?.code,
+      });
+    }
+  }
+
   async removeFromWishlist(req: Request, res: Response) {
     try {
       const userId = req.user!.userId;
