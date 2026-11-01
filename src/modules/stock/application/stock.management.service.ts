@@ -123,7 +123,7 @@ export class StockManagementService {
       const [product, stock] = await Promise.all([
         this.prisma.product.findUnique({
           where: { id: item.productId },
-          select: { name: true, isActive: true, allowOutOfStockOrders: true },
+          select: { name: true, isActive: true },
         }),
         this.stockRepository.findByProductAndWarehouse(
           item.productId,
@@ -136,19 +136,15 @@ export class StockManagementService {
         throw new Error(`${product?.name ?? "This product"} is no longer available.`);
       }
       const available = Math.max(0, Number(stock?.quantity ?? 0));
-      const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
-      if (!stock || available <= 0) throw new Error(`${product.name} is out of stock.`);
-
-      const belowThreshold = available > 0 && threshold > 0 && available <= threshold;
-      if (belowThreshold && !product.allowOutOfStockOrders) {
+      if (!stock || available <= 0) {
         throw new Error(`${product.name} is out of stock.`);
       }
-      const maximumAllowed = belowThreshold ? 1 : available;
-      if (item.quantity > maximumAllowed) {
+
+      // lowStockThreshold is an inventory alert threshold, not a sales limit.
+      // Any physically available quantity remains purchasable.
+      if (item.quantity > available) {
         throw new Error(
-          belowThreshold
-            ? `${product.name} has limited availability. Only 1 item can be ordered.`
-            : `Only ${available} item(s) of ${product.name} are available.`,
+          `Only ${available} item(s) of ${product.name} are available.`,
         );
       }
     }
@@ -181,7 +177,7 @@ export class StockManagementService {
       for (const item of grouped.values()) {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
-          select: { name: true, isActive: true, allowOutOfStockOrders: true },
+          select: { name: true, isActive: true },
         });
         if (!product || !product.isActive) {
           throw new Error(`${product?.name ?? item.name} is no longer available.`);
@@ -196,21 +192,15 @@ export class StockManagementService {
         });
 
         const available = Math.max(0, Number(stock?.quantity ?? 0));
-        const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
         if (!stock || available <= 0) {
           throw new Error(`${product.name} is out of stock.`);
         }
 
-        const belowThreshold = available > 0 && threshold > 0 && available <= threshold;
-        if (belowThreshold && !product.allowOutOfStockOrders) {
-          throw new Error(`${product.name} is out of stock.`);
-        }
-        const maximumAllowed = belowThreshold ? 1 : available;
-        if (item.quantity > maximumAllowed) {
+        // Recheck actual quantity inside the reservation transaction.
+        // Low-stock thresholds must not block purchases of available stock.
+        if (item.quantity > available) {
           throw new Error(
-            belowThreshold
-              ? `${product.name} has limited availability. Only 1 item can be ordered.`
-              : `Only ${available} item(s) of ${product.name} are available.`,
+            `Only ${available} item(s) of ${product.name} are available.`,
           );
         }
 
