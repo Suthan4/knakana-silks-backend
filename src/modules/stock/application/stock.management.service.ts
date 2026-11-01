@@ -103,25 +103,142 @@ export class StockManagementService {
     });
   }
 
+  async validateStockForOrder(orderItems: any[], warehouseId: bigint): Promise<void> {
+    const grouped = new Map<string, { productId: bigint; variantId?: bigint; quantity: number }>();
+    for (const item of orderItems) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+        throw new Error("Please select a valid quantity.");
+      }
+      const key = `${item.productId.toString()}:${item.variantId?.toString() ?? "simple"}`;
+      const current = grouped.get(key);
+      if (current) current.quantity += item.quantity;
+      else grouped.set(key, {
+        productId: item.productId,
+        variantId: item.variantId ?? undefined,
+        quantity: item.quantity,
+      });
+    }
+
+    for (const item of grouped.values()) {
+      const [product, stock] = await Promise.all([
+        this.prisma.product.findUnique({
+          where: { id: item.productId },
+          select: { name: true, isActive: true, allowOutOfStockOrders: true },
+        }),
+        this.stockRepository.findByProductAndWarehouse(
+          item.productId,
+          warehouseId,
+          item.variantId,
+        ),
+      ]);
+
+      if (!product || !product.isActive) {
+        throw new Error(`${product?.name ?? "This product"} is no longer available.`);
+      }
+      const available = Math.max(0, Number(stock?.quantity ?? 0));
+      const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
+      if (!stock || available <= 0) throw new Error(`${product.name} is out of stock.`);
+
+      const belowThreshold = available < threshold;
+      if (belowThreshold && !product.allowOutOfStockOrders) {
+        throw new Error(`${product.name} is out of stock.`);
+      }
+      const maximumAllowed = belowThreshold ? 1 : available;
+      if (item.quantity > maximumAllowed) {
+        throw new Error(
+          belowThreshold
+            ? `${product.name} has limited availability. Only 1 item can be ordered.`
+            : `Only ${available} item(s) of ${product.name} are available.`,
+        );
+      }
+    }
+  }
+
   /**
    * ✅ Reserve stock when order is created (decrease)
    */
   async reserveStockForOrder(orderItems: any[], warehouseId: bigint) {
-    for (const item of orderItems) {
-      await this.adjustStock({
-        productId: item.productId,
-        variantId: item.variantId ?? undefined,
-        warehouseId,
-        quantity: -item.quantity, // Decrease stock
-        reason: StockAdjustmentReason.ORDER_PLACED,
-        referenceId: `Order`,
-        createdBy: "SYSTEM",
-      });
-    }
+    // Validate and reserve every line in one transaction. This prevents partial
+    // reservations and concurrent orders from consuming the same remaining units.
+    await this.prisma.$transaction(async (tx) => {
+      const grouped = new Map<string, { productId: bigint; variantId?: bigint; quantity: number; name: string }>();
 
-    console.log(
-      `📦 Reserved stock for order with ${orderItems.length} items`
-    );
+      for (const item of orderItems) {
+        if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+          throw new Error("Please select a valid quantity.");
+        }
+        const key = `${item.productId.toString()}:${item.variantId?.toString() ?? "simple"}`;
+        const current = grouped.get(key);
+        if (current) current.quantity += item.quantity;
+        else grouped.set(key, {
+          productId: item.productId,
+          variantId: item.variantId ?? undefined,
+          quantity: item.quantity,
+          name: item.product?.name ?? "This product",
+        });
+      }
+
+      for (const item of grouped.values()) {
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
+          select: { name: true, isActive: true, allowOutOfStockOrders: true },
+        });
+        if (!product || !product.isActive) {
+          throw new Error(`${product?.name ?? item.name} is no longer available.`);
+        }
+
+        const stock = await tx.stock.findFirst({
+          where: {
+            productId: item.productId,
+            variantId: item.variantId ?? null,
+            warehouseId,
+          },
+        });
+
+        const available = Math.max(0, Number(stock?.quantity ?? 0));
+        const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
+        if (!stock || available <= 0) {
+          throw new Error(`${product.name} is out of stock.`);
+        }
+
+        const belowThreshold = available < threshold;
+        if (belowThreshold && !product.allowOutOfStockOrders) {
+          throw new Error(`${product.name} is out of stock.`);
+        }
+        const maximumAllowed = belowThreshold ? 1 : available;
+        if (item.quantity > maximumAllowed) {
+          throw new Error(
+            belowThreshold
+              ? `${product.name} has limited availability. Only 1 item can be ordered.`
+              : `Only ${available} item(s) of ${product.name} are available.`,
+          );
+        }
+
+        // Conditional decrement prevents two concurrent checkouts from both
+        // consuming the same stock snapshot under READ COMMITTED isolation.
+        const decrement = await tx.stock.updateMany({
+          where: {
+            id: stock.id,
+            quantity: { gte: item.quantity },
+          },
+          data: { quantity: { decrement: item.quantity } },
+        });
+        if (decrement.count !== 1) {
+          throw new Error(`${product.name} stock has just changed. Please refresh your cart and try again.`);
+        }
+
+        await tx.stockAdjustment.create({
+          data: {
+            stockId: stock.id,
+            quantity: -item.quantity,
+            reason: `${StockAdjustmentReason.ORDER_PLACED} - Ref: Order`,
+            createdBy: "SYSTEM",
+          },
+        });
+      }
+    });
+
+    console.log(`📦 Reserved stock for order with ${orderItems.length} items`);
   }
 
   /**
