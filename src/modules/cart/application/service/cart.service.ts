@@ -13,7 +13,7 @@ function getStockState(stockRows: StockRow[] | undefined) {
   const rows = stockRows ?? [];
   const available = rows.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) || 0), 0);
   const threshold = rows.reduce((sum, row) => sum + Math.max(0, Number(row.lowStockThreshold) || 0), 0);
-  return { available, threshold, isBelowThreshold: available < threshold };
+  return { available, threshold, isBelowThreshold: available > 0 && threshold > 0 && available <= threshold };
 }
 
 function validateStock(
