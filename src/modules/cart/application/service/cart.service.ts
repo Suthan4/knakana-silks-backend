@@ -126,19 +126,32 @@ export class CartService {
       if (!variantId) throw new CartValidationError("Please select a product variant.");
       const variant = product.variants.find((entry) => entry.id === BigInt(variantId));
       if (!variant) throw new CartValidationError("The selected variant is not available.");
-      const existing = await this.cartRepository.findItem(cart.id, BigInt(productId), BigInt(variantId));
-      validateStock(product, variant.stock, quantity, Number(existing?.quantity ?? 0));
+      const existingRows = await this.cartRepository.getCartWithItems(BigInt(userId));
+      const currentQuantity = existingRows?.items
+        .filter((item) => item.productId === BigInt(productId) && item.variantId === BigInt(variantId))
+        .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
+      validateStock(product, variant.stock, quantity, currentQuantity);
     } else {
       if (variantId) throw new CartValidationError("This product does not have selectable variants.");
-      const existing = await this.cartRepository.findItem(cart.id, BigInt(productId));
-      validateStock(product, product.stock, quantity, Number(existing?.quantity ?? 0));
+      const existingRows = await this.cartRepository.getCartWithItems(BigInt(userId));
+      const currentQuantity = existingRows?.items
+        .filter((item) => item.productId === BigInt(productId) && item.variantId == null)
+        .reduce((sum, item) => sum + Number(item.quantity || 0), 0) ?? 0;
+      validateStock(product, product.stock, quantity, currentQuantity);
     }
+
+    const stockRows = product.hasVariants
+      ? product.variants.find((entry) => entry.id === BigInt(variantId!))?.stock
+      : product.stock;
+    const { available, isBelowThreshold } = getStockState(stockRows);
+    const maxQuantity = isBelowThreshold && product.allowOutOfStockOrders ? 1 : available;
 
     return this.cartRepository.addOrIncrementItem({
       cartId: cart.id,
       productId: BigInt(productId),
       variantId: variantId ? BigInt(variantId) : undefined,
       quantity,
+      maxQuantity,
     });
   }
 
@@ -157,11 +170,10 @@ export class CartService {
       throw new CartValidationError(`${item.product.name} is no longer available.`);
     }
 
-    if (item.variantId) {
-      validateStock(item.product, item.variant?.stock, quantity);
-    } else {
-      validateStock(item.product, item.product.stock, quantity);
-    }
+    const stockRows = item.variantId ? item.variant?.stock : item.product.stock;
+    validateStock(item.product, stockRows, quantity);
+    const { available, isBelowThreshold } = getStockState(stockRows);
+    const maxQuantity = isBelowThreshold && item.product.allowOutOfStockOrders ? 1 : available;
 
     const matchingItems = cartWithItems.items.filter(
       (candidate) =>
@@ -169,11 +181,7 @@ export class CartService {
         (candidate.variantId ?? null) === (item.variantId ?? null),
     );
 
-    const updated = await this.cartRepository.updateItem(item.id, quantity);
-    for (const duplicate of matchingItems) {
-      if (duplicate.id !== item.id) await this.cartRepository.removeItem(duplicate.id);
-    }
-    return updated;
+    return this.cartRepository.updateItem(item.id, quantity, maxQuantity);
   }
 
   async removeFromCart(userId: string, itemId: string) {
