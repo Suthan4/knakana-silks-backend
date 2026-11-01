@@ -21,6 +21,10 @@ router.delete("/wishlist/items/:itemId", authenticate,commerceWriteLimiter, (req
   getWishlistController().removeFromWishlist(req, res)
 );
 
+router.post("/wishlist/items/:itemId/move-to-cart", authenticate, commerceWriteLimiter, (req, res) =>
+  getWishlistController().moveItemToCart(req, res)
+);
+
 router.delete("/wishlist", authenticate,commerceWriteLimiter, (req, res) =>
   getWishlistController().clearWishlist(req, res)
 );
