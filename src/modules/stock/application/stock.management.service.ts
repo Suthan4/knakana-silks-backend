@@ -214,13 +214,22 @@ export class StockManagementService {
           );
         }
 
-        const updated = await tx.stock.update({
-          where: { id: stock.id },
-          data: { quantity: available - item.quantity },
+        // Conditional decrement prevents two concurrent checkouts from both
+        // consuming the same stock snapshot under READ COMMITTED isolation.
+        const decrement = await tx.stock.updateMany({
+          where: {
+            id: stock.id,
+            quantity: { gte: item.quantity },
+          },
+          data: { quantity: { decrement: item.quantity } },
         });
+        if (decrement.count !== 1) {
+          throw new Error(`${product.name} stock has just changed. Please refresh your cart and try again.`);
+        }
+
         await tx.stockAdjustment.create({
           data: {
-            stockId: updated.id,
+            stockId: stock.id,
             quantity: -item.quantity,
             reason: `${StockAdjustmentReason.ORDER_PLACED} - Ref: Order`,
             createdBy: "SYSTEM",
