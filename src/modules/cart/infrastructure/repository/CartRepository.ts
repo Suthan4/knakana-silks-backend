@@ -158,16 +158,21 @@ export class CartRepository implements ICartRepository {
 
   async updateItem(id: bigint, quantity: number, maxQuantity?: number): Promise<CartItem> {
     return this.prisma.$transaction(async (tx) => {
-      const current = await tx.cartItem.findUnique({ where: { id } });
-      if (!current) throw new Error("Cart item not found.");
+      const initial = await tx.cartItem.findUnique({ where: { id } });
+      if (!initial) throw new Error("Cart item not found.");
 
-      const lockKey = `${current.cartId}:${current.productId}:${current.variantId?.toString() ?? "simple"}`;
+      const lockKey = `${initial.cartId}:${initial.productId}:${initial.variantId?.toString() ?? "simple"}`;
       await tx.$queryRaw<Array<{ locked: number }>>`
         WITH advisory_lock AS MATERIALIZED (
           SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)
         )
         SELECT 1::int AS locked FROM advisory_lock
       `;
+
+      // Re-read after obtaining the lock so quantity calculations use the
+      // latest committed value rather than a stale pre-lock snapshot.
+      const current = await tx.cartItem.findUnique({ where: { id } });
+      if (!current) throw new Error("Cart item not found.");
 
       const matching = await tx.cartItem.findMany({
         where: {
