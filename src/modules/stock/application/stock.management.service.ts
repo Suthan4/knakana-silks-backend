@@ -141,11 +141,12 @@ export class StockManagementService {
       }
 
       const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
-      if (product.allowOutOfStockOrders && item.quantity > 1) {
-        throw new Error(`Only 1 item of ${product.name} can be ordered.`);
-      }
-      if (!product.allowOutOfStockOrders && threshold > 0 && available < threshold) {
+      const isBelowThreshold = threshold > 0 && available < threshold;
+      if (isBelowThreshold && !product.allowOutOfStockOrders) {
         throw new Error(`${product.name} is out of stock.`);
+      }
+      if (isBelowThreshold && product.allowOutOfStockOrders && item.quantity > 1) {
+        throw new Error(`Only 1 item of ${product.name} can be ordered.`);
       }
       if (item.quantity > available) {
         throw new Error(
@@ -203,11 +204,12 @@ export class StockManagementService {
 
         // Recheck the same policy atomically at final reservation.
         const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
-        if (product.allowOutOfStockOrders && item.quantity > 1) {
-          throw new Error(`Only 1 item of ${product.name} can be ordered.`);
-        }
-        if (!product.allowOutOfStockOrders && threshold > 0 && available < threshold) {
+        const isBelowThreshold = threshold > 0 && available < threshold;
+        if (isBelowThreshold && !product.allowOutOfStockOrders) {
           throw new Error(`${product.name} is out of stock.`);
+        }
+        if (isBelowThreshold && product.allowOutOfStockOrders && item.quantity > 1) {
+          throw new Error(`Only 1 item of ${product.name} can be ordered.`);
         }
         if (item.quantity > available) {
           throw new Error(
