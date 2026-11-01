@@ -103,6 +103,57 @@ export class StockManagementService {
     });
   }
 
+  async validateStockForOrder(orderItems: any[], warehouseId: bigint): Promise<void> {
+    const grouped = new Map<string, { productId: bigint; variantId?: bigint; quantity: number }>();
+    for (const item of orderItems) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+        throw new Error("Please select a valid quantity.");
+      }
+      const key = `${item.productId.toString()}:${item.variantId?.toString() ?? "simple"}`;
+      const current = grouped.get(key);
+      if (current) current.quantity += item.quantity;
+      else grouped.set(key, {
+        productId: item.productId,
+        variantId: item.variantId ?? undefined,
+        quantity: item.quantity,
+      });
+    }
+
+    for (const item of grouped.values()) {
+      const [product, stock] = await Promise.all([
+        this.prisma.product.findUnique({
+          where: { id: item.productId },
+          select: { name: true, isActive: true, allowOutOfStockOrders: true },
+        }),
+        this.stockRepository.findByProductAndWarehouse(
+          item.productId,
+          warehouseId,
+          item.variantId,
+        ),
+      ]);
+
+      if (!product || !product.isActive) {
+        throw new Error(`${product?.name ?? "This product"} is no longer available.`);
+      }
+      const available = Math.max(0, Number(stock?.quantity ?? 0));
+      const threshold = Math.max(0, Number(stock?.lowStockThreshold ?? 0));
+      if (!stock || available <= 0) throw new Error(`${product.name} is out of stock.`);
+
+      const belowThreshold = available < threshold;
+      if (belowThreshold && !product.allowOutOfStockOrders) {
+        throw new Error(`${product.name} is out of stock.`);
+      }
+      const maximumAllowed = belowThreshold ? 1 : available;
+      if (item.quantity > maximumAllowed) {
+        throw new Error(
+          belowThreshold
+            ? `${product.name} has limited availability. Only 1 item can be ordered.`
+            : `Only ${available} item(s) of ${product.name} are available.`,
+        );
+      }
+    }
+  }
+
   /**
    * ✅ Reserve stock when order is created (decrease)
    */
