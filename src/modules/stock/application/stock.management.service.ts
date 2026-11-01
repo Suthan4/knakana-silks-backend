@@ -282,6 +282,10 @@ export class StockManagementService {
           throw new Error(validationError);
         }
 
+        if (!stock) {
+          throw new Error(`${product.name} is out of stock.`);
+        }
+
         // Conditional decrement prevents two concurrent checkouts from both
         // consuming the same stock snapshot under READ COMMITTED isolation.
         const decrement = await tx.stock.updateMany({
