@@ -290,6 +290,10 @@ export class OrderService {
       orderItems = cart.items;
     }
 
+    // Validate stock at the same pickup warehouse used for order reservation.
+    const stockWarehouse = await this.getPickupWarehouse();
+    await this.stockManagementService.validateStockForOrder(orderItems, stockWarehouse.id);
+
     // Validate address
     const address = await this.addressRepository.findById(BigInt(data.shippingAddressId));
     if (!address || address.userId !== userIdBigInt) {
@@ -414,6 +418,11 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
       }
       orderItems = cart.items;
     }
+
+    // Validate stock before creating a payment session. The stock is checked
+    // again atomically after payment verification before the order is finalized.
+    const stockWarehouse = await this.getPickupWarehouse();
+    await this.stockManagementService.validateStockForOrder(orderItems, stockWarehouse.id);
 
     // Validate addresses
     const [shippingAddress, billingAddress] = await Promise.all([
