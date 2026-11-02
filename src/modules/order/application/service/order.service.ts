@@ -294,6 +294,7 @@ export class OrderService {
 
     // Validate stock at the same pickup warehouse used for order reservation.
     const stockWarehouse = await this.getPickupWarehouse();
+    orderItems = await this.stockManagementService.resolveOrderItems(orderItems);
     await this.stockManagementService.validateStockForOrder(orderItems, stockWarehouse.id);
 
     // Validate address
@@ -424,6 +425,7 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
     // Validate stock before creating a payment session. The stock is checked
     // again atomically after payment verification before the order is finalized.
     const stockWarehouse = await this.getPickupWarehouse();
+    orderItems = await this.stockManagementService.resolveOrderItems(orderItems);
     await this.stockManagementService.validateStockForOrder(orderItems, stockWarehouse.id);
 
     // Validate addresses
@@ -580,8 +582,9 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
       throw new Error("Invalid billing address");
     }
 
-    // Get warehouse
+    // Get warehouse and resolve legacy cart rows before order creation/reservation.
     const pickupWarehouse = await this.getPickupWarehouse();
+    orderItems = await this.stockManagementService.resolveOrderItems(orderItems);
 console.log("pickupWarehouse",pickupWarehouse);
 
     // Calculate dimensions
