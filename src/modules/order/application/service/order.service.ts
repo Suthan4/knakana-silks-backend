@@ -509,6 +509,7 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
         billingAddressId: data.billingAddressId,
         couponCode: appliedCoupon?.code || "",
         couponId: couponId?.toString() || "",
+        paymentMethod: data.paymentMethod,
         isBuyNow: isBuyNow.toString(),
         items: isBuyNow ? JSON.stringify(data.items) : "",
         subtotal: breakdown.subtotal.toString(),
@@ -557,22 +558,30 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
       if (existingOrder) return existingOrder;
     }
 
-    // Only a captured payment is eligible for order confirmation and stock deduction.
-    const paymentDetails = await this.razorpayService.fetchPayment(
-      params.razorpay_payment_id,
-    );
+    // Read the payment metadata to determine the selected payment mode.
+    const razorpayOrderDetails = await this.razorpayService.fetchOrder(params.razorpay_order_id);
+    const notes = razorpayOrderDetails.notes as any;
+    const isCashOnDelivery = notes.paymentMethod === "COD";
+
+    // Online orders may deduct inventory only after Razorpay confirms capture.
+    // COD orders are confirmed by order placement and do not have a captured
+    // Razorpay payment at this stage.
+    const paymentDetails = isCashOnDelivery
+      ? null
+      : await this.razorpayService.fetchPayment(params.razorpay_payment_id);
+
     if (
-      paymentDetails.order_id !== params.razorpay_order_id ||
-      paymentDetails.status !== "captured"
+      !isCashOnDelivery &&
+      (
+        paymentDetails?.order_id !== params.razorpay_order_id ||
+        paymentDetails?.status !== "captured"
+      )
     ) {
       throw new Error("Payment has not been successfully captured. Inventory was not changed.");
     }
 
-    // Get payment metadata only after validating the captured payment.
-    const razorpayOrderDetails = await this.razorpayService.fetchOrder(params.razorpay_order_id);
-    const notes = razorpayOrderDetails.notes as any;
     const expectedAmount = Math.round(Number(notes.total) * 100);
-    if (Number(paymentDetails.amount) !== expectedAmount) {
+    if (!isCashOnDelivery && Number(paymentDetails?.amount) !== expectedAmount) {
       throw new Error("Captured payment amount does not match the order total. Inventory was not changed.");
     }
     const userId = notes.userId;
@@ -856,13 +865,13 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
     });
 
     // Payment details were fetched and verified as captured before inventory reservation.
-    let paymentMethod: PaymentMethod = "CARD";
-    if (paymentDetails.method === "card") paymentMethod = "CARD";
-    else if (paymentDetails.method === "upi") paymentMethod = "UPI";
-    else if (paymentDetails.method === "netbanking") paymentMethod = "NETBANKING";
-    else if (paymentDetails.method === "wallet") paymentMethod = "WALLET";
-    else if (paymentDetails.method === "emi") paymentMethod = "EMI";
-    else if (paymentDetails.method === "paylater") paymentMethod = "PAYLATER";
+    let paymentMethod: PaymentMethod = isCashOnDelivery ? "COD" : "CARD";
+    if (paymentDetails?.method === "card") paymentMethod = "CARD";
+    else if (paymentDetails?.method === "upi") paymentMethod = "UPI";
+    else if (paymentDetails?.method === "netbanking") paymentMethod = "NETBANKING";
+    else if (paymentDetails?.method === "wallet") paymentMethod = "WALLET";
+    else if (paymentDetails?.method === "emi") paymentMethod = "EMI";
+    else if (paymentDetails?.method === "paylater") paymentMethod = "PAYLATER";
 
     const paymentRecord: any = {
       orderId: order.id,
@@ -873,21 +882,21 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       amount: Number(notes.total),
     };
 
-    if (paymentDetails.method === "card" && paymentDetails.card) {
+    if (paymentDetails?.method === "card" && paymentDetails.card) {
       paymentRecord.cardNetwork = paymentDetails.card.network || null;
       paymentRecord.cardLast4 = paymentDetails.card.last4 || null;
       paymentRecord.cardType = paymentDetails.card.type || null;
     }
 
-    if (paymentDetails.method === "upi" && paymentDetails.vpa) {
+    if (paymentDetails?.method === "upi" && paymentDetails.vpa) {
       paymentRecord.upiId = paymentDetails.vpa;
     }
 
-    if (paymentDetails.bank) {
+    if (paymentDetails?.bank) {
       paymentRecord.bankName = paymentDetails.bank;
     }
 
-    if (paymentDetails.method === "wallet" && paymentDetails.wallet) {
+    if (paymentDetails?.method === "wallet" && paymentDetails.wallet) {
       paymentRecord.walletName = paymentDetails.wallet;
     }
 
