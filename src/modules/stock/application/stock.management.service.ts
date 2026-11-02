@@ -46,8 +46,13 @@ function getOrderStockValidationError(params: {
 
   const isBelowThreshold = threshold > 0 && available < threshold;
 
-  // Positive physical stock is always purchasable. The low-stock threshold
-  // must never turn the final physical unit into an out-of-stock product.
+  // Physical zero is always unavailable, regardless of this setting.
+  // Positive stock below threshold is blocked unless limited-stock ordering
+  // is explicitly enabled. When enabled, only one unit may be purchased.
+  if (isBelowThreshold && !allowOutOfStockOrders) {
+    return `${productName} is currently unavailable because stock is below the minimum threshold.`;
+  }
+
   if (isBelowThreshold && allowOutOfStockOrders && requestedQuantity > 1) {
     return `Only 1 item of ${productName} can be ordered.`;
   }
@@ -146,6 +151,73 @@ export class StockManagementService {
         },
       });
     });
+  }
+
+  /**
+   * Resolve legacy cart rows whose variantId is missing.
+   * Inference is allowed only when the product has exactly one variant.
+   * Multiple variants must be selected explicitly; never guess inventory.
+   */
+  async resolveOrderItems(orderItems: any[]): Promise<any[]> {
+    return Promise.all(
+      orderItems.map(async (item) => {
+        const existingVariantId = item.variantId ?? item.variant?.id;
+        if (existingVariantId != null) {
+          return { ...item, variantId: existingVariantId };
+        }
+
+        const product =
+          item.product ??
+          (await this.prisma.product.findUnique({
+            where: { id: item.productId },
+            select: { id: true, name: true, hasVariants: true },
+          }));
+
+        if (!product) {
+          throw new Error("Product not found. Please refresh your cart.");
+        }
+
+        // Resolve the inventory row from actual variant records, not only
+        // the denormalized hasVariants flag. Legacy cart rows may have a
+        // null variantId while inventory belongs to a real variant.
+        const variants = await this.prisma.productVariant.findMany({
+          where: { productId: item.productId },
+          select: {
+            id: true,
+            price: true,
+            sellingPrice: true,
+            weight: true,
+            length: true,
+            breadth: true,
+            height: true,
+            sku: true,
+            size: true,
+            color: true,
+            fabric: true,
+            attributes: true,
+          },
+          orderBy: { id: "asc" },
+        });
+
+        if (variants.length === 0) {
+          // No variant records means this is a simple product; validate
+          // its stock row with variantId = null.
+          return { ...item, variantId: undefined, variant: null };
+        }
+
+        if (variants.length > 1) {
+          throw new Error(
+            `${product.name ?? "This product"} needs a variant selection. Please remove it from your cart and select the variant again.`,
+          );
+        }
+
+        return {
+          ...item,
+          variantId: variants[0].id,
+          variant: variants[0],
+        };
+      }),
+    );
   }
 
   async validateStockForOrder(orderItems: any[], warehouseId: bigint): Promise<void> {

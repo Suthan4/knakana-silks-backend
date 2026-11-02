@@ -35,9 +35,15 @@ function validateStock(
     throw new CartValidationError(`${productName} is out of stock.`);
   }
 
-  // Positive physical stock remains purchasable below the low-stock
-  // threshold. Keep the one-item cap only for explicitly backorder-enabled
-  // products, matching the shared order validation policy.
+  // A zero quantity is always unavailable (checked above).
+  // Below threshold: block when limited-stock ordering is disabled;
+  // when enabled, allow at most one unit while physical stock is positive.
+  if (isBelowThreshold && !product.allowOutOfStockOrders) {
+    throw new CartValidationError(
+      `${productName} is currently unavailable because stock is below the minimum threshold.`,
+    );
+  }
+
   if (isBelowThreshold && product.allowOutOfStockOrders && totalRequested > 1) {
     throw new CartValidationError(`Only 1 item of ${productName} can be ordered.`);
   }
@@ -106,19 +112,68 @@ export class CartService {
     }
 
     const pickupWarehouseId = await this.getPickupWarehouseId();
-    const pickupItems = cart.items.map((item) => ({
-      ...item,
-      product: {
-        ...item.product,
-        stock: this.filterPickupWarehouseStock(item.product.stock, pickupWarehouseId),
-      },
-      variant: item.variant
-        ? {
-            ...item.variant,
-            stock: this.filterPickupWarehouseStock(item.variant.stock, pickupWarehouseId),
-          }
-        : item.variant,
-    }));
+
+    // Repair legacy cart rows that have a missing variantId only when the
+    // product has exactly one variant. Never guess between multiple variants.
+    const unresolvedProductIds = Array.from(
+      new Set(
+        cart.items
+          .filter((item) => !item.variantId && item.product.hasVariants)
+          .map((item) => item.productId),
+      ),
+    );
+
+    const legacyVariants = unresolvedProductIds.length
+      ? await this.prisma.productVariant.findMany({
+          where: { productId: { in: unresolvedProductIds } },
+          include: { stock: true },
+        })
+      : [];
+
+    const variantsByProduct = new Map<string, typeof legacyVariants>();
+    for (const variant of legacyVariants) {
+      const key = variant.productId.toString();
+      const rows = variantsByProduct.get(key) ?? [];
+      rows.push(variant);
+      variantsByProduct.set(key, rows);
+    }
+
+    const pickupItems = cart.items.map((item) => {
+      const candidates = variantsByProduct.get(item.productId.toString()) ?? [];
+      const inferredVariant =
+        !item.variantId && item.product.hasVariants && candidates.length === 1
+          ? candidates[0]
+          : null;
+      const resolvedVariant = item.variant ?? inferredVariant;
+      const resolvedVariantId = item.variantId ?? inferredVariant?.id ?? null;
+
+      const productStock = this.filterPickupWarehouseStock(
+        item.product.stock,
+        pickupWarehouseId,
+      ).filter((row) =>
+        resolvedVariantId
+          ? row.variantId === resolvedVariantId
+          : row.variantId == null,
+      );
+
+      return {
+        ...item,
+        variantId: resolvedVariantId,
+        product: {
+          ...item.product,
+          stock: productStock,
+        },
+        variant: resolvedVariant
+          ? {
+              ...resolvedVariant,
+              stock: this.filterPickupWarehouseStock(
+                resolvedVariant.stock,
+                pickupWarehouseId,
+              ),
+            }
+          : null,
+      };
+    });
 
     const groupedItems = new Map<string, typeof pickupItems>();
     for (const item of pickupItems) {
@@ -256,7 +311,31 @@ export class CartService {
     }
 
     const pickupWarehouseId = await this.getPickupWarehouseId();
-    const rawStockRows = item.variantId ? item.variant?.stock : item.product.stock;
+
+    // Legacy cart rows may have a null variantId. Resolve only a single
+    // unambiguous variant; never sum stock across different variants.
+    let resolvedVariant = item.variant;
+    let resolvedVariantId = item.variantId ?? item.variant?.id;
+
+    if (!resolvedVariantId && item.product.hasVariants) {
+      const variants = await this.prisma.productVariant.findMany({
+        where: { productId: item.productId },
+        include: { stock: true },
+      });
+
+      if (variants.length !== 1) {
+        throw new CartValidationError(
+          "Please remove this item and select its variant again before updating the cart.",
+        );
+      }
+
+      resolvedVariant = variants[0];
+      resolvedVariantId = variants[0].id;
+    }
+
+    const rawStockRows = resolvedVariantId
+      ? resolvedVariant?.stock
+      : item.product.stock;
     const stockRows = this.filterPickupWarehouseStock(rawStockRows, pickupWarehouseId);
     validateStock(item.product, stockRows, quantity);
     const stockState = getStockState(stockRows);
