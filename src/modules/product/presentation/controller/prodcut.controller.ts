@@ -310,10 +310,14 @@ export class ProductController {
       });
     } catch (error: any) {
       if (error.name === "ZodError") {
+        const validationErrors = (error.errors ?? []).map((issue: any) => ({
+          path: Array.isArray(issue.path) ? issue.path.join(".") : "",
+          message: issue.message,
+        }));
         return res.status(400).json({
           success: false,
-          message: "Invalid product consolidation request",
-          errors: error.errors,
+          message: validationErrors[0]?.message || "Invalid product consolidation request",
+          errors: validationErrors,
         });
       }
       const statusCode =
@@ -327,7 +331,6 @@ export class ProductController {
       });
     }
   }
-
 
   /** Add an existing simple product to a variable product without re-uploading media. */
   async addSimpleProductAsVariant(req: Request, res: Response) {
