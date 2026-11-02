@@ -363,10 +363,11 @@ export class ProductService {
         throw new NotFoundError("Product not found");
       }
 
-      const previousMedia = [
-        ...(product.media || []),
-        ...((product.variants || []).flatMap((variant: any) => variant.media || [])),
-      ] as any[];
+      const mediaCollectionsToCompare: any[][] = [];
+      if (data.media !== undefined) mediaCollectionsToCompare.push(product.media || []);
+      if (data.variants !== undefined) {
+        mediaCollectionsToCompare.push(...((product.variants || []).map((variant: any) => variant.media || [])));
+      }
       const incomingMedia = [
         ...(data.media || []),
         ...((data.variants || []).flatMap((variant: any) => variant.media || [])),
@@ -375,10 +376,10 @@ export class ProductService {
         media.key,
         media.url ? this.s3Service.extractKeyFromUrl(media.url) : undefined,
       ]).filter(Boolean).map(String));
-      for (const media of previousMedia) {
+      for (const media of mediaCollectionsToCompare.flat()) {
         if (media.isActive === false) continue;
         const key = media.key || (media.url ? this.s3Service.extractKeyFromUrl(media.url) : undefined);
-        if (key && !incomingKeys.has(String(key)) && /^(products|products\/variants)\//.test(String(key))) {
+        if (key && !incomingKeys.has(String(key)) && /^(products|products\\/variants)\\//.test(String(key))) {
           obsoleteMediaKeys.add(String(key));
         }
       }
