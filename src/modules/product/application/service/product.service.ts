@@ -355,11 +355,32 @@ export class ProductService {
   async updateProduct(id: string, data: UpdateProductDTO): Promise<Product> {
     assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
+    const obsoleteMediaKeys = new Set<string>();
 
-    return (await this.prisma.$transaction(async (tx) => {
+    const updatedProduct = (await this.prisma.$transaction(async (tx) => {
       const product = await this.productRepository.findByIdAdmin(productId, tx);
       if (!product) {
         throw new NotFoundError("Product not found");
+      }
+
+      const previousMedia = [
+        ...(product.media || []),
+        ...((product.variants || []).flatMap((variant: any) => variant.media || [])),
+      ] as any[];
+      const incomingMedia = [
+        ...(data.media || []),
+        ...((data.variants || []).flatMap((variant: any) => variant.media || [])),
+      ] as any[];
+      const incomingKeys = new Set(incomingMedia.flatMap((media: any) => [
+        media.key,
+        media.url ? this.s3Service.extractKeyFromUrl(media.url) : undefined,
+      ]).filter(Boolean).map(String));
+      for (const media of previousMedia) {
+        if (media.isActive === false) continue;
+        const key = media.key || (media.url ? this.s3Service.extractKeyFromUrl(media.url) : undefined);
+        if (key && !incomingKeys.has(String(key)) && /^(products|products\/variants)\//.test(String(key))) {
+          obsoleteMediaKeys.add(String(key));
+        }
       }
 
       if (data.categoryId) {
@@ -791,6 +812,25 @@ export class ProductService {
 
       return (await this.productRepository.findById(productId, tx)) as Product;
     })) as Product;
+
+    // Delete replaced S3 objects only after the DB transaction commits. A key
+    // still referenced by any active product/variant media record is retained.
+    for (const key of obsoleteMediaKeys) {
+      try {
+        const [productReference, variantReference] = await Promise.all([
+          this.prisma.productMedia.findFirst({ where: { key, isActive: true }, select: { id: true } }),
+          this.prisma.productVariantMedia.findFirst({ where: { key, isActive: true }, select: { id: true } }),
+        ]);
+        if (!productReference && !variantReference) {
+          await this.s3Service.deleteFile(key);
+        }
+      } catch (cleanupError) {
+        // The product update is already committed. Log cleanup failures for
+        // retry/operations; never tell the admin the save failed after success.
+        console.error("Product media replacement cleanup failed:", { key, cleanupError });
+      }
+    }
+    return updatedProduct;
   }
 
   async patchProduct(id: string, data: PatchProductDTO): Promise<Product> {
