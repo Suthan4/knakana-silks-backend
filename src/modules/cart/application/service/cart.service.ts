@@ -311,7 +311,31 @@ export class CartService {
     }
 
     const pickupWarehouseId = await this.getPickupWarehouseId();
-    const rawStockRows = item.variantId ? item.variant?.stock : item.product.stock;
+
+    // Legacy cart rows may have a null variantId. Resolve only a single
+    // unambiguous variant; never sum stock across different variants.
+    let resolvedVariant = item.variant;
+    let resolvedVariantId = item.variantId ?? item.variant?.id;
+
+    if (!resolvedVariantId && item.product.hasVariants) {
+      const variants = await this.prisma.productVariant.findMany({
+        where: { productId: item.productId },
+        include: { stock: true },
+      });
+
+      if (variants.length !== 1) {
+        throw new CartValidationError(
+          "Please remove this item and select its variant again before updating the cart.",
+        );
+      }
+
+      resolvedVariant = variants[0];
+      resolvedVariantId = variants[0].id;
+    }
+
+    const rawStockRows = resolvedVariantId
+      ? resolvedVariant?.stock
+      : item.product.stock;
     const stockRows = this.filterPickupWarehouseStock(rawStockRows, pickupWarehouseId);
     validateStock(item.product, stockRows, quantity);
     const stockState = getStockState(stockRows);
