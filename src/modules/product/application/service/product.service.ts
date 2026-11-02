@@ -1124,13 +1124,14 @@ export class ProductService {
   }
 
   async getProduct(id: string) {
-    const productId = BigInt(id);
-    // Admin edit requires every active and inactive product/variant media row
-    // so existing photos remain visible and can be safely retained or removed.
-    const product = await this.productRepository.findByIdAdmin(productId);
-    if (!product) {
-      throw new NotFoundError("Product not found");
-    }
+    const product = await this.productRepository.findById(BigInt(id));
+    if (!product) throw new NotFoundError("Product not found");
+    return product;
+  }
+
+  async getAdminProduct(id: string) {
+    const product = await this.productRepository.findByIdAdmin(BigInt(id));
+    if (!product) throw new NotFoundError("Product not found");
     return product;
   }
 
