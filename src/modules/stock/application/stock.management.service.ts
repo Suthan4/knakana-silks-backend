@@ -46,10 +46,8 @@ function getOrderStockValidationError(params: {
 
   const isBelowThreshold = threshold > 0 && available < threshold;
 
-  if (isBelowThreshold && !allowOutOfStockOrders) {
-    return `${productName} is out of stock.`;
-  }
-
+  // Positive physical stock is always purchasable. The low-stock threshold
+  // must never turn the final physical unit into an out-of-stock product.
   if (isBelowThreshold && allowOutOfStockOrders && requestedQuantity > 1) {
     return `Only 1 item of ${productName} can be ordered.`;
   }
