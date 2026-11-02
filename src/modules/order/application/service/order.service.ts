@@ -135,6 +135,7 @@ export class OrderService {
       skip: 0,
       take: 1,
       where: { isActive: true },
+      orderBy: { id: "asc" },
     });
 
     if (activeWarehouses.length === 0) {
