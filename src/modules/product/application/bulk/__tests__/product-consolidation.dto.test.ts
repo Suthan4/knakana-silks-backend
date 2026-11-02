@@ -13,6 +13,18 @@ describe("ConsolidateSimpleProductsDTOSchema", () => {
     ],
   };
 
+  it("accepts the exact admin payload reported in the consolidation bug", () => {
+    const payload = {
+      parentProductId: "21",
+      attributeName: "color",
+      products: [
+        { productId: "21", attributeValue: "Brown with Pink" },
+        { productId: "22", attributeValue: "Wine" },
+      ],
+    };
+    assert.deepEqual(ConsolidateSimpleProductsDTOSchema.safeParse(payload).success, true);
+  });
+
   it("accepts a valid consolidation request with distinct product IDs and attribute values", () => {
     assert.equal(ConsolidateSimpleProductsDTOSchema.safeParse(validPayload).success, true);
   });
