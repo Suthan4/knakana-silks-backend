@@ -394,6 +394,21 @@ export class ProductController {
     }
   }
 
+  async getAdminProduct(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id || Array.isArray(id) || !/^[1-9]\\d*$/.test(id)) {
+        return res.status(400).json({ success: false, message: "Valid product ID is required" });
+      }
+      res.setHeader("Cache-Control", "no-store");
+      const product = await this.productService.getAdminProduct(id);
+      return res.json({ success: true, data: product });
+    } catch (error: any) {
+      const statusCode = error.statusCode || (error.name === "NotFoundError" ? 404 : 500);
+      return res.status(statusCode).json({ success: false, message: error.message || "Failed to fetch product" });
+    }
+  }
+
   async getProductBySlug(req: Request, res: Response) {
     try {
       const { slug } = req.params;
