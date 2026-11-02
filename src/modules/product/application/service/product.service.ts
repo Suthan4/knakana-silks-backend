@@ -379,7 +379,7 @@ export class ProductService {
       for (const media of mediaCollectionsToCompare.flat()) {
         if (media.isActive === false) continue;
         const key = media.key || (media.url ? this.s3Service.extractKeyFromUrl(media.url) : undefined);
-        if (key && !incomingKeys.has(String(key)) && /^(products|products\\/variants)\\//.test(String(key))) {
+        if (key && !incomingKeys.has(String(key)) && /^(products|products\/variants)\//.test(String(key))) {
           obsoleteMediaKeys.add(String(key));
         }
       }
