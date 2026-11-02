@@ -98,6 +98,13 @@ const handleUpload = (uploadMiddleware: any) => {
 // ── Direct-to-S3 staged image uploads ───────────────────────────────────────
 // These endpoints are admin-only. Staging objects are never returned as public
 // media URLs; finalize validates ownership and runs the normal optimizer first.
+router.get(
+  "/image-preview",
+  authenticate,
+  authorize(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  commonController.getImageForPreview
+);
+
 router.post(
   "/upload/presigned-url",
   jsonParser,
