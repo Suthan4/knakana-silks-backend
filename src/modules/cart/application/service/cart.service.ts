@@ -65,6 +65,7 @@ export class CartService {
   private async getPickupWarehouseId(): Promise<bigint | null> {
     const defaultWarehouse = await this.prisma.warehouse.findFirst({
       where: { isDefaultPickup: true, isActive: true },
+      orderBy: { id: "asc" },
       select: { id: true },
     });
     if (defaultWarehouse) return defaultWarehouse.id;
