@@ -397,7 +397,7 @@ export class ProductController {
   async getAdminProduct(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      if (!id || Array.isArray(id) || !/^[1-9]\\d*$/.test(id)) {
+      if (!id || Array.isArray(id) || !/^[1-9]\d*$/.test(id)) {
         return res.status(400).json({ success: false, message: "Valid product ID is required" });
       }
       res.setHeader("Cache-Control", "no-store");
