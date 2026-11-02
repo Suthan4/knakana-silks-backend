@@ -125,6 +125,7 @@ export class OrderService {
       skip: 0,
       take: 1,
       where: { isDefaultPickup: true, isActive: true },
+      orderBy: { id: "asc" },
     });
 
     if (defaultWarehouses.length > 0) {

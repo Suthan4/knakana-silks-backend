@@ -35,16 +35,11 @@ function validateStock(
     throw new CartValidationError(`${productName} is out of stock.`);
   }
 
-  // Backorder-enabled products bypass the threshold but are capped at one
-  // item. Otherwise, stock below threshold is not purchasable.
-  if (isBelowThreshold) {
-    if (!product.allowOutOfStockOrders) {
-      throw new CartValidationError(`${productName} is out of stock.`);
-    }
-    if (totalRequested > 1) {
-      throw new CartValidationError(`Only 1 item of ${productName} can be ordered.`);
-    }
-    return;
+  // Positive physical stock remains purchasable below the low-stock
+  // threshold. Keep the one-item cap only for explicitly backorder-enabled
+  // products, matching the shared order validation policy.
+  if (isBelowThreshold && product.allowOutOfStockOrders && totalRequested > 1) {
+    throw new CartValidationError(`Only 1 item of ${productName} can be ordered.`);
   }
 
   if (totalRequested > available) {
@@ -70,6 +65,7 @@ export class CartService {
   private async getPickupWarehouseId(): Promise<bigint | null> {
     const defaultWarehouse = await this.prisma.warehouse.findFirst({
       where: { isDefaultPickup: true, isActive: true },
+      orderBy: { id: "asc" },
       select: { id: true },
     });
     if (defaultWarehouse) return defaultWarehouse.id;
