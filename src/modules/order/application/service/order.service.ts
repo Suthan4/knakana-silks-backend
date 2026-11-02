@@ -541,15 +541,40 @@ console.log("orderItems:", JSON.stringify(orderItems, null, 2));
     razorpay_payment_id: string;
     razorpay_signature: string;
   }) {
-    // Verify signature
+    // Verify the Razorpay signature before trusting callback data.
     const isValid = this.razorpayService.verifyPaymentSignature(params);
     if (!isValid) {
       throw new Error("Invalid payment signature");
     }
 
-    // Get payment metadata
+    // Make payment verification idempotent: a repeated callback must never
+    // create a second order or deduct inventory a second time.
+    const existingPayment = await this.paymentRepository.findByRazorpayPaymentId(
+      params.razorpay_payment_id,
+    );
+    if (existingPayment?.status === PaymentStatus.SUCCESS) {
+      const existingOrder = await this.orderRepository.findById(existingPayment.orderId);
+      if (existingOrder) return existingOrder;
+    }
+
+    // Only a captured payment is eligible for order confirmation and stock deduction.
+    const paymentDetails = await this.razorpayService.fetchPayment(
+      params.razorpay_payment_id,
+    );
+    if (
+      paymentDetails.order_id !== params.razorpay_order_id ||
+      paymentDetails.status !== "captured"
+    ) {
+      throw new Error("Payment has not been successfully captured. Inventory was not changed.");
+    }
+
+    // Get payment metadata only after validating the captured payment.
     const razorpayOrderDetails = await this.razorpayService.fetchOrder(params.razorpay_order_id);
     const notes = razorpayOrderDetails.notes as any;
+    const expectedAmount = Math.round(Number(notes.total) * 100);
+    if (Number(paymentDetails.amount) !== expectedAmount) {
+      throw new Error("Captured payment amount does not match the order total. Inventory was not changed.");
+    }
     const userId = notes.userId;
     const userIdBigInt = BigInt(userId);
     const isBuyNow = notes.isBuyNow === "true";
@@ -830,9 +855,7 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       shiprocketShipmentId: String(shiprocketOrder.shipment_id),
     });
 
-    // Fetch payment details
-    const paymentDetails = await this.razorpayService.fetchPayment(params.razorpay_payment_id);
-
+    // Payment details were fetched and verified as captured before inventory reservation.
     let paymentMethod: PaymentMethod = "CARD";
     if (paymentDetails.method === "card") paymentMethod = "CARD";
     else if (paymentDetails.method === "upi") paymentMethod = "UPI";
