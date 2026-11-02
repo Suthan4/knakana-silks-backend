@@ -173,10 +173,13 @@ export class StockManagementService {
             select: { id: true, name: true, hasVariants: true },
           }));
 
-        if (!product?.hasVariants) {
-          return { ...item, variantId: undefined, variant: null };
+        if (!product) {
+          throw new Error("Product not found. Please refresh your cart.");
         }
 
+        // Resolve the inventory row from actual variant records, not only
+        // the denormalized hasVariants flag. Legacy cart rows may have a
+        // null variantId while inventory belongs to a real variant.
         const variants = await this.prisma.productVariant.findMany({
           where: { productId: item.productId },
           select: {
@@ -196,11 +199,15 @@ export class StockManagementService {
           orderBy: { id: "asc" },
         });
 
-        if (variants.length !== 1) {
+        if (variants.length === 0) {
+          // No variant records means this is a simple product; validate
+          // its stock row with variantId = null.
+          return { ...item, variantId: undefined, variant: null };
+        }
+
+        if (variants.length > 1) {
           throw new Error(
-            variants.length === 0
-              ? `${product.name ?? "This product"} has no selectable variant. Please contact support.`
-              : `${product.name ?? "This product"} needs a variant selection. Please remove it from your cart and select the variant again.`,
+            `${product.name ?? "This product"} needs a variant selection. Please remove it from your cart and select the variant again.`,
           );
         }
 
