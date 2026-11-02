@@ -77,6 +77,7 @@ export interface IProductRepository {
   delete(id: bigint, tx?: Prisma.TransactionClient): Promise<void>;
 
   findById(id: bigint, tx?: Prisma.TransactionClient): Promise<ProductWithRelations | null>;
+  findByIdAdmin(id: bigint, tx?: Prisma.TransactionClient): Promise<AdminProductWithRelations | null>;
   findBySlug(slug: string, tx?: Prisma.TransactionClient): Promise<Product | null>;
   findBySku(sku: string, tx?: Prisma.TransactionClient): Promise<Product | null>;
 
