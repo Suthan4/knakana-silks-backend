@@ -357,7 +357,7 @@ export class ProductService {
     const productId = BigInt(id);
 
     return (await this.prisma.$transaction(async (tx) => {
-      const product = await this.productRepository.findById(productId, tx);
+      const product = await this.productRepository.findByIdAdmin(productId, tx);
       if (!product) {
         throw new NotFoundError("Product not found");
       }
@@ -1125,9 +1125,13 @@ export class ProductService {
 
   async getProduct(id: string) {
     const product = await this.productRepository.findById(BigInt(id));
-    if (!product) {
-      throw new NotFoundError("Product not found");
-    }
+    if (!product) throw new NotFoundError("Product not found");
+    return product;
+  }
+
+  async getAdminProduct(id: string) {
+    const product = await this.productRepository.findByIdAdmin(BigInt(id));
+    if (!product) throw new NotFoundError("Product not found");
     return product;
   }
 

@@ -310,10 +310,14 @@ export class ProductController {
       });
     } catch (error: any) {
       if (error.name === "ZodError") {
+        const validationErrors = (error.errors ?? []).map((issue: any) => ({
+          path: Array.isArray(issue.path) ? issue.path.join(".") : "",
+          message: issue.message,
+        }));
         return res.status(400).json({
           success: false,
-          message: "Invalid product consolidation request",
-          errors: error.errors,
+          message: validationErrors[0]?.message || "Invalid product consolidation request",
+          errors: validationErrors,
         });
       }
       const statusCode =
@@ -327,7 +331,6 @@ export class ProductController {
       });
     }
   }
-
 
   /** Add an existing simple product to a variable product without re-uploading media. */
   async addSimpleProductAsVariant(req: Request, res: Response) {
@@ -388,6 +391,21 @@ export class ProductController {
       });
     } catch (error: any) {
       res.status(404).json({ success: false, message: error.message });
+    }
+  }
+
+  async getAdminProduct(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id || Array.isArray(id) || !/^[1-9]\d*$/.test(id)) {
+        return res.status(400).json({ success: false, message: "Valid product ID is required" });
+      }
+      res.setHeader("Cache-Control", "no-store");
+      const product = await this.productService.getAdminProduct(id);
+      return res.json({ success: true, data: product });
+    } catch (error: any) {
+      const statusCode = error.statusCode || (error.name === "NotFoundError" ? 404 : 500);
+      return res.status(statusCode).json({ success: false, message: error.message || "Failed to fetch product" });
     }
   }
 

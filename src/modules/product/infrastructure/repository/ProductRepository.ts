@@ -71,6 +71,17 @@ export class ProductRepository implements IProductRepository {
     return client.product.count({ where });
   }
 
+  async findByIdAdmin(
+    id: bigint,
+    tx?: Prisma.TransactionClient
+  ): Promise<AdminProductWithRelations | null> {
+    const client = this.getClient(tx);
+    return client.product.findUnique({
+      where: { id },
+      include: adminProductInclude,
+    });
+  }
+
   async findById(
     id: bigint,
     tx?: Prisma.TransactionClient
