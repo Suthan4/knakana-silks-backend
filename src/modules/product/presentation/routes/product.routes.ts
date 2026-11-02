@@ -316,6 +316,14 @@ router.post(
 );
 
 router.get(
+  "/admin/products/:id",
+  authenticate,
+  adminCatalogReadLimiter,
+  checkPermission("products", "read"),
+  (req, res) => getProductController().getAdminProduct(req, res)
+);
+
+router.get(
   "/admin/products",
   authenticate,
   adminCatalogReadLimiter,
