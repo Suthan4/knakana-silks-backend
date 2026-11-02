@@ -153,6 +153,24 @@ export class CommonController {
   };
 
   /**
+   * Stream an existing product image to the authenticated admin editor.
+   * The object key is validated by the storage service before any S3 read.
+   */
+  getImageForPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const key = String(req.query.key || "");
+      const { body, contentType } = await this.s3Service.getImageForPreview(key);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", String(body.length));
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.status(200).send(body);
+    } catch (error) {
+      this.handleError(res, error, "getImageForPreview");
+    }
+  };
+
+  /**
    * Delete a single file
    * DELETE /api/upload
    * Body: { url: "https://…/key" } OR { key: "folder/file.webp" }

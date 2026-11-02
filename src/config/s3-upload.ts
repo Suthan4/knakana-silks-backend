@@ -407,6 +407,32 @@ export class S3UploadService {
   }
 
   /**
+   * Read an existing product image for the authenticated admin image editor.
+   * This same-origin API response avoids requiring public CloudFront CORS
+   * headers for canvas export in the browser.
+   */
+  async getImageForPreview(key: string): Promise<{ body: Buffer; contentType: string }> {
+    if (
+      !key ||
+      key.startsWith("/") ||
+      key.includes("..") ||
+      !/^(products|products\/variants)\/[a-zA-Z0-9._/-]+$/.test(key)
+    ) {
+      throw new Error("Invalid product image key");
+    }
+    const result = await this.s3Client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+    if (!result.Body) throw new Error("Image object was empty");
+    const bytes = await result.Body.transformToByteArray();
+    const contentType = String(result.ContentType || "application/octet-stream");
+    if (!contentType.startsWith("image/")) {
+      throw new Error("Only image files can be opened in the image editor");
+    }
+    return { body: Buffer.from(bytes), contentType };
+  }
+
+  /**
    * Delete a single file from S3 by key.
    */
   async deleteFile(key: string): Promise<void> {
