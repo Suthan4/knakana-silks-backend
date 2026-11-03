@@ -1561,8 +1561,61 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     });
   }
 
-  async deleteMedia(id: string) {
-    await this.productRepository.deleteMedia(BigInt(id));
+  private async deleteMediaObjectIfUnreferenced(media: {
+    key: string | null;
+    url: string;
+  }): Promise<void> {
+    const key = media.key || this.s3Service.extractKeyFromUrl(media.url);
+    if (!key) throw new ValidationError("Stored media has no valid S3 object key.");
+
+    // A media object can be referenced by more than one active product/variant
+    // record. Never remove a shared S3 object while another record still uses it.
+    const [productReference, variantReference] = await Promise.all([
+      this.prisma.productMedia.findFirst({
+        where: {
+          isActive: true,
+          OR: [{ key }, { url: media.url }, { thumbnailUrl: media.url }],
+        },
+        select: { id: true },
+      }),
+      this.prisma.productVariantMedia.findFirst({
+        where: {
+          isActive: true,
+          OR: [{ key }, { url: media.url }, { thumbnailUrl: media.url }],
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!productReference && !variantReference) {
+      await this.s3Service.deleteFile(key);
+    }
+  }
+
+  async deleteMedia(productId: string, mediaId: string) {
+    const productIdBigInt = BigInt(productId);
+    const mediaIdBigInt = BigInt(mediaId);
+    const media = await this.prisma.productMedia.findFirst({
+      where: { id: mediaIdBigInt, productId: productIdBigInt },
+    });
+    if (!media) throw new NotFoundError("Product media not found.");
+
+    if (media.isActive) {
+      // Hide the row from all active/admin edit responses before touching S3.
+      await this.productRepository.deleteMedia(mediaIdBigInt);
+      try {
+        await this.deleteMediaObjectIfUnreferenced(media);
+      } catch (error) {
+        // Restore the media row if S3 rejected the deletion so the admin does
+        // not lose a working reference or see a false successful deletion.
+        await this.productRepository.updateMedia(mediaIdBigInt, { isActive: true });
+        throw error;
+      }
+    }
+
+    const updatedProduct = await this.productRepository.findByIdAdmin(productIdBigInt);
+    if (!updatedProduct) throw new NotFoundError("Product not found after media deletion.");
+    return updatedProduct;
   }
 
   // 🆕 ENHANCED: Variant methods with media, pricing, and dimensions
@@ -1771,8 +1824,34 @@ async getAdminProducts(params: QueryProductDTO & { categoryIds?: string[] }) {
     });
   }
 
-  async deleteVariantMedia(id: string) {
-    await this.productRepository.deleteVariantMedia(BigInt(id));
+  async deleteVariantMedia(productId: string, variantId: string, mediaId: string) {
+    const productIdBigInt = BigInt(productId);
+    const variantIdBigInt = BigInt(variantId);
+    const mediaIdBigInt = BigInt(mediaId);
+    const variant = await this.prisma.productVariant.findFirst({
+      where: { id: variantIdBigInt, productId: productIdBigInt },
+      select: { id: true },
+    });
+    if (!variant) throw new NotFoundError("Product variant not found.");
+
+    const media = await this.prisma.productVariantMedia.findFirst({
+      where: { id: mediaIdBigInt, variantId: variantIdBigInt },
+    });
+    if (!media) throw new NotFoundError("Variant media not found.");
+
+    if (media.isActive) {
+      await this.productRepository.deleteVariantMedia(mediaIdBigInt);
+      try {
+        await this.deleteMediaObjectIfUnreferenced(media);
+      } catch (error) {
+        await this.productRepository.updateVariantMedia(mediaIdBigInt, { isActive: true });
+        throw error;
+      }
+    }
+
+    const updatedProduct = await this.productRepository.findByIdAdmin(productIdBigInt);
+    if (!updatedProduct) throw new NotFoundError("Product not found after variant media deletion.");
+    return updatedProduct;
   }
 
 

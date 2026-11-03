@@ -23,11 +23,11 @@ export type AdminProductWithRelations = Prisma.ProductGetPayload<{
     specifications: true;
     variants: {
       include: {
-        media: { orderBy: { order: "asc" } }; // No isActive filter
+        media: { where: { isActive: true }; orderBy: { order: "asc" } };
         stock: true;
       };
     };
-    media: { orderBy: { order: "asc" } }; // No isActive filter
+    media: { where: { isActive: true }; orderBy: { order: "asc" } };
     stock: true;
   };
 }>;

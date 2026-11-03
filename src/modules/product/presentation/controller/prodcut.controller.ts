@@ -681,18 +681,16 @@ export class ProductController {
 
   async deleteMedia(req: Request, res: Response) {
     try {
-      const { mediaId } = req.params;
-      if (!mediaId || Array.isArray(mediaId)) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Media ID is required" });
+      const { id, mediaId } = req.params;
+      if (!id || Array.isArray(id) || !mediaId || Array.isArray(mediaId)) {
+        return res.status(400).json({ success: false, message: "Product ID and media ID are required" });
       }
 
-      await this.productService.deleteMedia(mediaId);
-
+      const product = await this.productService.deleteMedia(id, mediaId);
       res.json({
         success: true,
-        message: "Media deleted successfully",
+        message: "Media deleted from S3 and product successfully",
+        data: product,
       });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
@@ -816,18 +814,20 @@ export class ProductController {
 
   async deleteVariantMedia(req: Request, res: Response) {
     try {
-      const { mediaId } = req.params;
-      if (!mediaId || Array.isArray(mediaId)) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Media ID is required" });
+      const { id, variantId, mediaId } = req.params;
+      if (
+        !id || Array.isArray(id) ||
+        !variantId || Array.isArray(variantId) ||
+        !mediaId || Array.isArray(mediaId)
+      ) {
+        return res.status(400).json({ success: false, message: "Product ID, variant ID, and media ID are required" });
       }
 
-      await this.productService.deleteVariantMedia(mediaId);
-
+      const product = await this.productService.deleteVariantMedia(id, variantId, mediaId);
       res.json({
         success: true,
-        message: "Variant media deleted successfully",
+        message: "Variant media deleted from S3 and product successfully",
+        data: product,
       });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
