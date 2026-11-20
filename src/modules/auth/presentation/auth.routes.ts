@@ -13,6 +13,7 @@ import { sendNewsletterSubscriptionEmail } from "../application/services/email.s
 import { getPrismaClient } from "@/lib/database/prisma.js";
 import { Msg91OtpService } from "../application/services/msg91-otp.service.js";
 import { AuthService } from "../application/services/auth.service.js";
+import { rateLimit } from "express-rate-limit";
 
 const router = Router();
 const subscribeSchema = z.object({
@@ -25,9 +26,16 @@ const getAdminController = () => container.resolve(AdminController);
 
 // ============ Customer mobile OTP routes (MSG91) ============
 const msg91Otp = new Msg91OtpService();
+const mobileOtpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, code: "OTP_RATE_LIMITED", message: "Too many OTP attempts. Please wait 10 minutes." },
+});
 const mobileSchema = z.object({ mobile: z.string().min(10).max(16) });
 
-router.post("/auth/mobile/send-otp", async (req, res) => {
+router.post("/auth/mobile/send-otp", mobileOtpLimiter, async (req, res) => {
   try {
     const { mobile } = mobileSchema.parse(req.body);
     const sent = await msg91Otp.send(mobile);
@@ -37,7 +45,7 @@ router.post("/auth/mobile/send-otp", async (req, res) => {
   }
 });
 
-router.post("/auth/mobile/resend-otp", async (req, res) => {
+router.post("/auth/mobile/resend-otp", mobileOtpLimiter, async (req, res) => {
   try {
     const { mobile } = mobileSchema.parse(req.body);
     await msg91Otp.resend(mobile);
@@ -47,7 +55,7 @@ router.post("/auth/mobile/resend-otp", async (req, res) => {
   }
 });
 
-router.post("/auth/mobile/verify-otp", async (req, res) => {
+router.post("/auth/mobile/verify-otp", mobileOtpLimiter, async (req, res) => {
   try {
     const data = z.object({ mobile: z.string().min(10).max(16), otp: z.string().length(6) }).parse(req.body);
     const verified = await msg91Otp.verify(data.mobile, data.otp);
