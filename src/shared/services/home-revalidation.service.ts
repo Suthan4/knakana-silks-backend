@@ -8,12 +8,12 @@ import { logger } from "@/shared/logger/logger.js";
  */
 export async function revalidateStorefrontHome(): Promise<void> {
   const secret = process.env.REVALIDATE_SECRET;
-  const url =
-    process.env.STOREFRONT_REVALIDATE_URL ||
-    "https://www.kankanasilks.com/api/revalidate-home";
+  const url = process.env.STOREFRONT_REVALIDATE_URL;
 
-  if (!secret) {
-    logger.warn("Homepage revalidation skipped: REVALIDATE_SECRET is not configured");
+  if (!secret || !url) {
+    logger.warn(
+      "Homepage revalidation skipped: REVALIDATE_SECRET or STOREFRONT_REVALIDATE_URL is not configured",
+    );
     return;
   }
 
@@ -28,8 +28,6 @@ export async function revalidateStorefrontHome(): Promise<void> {
     );
     logger.info("Storefront homepage revalidated");
   } catch (error) {
-    logger.error("Storefront homepage revalidation failed", error, {
-      url,
-    });
+    logger.error("Storefront homepage revalidation failed", error, { url });
   }
 }
