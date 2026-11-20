@@ -12,9 +12,9 @@ function getConfig() {
 }
 
 function normalizeIndianMobile(value: string): string {
-  const digits = value.replace(/\\D/g, "");
+  const digits = value.replace(/\D/g, "");
   const mobile = digits.startsWith("91") && digits.length === 12 ? digits : digits.length === 10 ? `91${digits}` : "";
-  if (!/^91[6-9]\\d{9}$/.test(mobile)) {
+  if (!/^91[6-9]\d{9}$/.test(mobile)) {
     throw new Error("Enter a valid 10-digit Indian mobile number.");
   }
   return mobile;
@@ -43,7 +43,7 @@ export class Msg91OtpService {
     const { authKey } = getConfig();
     const mobile = normalizeIndianMobile(mobileInput);
     const otp = otpInput.trim();
-    if (!/^\\d{6}$/.test(otp)) throw new Error("Enter the 6-digit OTP.");
+    if (!/^\d{6}$/.test(otp)) throw new Error("Enter the 6-digit OTP.");
     const response = await axios.get(`${MSG91_BASE_URL}/verify`, {
       params: { mobile, otp },
       headers: { authkey: authKey },
