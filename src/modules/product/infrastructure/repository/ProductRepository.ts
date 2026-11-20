@@ -33,11 +33,11 @@ const adminProductInclude = {
   specifications: true,
   variants: {
     include: {
-      media: { orderBy: { order: "asc" as const } },
+      media: { where: { isActive: true }, orderBy: { order: "asc" as const } },
       stock: true,
     },
   },
-  media: { orderBy: { order: "asc" as const } },
+  media: { where: { isActive: true }, orderBy: { order: "asc" as const } },
   stock: true,
 } as const;
 
