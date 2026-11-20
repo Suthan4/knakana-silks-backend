@@ -5,6 +5,7 @@ import type {
   SectionMediaDTO,
   SectionCTADTO,
 } from "../dtos/home_section.dtos.js";
+import { revalidateStorefrontHome } from "@/shared/services/home-revalidation.service.js";
 
 @injectable()
 export class HomeSectionService {
@@ -87,7 +88,9 @@ export class HomeSectionService {
       );
     }
 
-    return this.homeSectionRepository.findById(section.id);
+    const createdSection = await this.homeSectionRepository.findById(section.id);
+    void revalidateStorefrontHome();
+    return createdSection;
   }
 
   async updateHomeSection(
@@ -193,7 +196,9 @@ export class HomeSectionService {
       );
     }
 
-    return this.homeSectionRepository.findById(sectionId);
+    const updatedSection = await this.homeSectionRepository.findById(sectionId);
+    void revalidateStorefrontHome();
+    return updatedSection;
   }
 
   async deleteHomeSection(id: string) {
@@ -205,6 +210,7 @@ export class HomeSectionService {
     }
 
     await this.homeSectionRepository.delete(sectionId);
+    void revalidateStorefrontHome();
   }
 
   async getHomeSection(id: string) {

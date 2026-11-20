@@ -2,6 +2,7 @@ import { injectable, inject } from "tsyringe";
 import { IBannerRepository } from "../../infrastructure/interface/Ibannerrepository.js";
 import { Banner } from "@/generated/prisma/client.js";
 import { MediaType } from "@/generated/prisma/enums.js";
+import { revalidateStorefrontHome } from "@/shared/services/home-revalidation.service.js";
 
 @injectable()
 export class BannerService {
@@ -45,6 +46,7 @@ export class BannerService {
       order: data.order ?? 0,
     });
 
+    void revalidateStorefrontHome();
     return banner;
   }
 
@@ -83,6 +85,7 @@ export class BannerService {
     }
 
     const updated = await this.bannerRepository.update(bannerId, updateData);
+    void revalidateStorefrontHome();
     return updated;
   }
 
@@ -95,6 +98,7 @@ export class BannerService {
     }
 
     await this.bannerRepository.delete(bannerId);
+    void revalidateStorefrontHome();
   }
 
   async getBanner(id: string): Promise<Banner> {
