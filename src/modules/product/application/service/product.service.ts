@@ -18,6 +18,7 @@ import {
   QueryProductDTO,
 } from "../product.dto.js";
 import { S3UploadService } from "@/config/s3-upload.js";
+import { revalidateStorefrontProducts } from "@/shared/services/home-revalidation.service.js";
 
 function isTemporaryGoogleMediaUrl(value?: string): boolean {
   return /drive\.google\.com|docs\.google\.com|googleusercontent\.com|\/products\/bulk\/drive-proxy\/|[?&]token=/i.test(
@@ -72,7 +73,7 @@ export class ProductService {
       assertNoTemporaryGoogleProductMedia(data);
       console.log("🔵 ProductService.createProduct called");
 
-      return await this.prisma.$transaction(async (tx) => {
+      const createdProduct = await this.prisma.$transaction(async (tx) => {
         // Validate category
         const category = await this.categoryRepository.findById(
           BigInt(data.categoryId)
@@ -346,6 +347,9 @@ export class ProductService {
 
         return await this.productRepository.findById(product.id, tx);
       });
+
+      void revalidateStorefrontProducts();
+      return createdProduct;
     } catch (error) {
       console.error("❌ Error in ProductService.createProduct:", error);
       throw error;
@@ -831,6 +835,7 @@ export class ProductService {
         console.error("Product media replacement cleanup failed:", { key, cleanupError });
       }
     }
+    void revalidateStorefrontProducts();
     return updatedProduct;
   }
 
@@ -838,7 +843,7 @@ export class ProductService {
     assertNoTemporaryGoogleProductMedia(data);
     const productId = BigInt(id);
 
-    return (await this.prisma.$transaction(async (tx) => {
+    const patchedProduct = (await this.prisma.$transaction(async (tx) => {
       const product = await this.productRepository.findById(productId, tx);
       if (!product) {
         throw new NotFoundError("Product not found");
@@ -1135,6 +1140,9 @@ export class ProductService {
 
       return (await this.productRepository.findById(productId, tx)) as Product;
     })) as Product;
+
+    void revalidateStorefrontProducts();
+    return patchedProduct;
   }
 
   async deleteProduct(id: string) {
@@ -1162,6 +1170,7 @@ export class ProductService {
     }
 
     await this.productRepository.delete(BigInt(id));
+    void revalidateStorefrontProducts();
   }
 
   async getProduct(id: string) {
