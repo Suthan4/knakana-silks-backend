@@ -2,18 +2,33 @@ import axios from "axios";
 import { logger } from "@/shared/logger/logger.js";
 
 /**
- * Invalidates the storefront's cached homepage after banner/home-section writes.
- * Revalidation is best-effort: a failed cache purge must not turn a successful
- * database mutation into an API error for the admin.
+ * Uses the existing storefront revalidation configuration.
+ * STOREFRONT_REVALIDATE_URL remains the full /api/revalidate-home URL;
+ * product/category endpoints are derived from the same storefront origin.
  */
-export async function revalidateStorefrontHome(): Promise<void> {
+async function revalidateStorefrontEndpoint(
+  endpoint: "home" | "product" | "category",
+): Promise<void> {
   const secret = process.env.REVALIDATE_SECRET;
-  const url = process.env.STOREFRONT_REVALIDATE_URL;
+  const configuredHomeUrl = process.env.STOREFRONT_REVALIDATE_URL;
 
-  if (!secret || !url) {
+  if (!secret || !configuredHomeUrl) {
     logger.warn(
-      "Homepage revalidation skipped: REVALIDATE_SECRET or STOREFRONT_REVALIDATE_URL is not configured",
+      `Storefront ${endpoint} revalidation skipped: REVALIDATE_SECRET or STOREFRONT_REVALIDATE_URL is not configured`,
     );
+    return;
+  }
+
+  let url: string;
+  try {
+    url =
+      endpoint === "home"
+        ? configuredHomeUrl
+        : new URL(`/api/revalidate-${endpoint}`, configuredHomeUrl).toString();
+  } catch (error) {
+    logger.error("Invalid STOREFRONT_REVALIDATE_URL", error, {
+      configuredHomeUrl,
+    });
     return;
   }
 
@@ -26,8 +41,25 @@ export async function revalidateStorefrontHome(): Promise<void> {
         timeout: 8_000,
       },
     );
-    logger.info("Storefront homepage revalidated");
+    logger.info(`Storefront ${endpoint} cache revalidated`, { url });
   } catch (error) {
-    logger.error("Storefront homepage revalidation failed", error, { url });
+    // Cache invalidation is best-effort. A committed admin mutation must not
+    // be reported as failed only because the storefront endpoint is unavailable.
+    logger.error(`Storefront ${endpoint} revalidation failed`, error, { url });
   }
+}
+
+/** Invalidates homepage banner and home-section data after admin writes. */
+export function revalidateStorefrontHome(): Promise<void> {
+  return revalidateStorefrontEndpoint("home");
+}
+
+/** Invalidates public product detail and listing caches after product writes. */
+export function revalidateStorefrontProducts(): Promise<void> {
+  return revalidateStorefrontEndpoint("product");
+}
+
+/** Invalidates category details, hierarchy and affected product listings. */
+export function revalidateStorefrontCategories(): Promise<void> {
+  return revalidateStorefrontEndpoint("category");
 }

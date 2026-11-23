@@ -3,6 +3,7 @@ import { SlugUtil } from "@/shared/utils/index.js";
 import { ICategoryRepository } from "../../infrastructure/interface/Icategoryrepository.js";
 import { CacheService } from "@/cache/cache.service.js";
 import { CategoryCacheKeys, CategoryCacheTTL, CategoryCacheModule } from "../../category.cache.js";
+import { revalidateStorefrontCategories } from "@/shared/services/home-revalidation.service.js";
 
 @injectable()
 export class CategoryService {
@@ -106,6 +107,7 @@ export class CategoryService {
 
     // 5. Invalidate category cache
     await CategoryCacheModule.onCategoryCreate();
+    void revalidateStorefrontCategories();
 
     return category;
   }
@@ -150,6 +152,7 @@ export class CategoryService {
 
     // Invalidate hierarchy cache
     await CategoryCacheModule.onHierarchyChange();
+    void revalidateStorefrontCategories();
 
     return placement;
   }
@@ -163,6 +166,7 @@ export class CategoryService {
 
     // Invalidate hierarchy cache
     await CategoryCacheModule.onHierarchyChange();
+    void revalidateStorefrontCategories();
   }
 
   /**
@@ -176,6 +180,7 @@ export class CategoryService {
 
     // Invalidate hierarchy cache
     await CategoryCacheModule.onHierarchyChange();
+    void revalidateStorefrontCategories();
 
     return result;
   }
@@ -255,6 +260,7 @@ export class CategoryService {
     if (updated.slug !== category.slug) {
       await CategoryCacheModule.onCategoryUpdate(id, updated.slug);
     }
+    void revalidateStorefrontCategories();
 
     return updated;
   }
@@ -286,6 +292,7 @@ export class CategoryService {
 
     // Invalidate category cache
     await CategoryCacheModule.onCategoryDelete(id, category.slug);
+    void revalidateStorefrontCategories();
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
