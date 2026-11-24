@@ -53,6 +53,7 @@ export interface IHomeSectionRepository {
     limit: number;
     showTitle: boolean;
     showSubtitle: boolean;
+    productLinks?: any;
   }): Promise<HomeSection>;
   update(id: bigint, data: Partial<HomeSection>): Promise<HomeSection>;
   delete(id: bigint): Promise<void>;

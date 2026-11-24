@@ -118,6 +118,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     limit: number;
     showTitle: boolean;
     showSubtitle: boolean;
+    productLinks?: any;
   }): Promise<HomeSection> {
     return this.prisma.homeSection.create({
       data,
