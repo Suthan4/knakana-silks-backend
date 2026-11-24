@@ -235,6 +235,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
         thumbnailUrl: m.thumbnailUrl,
         altText: m.altText,
         title: m.title,
+        linkUrl: m.linkUrl,
         order: m.order,
         overlayTitle: m.overlayTitle,
         overlaySubtitle: m.overlaySubtitle,
