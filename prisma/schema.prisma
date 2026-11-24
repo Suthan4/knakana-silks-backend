@@ -1153,7 +1153,7 @@ model Banner {
 model HomeSection {
   id             BigInt      @id @default(autoincrement())
   type           SectionType
-  title          String                    
+  title          String?                   
   subtitle       String?
   description    String?
   customTypeName String?

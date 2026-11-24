@@ -40,7 +40,7 @@ export interface IHomeSectionRepository {
   count(where?: any): Promise<number>;
   create(data: {
     type: any;
-    title: string;
+    title: string | null;
     subtitle?: string;
     description?: string;
     customTypeName?: string;
