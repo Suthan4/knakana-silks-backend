@@ -66,6 +66,7 @@ export const CreateHomeSectionDTOSchema = z
 
     // Relations
     productIds: z.array(z.string()).optional(),
+    productLinks: z.array(z.object({ productId: z.string(), linkUrl: z.string().max(2048).optional().nullable(), order: z.number().int().default(0) })).optional(),
     categoryIds: z.array(z.string()).optional(),
     media: z.array(SectionMediaDTOSchema).optional(),
     ctaButtons: z.array(SectionCTADTOSchema).optional(),
@@ -132,6 +133,7 @@ export const UpdateHomeSectionDTOSchema = z
 
     // Relations
     productIds: z.array(z.string()).optional(),
+    productLinks: z.array(z.object({ productId: z.string(), linkUrl: z.string().max(2048).optional().nullable(), order: z.number().int().default(0) })).optional(),
     categoryIds: z.array(z.string()).optional(),
     media: z.array(SectionMediaDTOSchema).optional(),
     ctaButtons: z.array(SectionCTADTOSchema).optional(),

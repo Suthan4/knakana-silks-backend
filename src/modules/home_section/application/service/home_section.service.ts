@@ -37,6 +37,7 @@ export class HomeSectionService {
 
     // Relations
     productIds?: string[];
+    productLinks?: { productId: string; linkUrl?: string | null; order: number }[];
     categoryIds?: string[];
     media?: SectionMediaDTO[];
     ctaButtons?: SectionCTADTO[];
@@ -57,6 +58,7 @@ export class HomeSectionService {
       limit: data.limit ?? 8,
       showTitle: data.showTitle ?? true,
       showSubtitle: data.showSubtitle ?? true,
+      ...(data.productLinks !== undefined ? { productLinks: data.productLinks } : {}),
     });
 
     // Add media if provided
@@ -133,6 +135,7 @@ export class HomeSectionService {
     // Update basic fields
     const updateData: any = {};
     if (data.type !== undefined) updateData.type = data.type;
+    if (data.productLinks !== undefined) updateData.productLinks = data.productLinks;
     if (data.title !== undefined) updateData.title = data.title;
     if (data.subtitle !== undefined) updateData.subtitle = data.subtitle;
     if (data.description !== undefined)

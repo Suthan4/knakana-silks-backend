@@ -1,0 +1,1 @@
+ALTER TABLE "home_sections" ADD COLUMN "product_links" JSONB;
