@@ -17,7 +17,7 @@ export class HomeSectionService {
   async createHomeSection(data: {
     // Basic Info
     type: SectionType;
-    title: string;
+    title?: string | null;
     subtitle?: string;
     description?: string;
     customTypeName?: string;
@@ -44,7 +44,7 @@ export class HomeSectionService {
     // Create the section
     const section = await this.homeSectionRepository.create({
       type: data.type,
-      title: data.title,
+      title: data.title?.trim() || null,
       subtitle: data.subtitle,
       description: data.description,
       customTypeName: data.customTypeName,
@@ -98,7 +98,7 @@ export class HomeSectionService {
     data: {
       // Basic Info
       type?: SectionType;
-      title?: string;
+      title?: string | null;
       subtitle?: string | null;
       description?: string | null;
       customTypeName?: string | null;
