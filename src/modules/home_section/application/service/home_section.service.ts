@@ -135,7 +135,6 @@ export class HomeSectionService {
     // Update basic fields
     const updateData: any = {};
     if (data.type !== undefined) updateData.type = data.type;
-    if (data.productLinks !== undefined) updateData.productLinks = data.productLinks;
     if (data.title !== undefined) updateData.title = data.title;
     if (data.subtitle !== undefined) updateData.subtitle = data.subtitle;
     if (data.description !== undefined)
