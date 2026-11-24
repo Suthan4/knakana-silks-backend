@@ -39,7 +39,7 @@ export const CreateHomeSectionDTOSchema = z
   .object({
     // Basic Info
     type: z.nativeEnum(SectionType),
-    title: z.string().min(1, "Title is required").max(200),
+    title: z.string().optional(),
     subtitle: z.string().max(500).optional(),
     description: z.string().max(2000).optional(),
     customTypeName: z.string().min(1).max(100).optional(),
@@ -103,7 +103,7 @@ export const UpdateHomeSectionDTOSchema = z
   .object({
     // Basic Info
     type: z.nativeEnum(SectionType).optional(),
-    title: z.string().min(1).max(200).optional(),
+    title: z.string().optional(),
     subtitle: z.string().max(500).optional().nullable(),
     description: z.string().max(2000).optional().nullable(),
     customTypeName: z.string().min(1).max(100).optional().nullable(),
