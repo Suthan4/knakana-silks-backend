@@ -1197,6 +1197,7 @@ model SectionMedia {
   thumbnailUrl    String?
   altText         String?
   title           String?
+  linkUrl         String?
   order           Int         @default(0)
   
   // Hero Slider Overlays

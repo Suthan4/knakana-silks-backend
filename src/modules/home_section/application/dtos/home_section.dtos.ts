@@ -9,6 +9,7 @@ export const SectionMediaDTOSchema = z.object({
   thumbnailUrl: z.string().url().optional(),
   altText: z.string().optional(),
   title: z.string().optional(),
+  linkUrl: z.string().max(2048).optional().nullable(),
   order: z.number().int().default(0),
   overlayTitle: z.string().optional(),
   overlaySubtitle: z.string().optional(),
