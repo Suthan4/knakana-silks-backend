@@ -1,42 +1,18 @@
 import { HomeSection, Prisma } from "@/generated/prisma/client.js";
-import type {
-  SectionMediaDTO,
-  SectionCTADTO,
-} from "../../application/dtos/home_section.dtos.js";
+import type { SectionMediaDTO, SectionCTADTO } from "../../application/dtos/home_section.dtos.js";
 
 export type HomeSectionWithRelations = Prisma.HomeSectionGetPayload<{
   include: {
-    products: {
-      include: {
-        media: true;
-        stock: true;
-        category: true;
-      };
-    };
-    categories: {
-      include: {
-        childPlacements: {
-          include: {
-            child: true;
-          };
-        }
-      };
-    };
+    products: { include: { media: true; stock: true; category: true } };
+    categories: { include: { childPlacements: { include: { child: true } } } };
     media: true;
     ctaButtons: true;
   };
 }>;
 
-
 export interface IHomeSectionRepository {
-  // Basic CRUD
   findById(id: bigint): Promise<HomeSectionWithRelations | null>;
-  findAll(params: {
-    skip: number;
-    take: number;
-    where?: any;
-    orderBy?: any;
-  }): Promise<HomeSectionWithRelations[]>;
+  findAll(params: { skip: number; take: number; where?: any; orderBy?: any }): Promise<HomeSectionWithRelations[]>;
   count(where?: any): Promise<number>;
   create(data: {
     type: any;
@@ -57,20 +33,12 @@ export interface IHomeSectionRepository {
   update(id: bigint, data: Partial<HomeSection>): Promise<HomeSection>;
   delete(id: bigint): Promise<void>;
   findActive(): Promise<HomeSectionWithRelations[]>;
-
-  // Product Relations
   addProducts(sectionId: bigint, productIds: bigint[]): Promise<void>;
   removeProducts(sectionId: bigint, productIds: bigint[]): Promise<void>;
-
-  // Category Relations
   addCategories(sectionId: bigint, categoryIds: bigint[]): Promise<void>;
   removeCategories(sectionId: bigint, categoryIds: bigint[]): Promise<void>;
-
-  // Media Management
   addMedia(sectionId: bigint, media: SectionMediaDTO[]): Promise<void>;
   removeAllMedia(sectionId: bigint): Promise<void>;
-
-  // CTA Button Management
   addCTAButtons(sectionId: bigint, buttons: SectionCTADTO[]): Promise<void>;
   removeAllCTAButtons(sectionId: bigint): Promise<void>;
 }
