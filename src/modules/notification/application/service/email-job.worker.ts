@@ -32,10 +32,14 @@ export class EmailJobWorker {
     void this.runLoop();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
-    console.info("[EMAIL_WORKER] Stopping");
+    console.info("[EMAIL_WORKER] Waiting for in-flight email batch to finish");
+    while (this.processing) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    console.info("[EMAIL_WORKER] Stopped");
   }
 
   private async runLoop(): Promise<void> {
