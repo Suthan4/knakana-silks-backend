@@ -15,7 +15,12 @@ export interface EmailJobInput {
   html: string;
 }
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim() || "admin@kankanasilks.com";
+const ADMIN_EMAIL =
+  process.env.ADMIN_EMAIL?.trim() || "admin@kankanasilks.com";
+const BRAND_COLOR = "#F8F0EF";
+const LOGO_URL =
+  process.env.EMAIL_LOGO_URL?.trim() ||
+  "https://www.kankanasilks.com/kankana-silks-logo.png";
 const ADMIN_REQUESTS_URL =
   process.env.ADMIN_PRODUCT_REQUEST_URL?.trim() ||
   "https://admin.kankanasilks.com/admin/product-request";
@@ -39,18 +44,40 @@ function variantText(request: ProductRequestEmailContext): string {
 }
 
 function layout(title: string, body: string): string {
-  return `<!doctype html><html><body style="margin:0;background:#f6f6f6;font-family:Arial,sans-serif;color:#252525;line-height:1.6">
-    <div style="max-width:620px;margin:24px auto;background:#fff;border:1px solid #e8e8e8;border-radius:10px;overflow:hidden">
-      <div style="padding:22px 28px;background:#542b32;color:#fff"><h1 style="margin:0;font-size:22px">Kankana Silks</h1></div>
-      <div style="padding:26px 28px"><h2 style="margin:0 0 16px;font-size:20px">${title}</h2>${body}</div>
-      <div style="padding:16px 28px;background:#fafafa;color:#777;font-size:12px">Thank you for choosing Kankana Silks.</div>
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(title)}</title>
+  </head>
+  <body style="margin:0;padding:24px 12px;background:${BRAND_COLOR};font-family:Arial,Helvetica,sans-serif;color:#302629;line-height:1.65">
+    <div style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #eadfdd;border-radius:12px;overflow:hidden">
+      <div style="padding:24px 28px;background:${BRAND_COLOR};text-align:center;border-bottom:1px solid #eadfdd">
+        <img
+          src="${escapeHtml(LOGO_URL)}"
+          alt="Kankana Silks"
+          width="190"
+          style="display:block;width:190px;max-width:70%;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none"
+        />
+      </div>
+      <div style="padding:28px 30px;background:#ffffff">
+        <h2 style="margin:0 0 18px;font-size:21px;line-height:1.35;font-weight:700;color:#302629">${escapeHtml(title)}</h2>
+        ${body}
+      </div>
+      <div style="padding:18px 28px;background:${BRAND_COLOR};border-top:1px solid #eadfdd;text-align:center;color:#66595b;font-size:12px">
+        <p style="margin:0 0 5px;font-weight:600;color:#493b3e">Kankana Silks</p>
+        <p style="margin:0">Thank you for choosing Kankana Silks.</p>
+        <p style="margin:6px 0 0"><a href="mailto:support@kankanasilks.com" style="color:#493b3e;text-decoration:underline">support@kankanasilks.com</a></p>
+      </div>
     </div>
-  </body></html>`;
+  </body>
+</html>`;
 }
 
 function details(request: ProductRequestEmailContext): string {
   const variant = variantText(request);
-  return `<div style="padding:16px;background:#faf7f7;border:1px solid #eee;border-radius:8px;margin:18px 0">
+  return `<div style="padding:16px;background:#F8F0EF;border:1px solid #EADFDB;border-radius:8px;margin:18px 0">
     <p style="margin:4px 0"><strong>Request:</strong> ${escapeHtml(request.requestNumber)}</p>
     <p style="margin:4px 0"><strong>Product:</strong> ${escapeHtml(request.product.name)}</p>
     ${variant ? `<p style="margin:4px 0"><strong>Variant:</strong> ${escapeHtml(variant)}</p>` : ""}
