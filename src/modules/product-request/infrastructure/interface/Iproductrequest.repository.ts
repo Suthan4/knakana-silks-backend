@@ -33,6 +33,7 @@ export interface IProductRequestRepository {
 
   findById(id: bigint): Promise<ProductRequestWithRelations | null>;
   findByRequestNumber(requestNumber: string): Promise<ProductRequestWithRelations | null>;
+  findActiveByUserProductVariant(userId: bigint, productId: bigint, variantId?: bigint): Promise<ProductRequestWithRelations | null>;
   
   findByUserId(
     userId: bigint,
