@@ -2,6 +2,8 @@
 import { injectable, inject } from "tsyringe";
 import { PrismaClient } from "@/generated/prisma/client.js";
 import { IStockRepository } from "../infrastructure/interface/Istockrepository.js";
+import { enqueueEmailJobs } from "@/modules/notification/application/service/email-job-queue.service.js";
+import { buildRestockedRequestClosedEmailJobs } from "@/modules/notification/application/service/product-request-email.templates.js";
 
 export enum StockAdjustmentReason {
   ORDER_PLACED = "ORDER_PLACED",
@@ -161,14 +163,37 @@ export class StockManagementService {
         );
 
         if (isPurchasable) {
-          await tx.productRequest.updateMany({
+          const activeRequests = await tx.productRequest.findMany({
             where: {
               productId,
               variantId: variantId ?? null,
               status: { in: ["PENDING", "APPROVED"] },
             },
-            data: { status: "CLOSED" },
+            include: {
+              user: { select: { email: true, firstName: true, lastName: true } },
+              product: { select: { name: true, slug: true } },
+              variant: { select: { size: true, color: true, fabric: true } },
+            },
           });
+
+          // Close each request conditionally. Only the transaction that
+          // actually changes PENDING/APPROVED to CLOSED enqueues notifications.
+          for (const request of activeRequests) {
+            const closed = await tx.productRequest.updateMany({
+              where: {
+                id: request.id,
+                status: { in: ["PENDING", "APPROVED"] },
+              },
+              data: { status: "CLOSED" },
+            });
+
+            if (closed.count === 1) {
+              await enqueueEmailJobs(
+                tx,
+                buildRestockedRequestClosedEmailJobs(request),
+              );
+            }
+          }
         }
       }
 
