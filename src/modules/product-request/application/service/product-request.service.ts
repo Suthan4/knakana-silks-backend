@@ -3,6 +3,12 @@ import { IProductRequestRepository } from "../../infrastructure/interface/Iprodu
 import { IProductRepository } from "@/modules/product/infrastructure/interface/Iproductrepository.js";
 import { RequestStatus } from "@/generated/prisma/enums.js";
 import { NumberUtil } from "@/shared/utils/index.js";
+import { PrismaClient } from "@/generated/prisma/client.js";
+import { enqueueEmailJobs } from "@/modules/notification/application/service/email-job-queue.service.js";
+import {
+  buildRequestSubmittedEmailJobs,
+  buildManuallyClosedRequestEmailJobs,
+} from "@/modules/notification/application/service/product-request-email.templates.js";
 
 @injectable()
 export class ProductRequestService {
@@ -10,7 +16,9 @@ export class ProductRequestService {
     @inject("IProductRequestRepository")
     private productRequestRepository: IProductRequestRepository,
     @inject("IProductRepository")
-    private productRepository: IProductRepository
+    private productRepository: IProductRepository,
+    @inject(PrismaClient)
+    private prisma: PrismaClient
   ) {}
 
   async createProductRequest(
@@ -53,13 +61,27 @@ export class ProductRequestService {
     // Generate unique request number
     const requestNumber = this.generateRequestNumber();
 
-    return this.productRequestRepository.create({
-      userId: BigInt(userId),
-      productId: BigInt(data.productId),
-      variantId: data.variantId ? BigInt(data.variantId) : undefined,
-      quantity: data.quantity,
-      customerNote: data.customerNote,
-      requestNumber,
+    return this.prisma.$transaction(async (tx) => {
+      const request = await tx.productRequest.create({
+        data: {
+          userId: BigInt(userId),
+          productId: BigInt(data.productId),
+          variantId: data.variantId ? BigInt(data.variantId) : undefined,
+          quantity: data.quantity,
+          customerNote: data.customerNote,
+          requestNumber,
+        },
+        include: {
+          user: { select: { email: true, firstName: true, lastName: true } },
+          product: { select: { name: true, slug: true } },
+          variant: { select: { size: true, color: true, fabric: true } },
+        },
+      });
+
+      // The request and both email jobs commit together. SMTP is never called
+      // in the customer request HTTP lifecycle.
+      await enqueueEmailJobs(tx, buildRequestSubmittedEmailJobs(request));
+      return request;
     });
   }
 
@@ -222,21 +244,42 @@ export class ProductRequestService {
   }
 
   async closeRequest(id: string) {
-    const request = await this.productRequestRepository.findById(BigInt(id));
+    return this.prisma.$transaction(async (tx) => {
+      const requestId = BigInt(id);
+      const request = await tx.productRequest.findUnique({
+        where: { id: requestId },
+        include: {
+          user: { select: { email: true, firstName: true, lastName: true } },
+          product: { select: { name: true, slug: true } },
+          variant: { select: { size: true, color: true, fabric: true } },
+        },
+      });
 
-    if (!request) {
-      throw new Error("Request not found");
-    }
+      if (!request) {
+        throw new Error("Request not found");
+      }
 
-    if (
-      request.status !== RequestStatus.PENDING &&
-      request.status !== RequestStatus.APPROVED
-    ) {
-      throw new Error(`Cannot close request with status ${request.status}`);
-    }
+      if (
+        request.status !== RequestStatus.PENDING &&
+        request.status !== RequestStatus.APPROVED
+      ) {
+        throw new Error(`Cannot close request with status ${request.status}`);
+      }
 
-    return this.productRequestRepository.update(BigInt(id), {
-      status: RequestStatus.CLOSED,
+      const updated = await tx.productRequest.updateMany({
+        where: {
+          id: requestId,
+          status: { in: [RequestStatus.PENDING, RequestStatus.APPROVED] },
+        },
+        data: { status: RequestStatus.CLOSED },
+      });
+
+      if (updated.count !== 1) {
+        throw new Error("This request has already been updated. Refresh and try again.");
+      }
+
+      await enqueueEmailJobs(tx, buildManuallyClosedRequestEmailJobs(request));
+      return tx.productRequest.findUnique({ where: { id: requestId } });
     });
   }
 
