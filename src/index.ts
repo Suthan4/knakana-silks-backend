@@ -44,18 +44,21 @@ const startServer = async () => {
     // Give in-flight requests a chance to finish instead of dying mid-request.
     const shutdown = async (signal: string) => {
       logger.info(`${signal} received: stopping email worker and closing HTTP server`);
+
+      // Do not allow an SMTP connection or stuck socket to block deployment shutdown.
+      const forceExitTimer = setTimeout(() => {
+        logger.error("Forced shutdown after timeout waiting for background work or connections");
+        process.exit(1);
+      }, 10_000);
+      forceExitTimer.unref();
+
       await emailJobWorker.stop();
       server.close(async () => {
+        clearTimeout(forceExitTimer);
         await getPrismaClient.$disconnect();
         logger.info("Shutdown complete");
         process.exit(0);
       });
-
-      // Force-exit if something (e.g. a stuck socket) blocks graceful close.
-      setTimeout(() => {
-        logger.error("Forced shutdown after timeout waiting for connections to close");
-        process.exit(1);
-      }, 10_000).unref();
     };
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
