@@ -1289,3 +1289,23 @@ model ImageCompressionSetting {
 
   @@map("image_compression_settings")
 }
+
+// Persistent outbox for background email delivery.
+model EmailJob {
+  id             BigInt    @id @default(autoincrement())
+  recipient      String
+  subject        String
+  html           String    @db.Text
+  status         String    @default("PENDING") @db.VarChar(20)
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now()) @db.Timestamptz(6) @map("next_attempt_at")
+  lockedAt       DateTime? @db.Timestamptz(6) @map("locked_at")
+  lastError      String?   @db.Text @map("last_error")
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6) @map("created_at")
+  sentAt         DateTime? @db.Timestamptz(6) @map("sent_at")
+
+  @@index([status, nextAttemptAt, createdAt], map: "email_jobs_pending_idx")
+  @@index([status, lockedAt], map: "email_jobs_processing_idx")
+  @@map("email_jobs")
+}
+
