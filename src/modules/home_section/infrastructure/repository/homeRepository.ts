@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { HomeSection, PrismaClient } from "@/generated/prisma/client.js";
+import { HomeSection, Prisma, PrismaClient } from "@/generated/prisma/client.js";
 import {
   HomeSectionWithRelations,
   IHomeSectionRepository,
@@ -118,6 +118,7 @@ export class HomeSectionRepository implements IHomeSectionRepository {
     limit: number;
     showTitle: boolean;
     showSubtitle: boolean;
+    productLinks?: any;
   }): Promise<HomeSection> {
     return this.prisma.homeSection.create({
       data,
@@ -127,7 +128,13 @@ export class HomeSectionRepository implements IHomeSectionRepository {
   async update(id: bigint, data: Partial<HomeSection>): Promise<HomeSection> {
     return this.prisma.homeSection.update({
       where: { id },
-      data,
+      data: {
+        ...data,
+        productLinks:
+          data.productLinks === null
+            ? Prisma.DbNull
+            : (data.productLinks as Prisma.InputJsonValue | undefined),
+      },
     });
   }
 
