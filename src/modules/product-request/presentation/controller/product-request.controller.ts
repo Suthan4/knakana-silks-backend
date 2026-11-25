@@ -119,6 +119,20 @@ export class ProductRequestController {
     }
   }
 
+  async closeRequest(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id || Array.isArray(id)) {
+        return res.status(400).json({ success: false, message: "Request ID is required" });
+      }
+
+      const request = await this.productRequestService.closeRequest(id);
+      return res.json({ success: true, message: "Request closed successfully", data: request });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  }
+
   async fulfillRequest(req: Request, res: Response) {
     try {
       const { id } = req.params;
