@@ -164,6 +164,7 @@ enum RequestStatus {
   REJECTED
   FULFILLED
   CANCELLED
+  CLOSED
 }
 
 enum CourierPreference {
