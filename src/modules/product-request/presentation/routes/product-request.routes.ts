@@ -51,6 +51,13 @@ router.patch(
 );
 
 router.patch(
+  "/admin/product-requests/:id/close",
+  authenticate,
+  checkPermission("product-requests", "update"),
+  (req, res) => getProductRequestController().closeRequest(req, res)
+);
+
+router.patch(
   "/admin/product-requests/:id/fulfill",
   authenticate,
   checkPermission("product-requests", "update"),
