@@ -2,6 +2,8 @@ import "dotenv/config";
 import { getPrismaClient } from "./lib/database/prisma.js";
 import { createApp } from "./app.js";
 import { logger } from "./shared/logger/logger.js";
+import { container } from "tsyringe";
+import { EmailJobWorker } from "./modules/notification/application/service/email-job.worker.js";
 
 (BigInt.prototype as any).toJSON = function () {
   return this.toString();
@@ -15,6 +17,11 @@ const startServer = async () => {
     logger.info("Database connected");
 
     const app = createApp();
+
+    // Background transactional email delivery. Jobs are already committed to
+    // PostgreSQL before the worker reads them, so request APIs never send SMTP.
+    const emailJobWorker = container.resolve(EmailJobWorker);
+    emailJobWorker.start();
 
     const server = app.listen(PORT, () => {
       logger.info("Server started", {
@@ -36,7 +43,8 @@ const startServer = async () => {
 
     // Give in-flight requests a chance to finish instead of dying mid-request.
     const shutdown = async (signal: string) => {
-      logger.info(`${signal} received: closing HTTP server`);
+      logger.info(`${signal} received: stopping email worker and closing HTTP server`);
+      await emailJobWorker.stop();
       server.close(async () => {
         await getPrismaClient.$disconnect();
         logger.info("Shutdown complete");
