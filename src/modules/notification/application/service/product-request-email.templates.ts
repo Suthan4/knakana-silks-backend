@@ -15,8 +15,7 @@ export interface EmailJobInput {
   html: string;
 }
 
-const ADMIN_EMAIL =
-  process.env.ADMIN_EMAIL?.trim() || "admin@kankanasilks.com";
+const ADMIN_EMAIL = "admin@kankanasilks.com";
 const BRAND_COLOR = "#F8F0EF";
 const LOGO_URL =
   process.env.EMAIL_LOGO_URL?.trim() ||
@@ -77,7 +76,7 @@ function layout(title: string, body: string): string {
 
 function details(request: ProductRequestEmailContext): string {
   const variant = variantText(request);
-  return `<div style="padding:16px;background:#F8F0EF;border:1px solid #EADFDB;border-radius:8px;margin:18px 0">
+  return `<div style="padding:16px;background:${BRAND_COLOR};border:1px solid #EADFDB;border-radius:8px;margin:18px 0">
     <p style="margin:4px 0"><strong>Request:</strong> ${escapeHtml(request.requestNumber)}</p>
     <p style="margin:4px 0"><strong>Product:</strong> ${escapeHtml(request.product.name)}</p>
     ${variant ? `<p style="margin:4px 0"><strong>Variant:</strong> ${escapeHtml(variant)}</p>` : ""}
@@ -86,7 +85,7 @@ function details(request: ProductRequestEmailContext): string {
 }
 
 function button(url: string, label: string): string {
-  return `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:11px 18px;background:#542b32;color:#fff;text-decoration:none;border-radius:6px">${escapeHtml(label)}</a></p>`;
+  return `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:11px 18px;background:${BRAND_COLOR};border:1px solid #EADFDB;color:#493B3E;text-decoration:none;border-radius:6px;font-weight:600">${escapeHtml(label)}</a></p>`;
 }
 
 function customerRequestUrl(id: bigint | string): string {
