@@ -34,8 +34,8 @@ export class EmailService {
   async sendEmail(options: EmailOptions) {
     try {
       const info = await this.transporter.sendMail({
-        from:
-          process.env.EMAIL_FROM || "Kangana Silks <noreply@kanganasilks.com>",
+        from: "Kankana Silks <notifications@kankanasilks.com>",
+        replyTo: "support@kankanasilks.com",
         to: options.to,
         subject: options.subject,
         html: options.html,
