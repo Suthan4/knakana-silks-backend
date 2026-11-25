@@ -63,7 +63,7 @@ export class ProductRequestRepository implements IProductRequestRepository {
         userId,
         productId,
         variantId: variantId ?? null,
-        status: { in: ["PENDING", "APPROVED", "REJECTED", "FULFILLED"] },
+        status: { in: ["PENDING", "APPROVED"] },
       },
       orderBy: { createdAt: "desc" },
       include: {
