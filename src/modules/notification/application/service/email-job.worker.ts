@@ -72,8 +72,8 @@ export class EmailJobWorker {
             OR
             ("status" = 'PROCESSING' AND "locked_at" < NOW() - INTERVAL '10 minutes')
           ORDER BY "created_at" ASC
-          FOR UPDATE SKIP LOCKED
           LIMIT ${this.batchSize}
+          FOR UPDATE SKIP LOCKED
         )
         UPDATE "email_jobs" AS jobs
         SET
