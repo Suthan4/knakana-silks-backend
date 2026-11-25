@@ -164,6 +164,7 @@ enum RequestStatus {
   REJECTED
   FULFILLED
   CANCELLED
+  CLOSED
 }
 
 enum CourierPreference {
@@ -1177,6 +1178,7 @@ model HomeSection {
 
   // Relations
   products       Product[]      @relation("SectionProducts")
+  productLinks   Json?          @map("product_links")
   categories     Category[]     @relation("SectionCategories")
   media          SectionMedia[]
   ctaButtons     SectionCTA[]

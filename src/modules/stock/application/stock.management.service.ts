@@ -139,6 +139,39 @@ export class StockManagementService {
         );
       }
 
+      // Automatically close matching requests only when this exact stock row
+      // satisfies the same availability rule used by order validation.
+      if (quantity > 0) {
+        const [product, updatedStock] = await Promise.all([
+          tx.product.findUnique({
+            where: { id: productId },
+            select: { isActive: true, allowOutOfStockOrders: true },
+          }),
+          tx.stock.findFirst({
+            where: { productId, variantId: variantId ?? null, warehouseId },
+          }),
+        ]);
+
+        const physicalStock = Math.max(0, Number(updatedStock?.quantity ?? 0));
+        const threshold = Math.max(0, Number(updatedStock?.lowStockThreshold ?? 0));
+        const isPurchasable = Boolean(
+          product?.isActive &&
+          physicalStock > 0 &&
+          (product.allowOutOfStockOrders || threshold <= 0 || physicalStock >= threshold)
+        );
+
+        if (isPurchasable) {
+          await tx.productRequest.updateMany({
+            where: {
+              productId,
+              variantId: variantId ?? null,
+              status: { in: ["PENDING", "APPROVED"] },
+            },
+            data: { status: "CLOSED" },
+          });
+        }
+      }
+
       // ✅ Create adjustment log
       await tx.stockAdjustment.create({
         data: {

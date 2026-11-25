@@ -37,6 +37,7 @@ export class HomeSectionService {
 
     // Relations
     productIds?: string[];
+    productLinks?: { productId: string; linkUrl?: string | null; order: number }[];
     categoryIds?: string[];
     media?: SectionMediaDTO[];
     ctaButtons?: SectionCTADTO[];
@@ -57,6 +58,7 @@ export class HomeSectionService {
       limit: data.limit ?? 8,
       showTitle: data.showTitle ?? true,
       showSubtitle: data.showSubtitle ?? true,
+      ...(data.productLinks !== undefined ? { productLinks: data.productLinks } : {}),
     });
 
     // Add media if provided
