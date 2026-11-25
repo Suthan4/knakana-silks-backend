@@ -221,6 +221,27 @@ export class ProductRequestService {
     });
   }
 
+  async closeRequest(id: string) {
+    const request = await this.productRequestRepository.findById(BigInt(id));
+
+    if (!request) {
+      throw new Error("Request not found");
+    }
+
+    // Manual close is available only while a request is active.
+    // Rejected, cancelled, fulfilled, and already closed requests stay unchanged.
+    if (
+      request.status !== RequestStatus.PENDING &&
+      request.status !== RequestStatus.APPROVED
+    ) {
+      throw new Error(`Cannot close request with status ${request.status}`);
+    }
+
+    return this.productRequestRepository.update(BigInt(id), {
+      status: RequestStatus.CLOSED,
+    });
+  }
+
   async fulfillRequest(id: string, orderId: string) {
     const request = await this.productRequestRepository.findById(BigInt(id));
 
