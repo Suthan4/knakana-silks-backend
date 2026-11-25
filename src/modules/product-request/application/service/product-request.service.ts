@@ -38,6 +38,18 @@ export class ProductRequestService {
       }
     }
 
+    // Do not create duplicate requests for the same customer + product + variant.
+    // A cancelled request may be submitted again; all other outcomes remain visible
+    // in the customer's request history and are not duplicated from product pages.
+    const existingRequest = await this.productRequestRepository.findActiveByUserProductVariant(
+      BigInt(userId),
+      BigInt(data.productId),
+      data.variantId ? BigInt(data.variantId) : undefined
+    );
+    if (existingRequest) {
+      throw new Error("You already have a request for this product. View its status in My Account → Product Requests.");
+    }
+
     // Generate unique request number
     const requestNumber = this.generateRequestNumber();
 

@@ -10,13 +10,19 @@ export const CreateProductRequestDTOSchema = z.object({
 
 export type CreateProductRequestDTO = z.infer<typeof CreateProductRequestDTOSchema>;
 
-export const UpdateProductRequestDTOSchema = z.object({
-  status: z.nativeEnum(RequestStatus),
-  adminNote: z.string().optional(),
+/**
+ * Approval is a dedicated transition endpoint. Status is intentionally not
+ * accepted from the client; the service owns the PENDING -> APPROVED transition.
+ */
+export const ApproveProductRequestDTOSchema = z.object({
+  adminNote: z.string().trim().max(2000).optional(),
+  // HTML date inputs are normalized to a full UTC ISO datetime by the admin API.
   estimatedAvailability: z.string().datetime().optional(),
 });
 
-export type UpdateProductRequestDTO = z.infer<typeof UpdateProductRequestDTOSchema>;
+export const RejectProductRequestDTOSchema = z.object({
+  adminNote: z.string().trim().min(1, "Admin note is required").max(2000),
+});
 
 export const QueryProductRequestDTOSchema = z.object({
   page: z.number().int().positive().default(1),

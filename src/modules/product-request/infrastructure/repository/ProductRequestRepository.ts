@@ -57,6 +57,24 @@ export class ProductRequestRepository implements IProductRequestRepository {
     });
   }
 
+  async findActiveByUserProductVariant(userId: bigint, productId: bigint, variantId?: bigint): Promise<ProductRequestWithRelations | null> {
+    return this.prisma.productRequest.findFirst({
+      where: {
+        userId,
+        productId,
+        variantId: variantId ?? null,
+        status: { in: ["PENDING", "APPROVED"] },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } },
+        product: { include: { media: { take: 1, where: { isActive: true }, orderBy: { order: "asc" } } } },
+        variant: true,
+        order: true,
+      },
+    });
+  }
+
   async findByRequestNumber(
     requestNumber: string
   ): Promise<ProductRequestWithRelations | null> {
