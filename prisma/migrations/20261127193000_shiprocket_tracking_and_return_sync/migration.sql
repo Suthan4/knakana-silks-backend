@@ -12,7 +12,7 @@ ALTER TABLE "return_shipments"
 
 UPDATE "return_shipments"
 SET "shiprocketShipmentId" = "awb"
-WHERE "awb" IS NOT NULL;
+WHERE "awb" IS NOT NULL AND "awb" <> '';
 
 UPDATE "return_shipments"
 SET "awb" = NULL
