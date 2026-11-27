@@ -271,19 +271,27 @@ export class ShiprocketWebhookService {
       throw new Error("Order for Shiprocket shipment was not found.");
     }
 
+    const isRtoDelivered =
+      statusId === 10 ||
+      currentStatusId === 16 ||
+      /RTO\s+DELIVERED|RETURN\s+TO\s+ORIGIN.*DELIVERED/i.test(normalizedStatus);
     const isRto =
       statusId === 9 ||
       statusId === 10 ||
+      currentStatusId === 15 ||
+      currentStatusId === 16 ||
       /\bRTO\b|RETURN\s+TO\s+ORIGIN/i.test(normalizedStatus);
     const isDelivered =
       statusId === 7 ||
       (!hasShipmentStatusId && normalizedStatus === "DELIVERED");
 
-    // Status IDs from Shiprocket's shipment status table are authoritative.
-    // RTO Initiated (9) and RTO Delivered (10) are not buyer delivery.
+    // Buyer delivery and RTO delivery are distinct terminal outcomes.
+    // RTO Initiated remains a shipment state until the parcel returns.
     let nextOrderStatus: OrderStatus | null = null;
     if (isDelivered) {
       nextOrderStatus = OrderStatus.DELIVERED;
+    } else if (isRtoDelivered) {
+      nextOrderStatus = OrderStatus.RETURNED;
     } else if (isRto) {
       nextOrderStatus = null;
     } else if (statusId === 17 || /OUT\s+FOR\s+DELIVERY/i.test(normalizedStatus)) {
@@ -350,8 +358,9 @@ export class ShiprocketWebhookService {
 
     await this.shipmentRepository.update(shipment.id, shipmentUpdate);
 
-    // Notify customers once per actual order status transition. RTO is kept as
-    // a provider shipment state and does not send a false cancellation/refund.
+    // Notify customers once per actual order status transition. RTO Initiated
+    // remains a shipment state; RTO Delivered moves the order to RETURNED and
+    // never issues an automatic refund.
     if (statusChanged && nextOrderStatus) {
       try {
         switch (nextOrderStatus) {
@@ -368,7 +377,7 @@ export class ShiprocketWebhookService {
           case OrderStatus.OUT_FOR_DELIVERY:
             await this.emailService.sendEmail({
               to: order.user.email,
-              subject: \`Order Out for Delivery - \${order.orderNumber}\`,
+              subject: `Order Out for Delivery - ${order.orderNumber}`,
               html: this.getOutForDeliveryEmailTemplate(
                 order.user.firstName,
                 order.orderNumber,
@@ -388,12 +397,20 @@ export class ShiprocketWebhookService {
           case OrderStatus.CANCELLED:
             await this.emailService.sendEmail({
               to: order.user.email,
-              subject: \`Order Cancelled - \${order.orderNumber}\`,
+              subject: `Order Cancelled - ${order.orderNumber}`,
               html: this.getCancellationEmailTemplate(
                 order.user.firstName,
                 order.orderNumber,
                 "Shiprocket reported that the shipment was cancelled."
               ),
+            });
+            break;
+
+          case OrderStatus.RETURNED:
+            await this.emailService.sendEmail({
+              to: order.user.email,
+              subject: `Order Returned to Warehouse - ${order.orderNumber}`,
+              html: `<p>Hi ${order.user.firstName},</p><p>Your shipment for order ${order.orderNumber} was returned to our warehouse by the courier.</p><p>Our team will review the shipment and contact you about next steps. This status does not mean a refund has been completed.</p>`,
             });
             break;
         }
