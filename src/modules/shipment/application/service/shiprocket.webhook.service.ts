@@ -165,8 +165,10 @@ export class ShiprocketWebhookService {
         const returnInTransit =
           currentStatusId === 25 ||
           statusId === 25 ||
+          currentStatusId === 48 ||
+          statusId === 48 ||
           (statusId === 18 && isReverseEvent) ||
-          /RETURN\s+IN\s*TRANSIT|IN\s*TRANSIT/i.test(normalizedStatus);
+          /RETURN\s+(?:IN\s*TRANSIT|OUT\s+FOR\s+DELIVERY)|IN\s*TRANSIT/i.test(normalizedStatus);
         const returnPickupScheduled =
           [23, 28, 47].includes(currentStatusId) ||
           [23, 28, 47].includes(statusId) ||
