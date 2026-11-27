@@ -1221,11 +1221,13 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
 
     if (
       status === OrderStatus.DELIVERED ||
+      status === OrderStatus.RETURNED ||
       order.status === OrderStatus.DELIVERED ||
+      order.status === OrderStatus.RETURNED ||
       Boolean(order.shipment?.deliveredAt)
     ) {
       throw new Error(
-        "Delivery status is controlled by Shiprocket tracking and cannot be changed manually."
+        "Delivered and returned-to-origin statuses are controlled by Shiprocket tracking and cannot be changed manually."
       );
     }
 
