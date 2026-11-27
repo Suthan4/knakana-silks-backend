@@ -105,7 +105,8 @@ export interface IReturnRepository {
   // Return shipment operations
   createReturnShipment(data: {
     shiprocketOrderId: string;
-    awb: string;
+    shiprocketShipmentId?: string;
+    awb?: string | null;
     courierName: string;
     pickupDate: Date;
     trackingUrl?: string;
