@@ -39,7 +39,12 @@ The manual admin mark-as-delivered endpoint and button have been removed. Delive
 
 ## Database deployment
 
-The dev branch adds the migration `20261127193000_shiprocket_tracking_and_return_sync`. Deploy it to the **dev database only** after generating the Prisma client:
+The dev branch adds two migrations:
+
+- `20261127193000_shiprocket_tracking_and_return_sync` — persist forward and reverse shipment identifiers and status.
+- `20261127203000_add_returned_order_status` — add the `RETURNED` order status for completed RTO.
+
+Deploy them to the **dev database only** after generating the Prisma client:
 
 ```bash
 bunx prisma generate
