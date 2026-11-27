@@ -304,14 +304,38 @@ export class ShiprocketService {
   }
 
   async schedulePickup(shipmentIds: number[]) {
+    if (!Array.isArray(shipmentIds) || shipmentIds.length !== 1) {
+      throw new Error("Shiprocket pickup must be scheduled for exactly one shipment at a time.");
+    }
+
+    const shipmentId = Number(shipmentIds[0]);
+    if (!Number.isSafeInteger(shipmentId) || shipmentId <= 0) {
+      throw new Error("A valid Shiprocket shipment ID is required to schedule pickup.");
+    }
+
     try {
       const response = await this.api.post("/courier/generate/pickup", {
-        shipment_id: shipmentIds,
+        shipment_id: [shipmentId],
       });
       return response.data;
     } catch (error: any) {
-      console.error("Pickup scheduling failed:", error.response?.data || error);
-      throw new Error("Failed to schedule pickup");
+      const details = error.response?.data;
+      console.error("Shiprocket pickup scheduling failed:", {
+        status: error.response?.status,
+        data: details,
+      });
+
+      const providerMessage =
+        details?.message ||
+        details?.errors ||
+        details?.error ||
+        error.message;
+
+      throw new Error(
+        typeof providerMessage === "string"
+          ? `Shiprocket pickup failed: ${providerMessage}`
+          : `Shiprocket pickup failed: ${JSON.stringify(providerMessage)}`
+      );
     }
   }
 
