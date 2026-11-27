@@ -375,7 +375,9 @@ console.log("order",order);
     // Older shipment rows were created without persisting Shiprocket's shipment_id.
     // Recover it from Shiprocket order details so those orders can still be picked up.
     let shiprocketShipmentId = Number(shipment.shiprocketShipmentId);
-    let awbCode = shipment.awbCode;
+    // Normalize Prisma's nullable value to the optional string used by the
+    // shipping notification and Shiprocket response flow.
+    let awbCode: string | undefined = shipment.awbCode ?? undefined;
 
     if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0 || !awbCode) {
       const shiprocketOrderDetails = await this.shiprocketRepository.getOrderDetails(
@@ -434,7 +436,7 @@ console.log("order",order);
         email: order.user.email,
         firstName: order.user.firstName,
         orderNumber: order.orderNumber,
-        trackingNumber: shipment.trackingNumber,
+        trackingNumber: awbCode ?? shipment.trackingNumber ?? undefined,
         courierName: shipment.courierName || undefined,
         estimatedDelivery: shipment.estimatedDelivery || undefined,
       });
