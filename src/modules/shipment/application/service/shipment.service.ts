@@ -414,11 +414,10 @@ console.log("order",order);
       shiprocketShipmentId,
     ]);
 
-    if (
-      pickupResponse?.pickup_status !== 1 &&
-      !pickupResponse?.response?.pickup_token_number
-    ) {
-      throw new Error("Shiprocket did not confirm the pickup request. Check Shiprocket before retrying.");
+    if (Number(pickupResponse?.pickup_status) !== 1) {
+      throw new Error(
+        "Shiprocket did not confirm the pickup request. Check the Shiprocket shipment status before retrying."
+      );
     }
 
     await this.shipmentRepository.update(shipment.id, {
