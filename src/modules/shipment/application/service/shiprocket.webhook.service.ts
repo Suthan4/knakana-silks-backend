@@ -147,19 +147,30 @@ export class ShiprocketWebhookService {
           }
         );
 
+        // Shiprocket exposes a separate return lifecycle in current_status_id:
+        // 23 Return Pickup Queued, 25 Return In Transit, 26 Return Delivered,
+        // 28 Return Pickup Generated, 32 Return Picked Up, 47/48 return OOD/OFD.
         const returnDelivered =
-          statusId === 7 ||
+          currentStatusId === 26 ||
           statusId === 26 ||
+          statusId === 7 ||
           /RETURN\s+DELIVERED|DELIVERED\s+TO\s+(?:SELLER|WAREHOUSE)/i.test(normalizedStatus) ||
           (isReverseEvent && normalizedStatus === "DELIVERED");
         const returnPickedUp =
-          statusId === 42 ||
+          currentStatusId === 32 ||
+          statusId === 32 ||
           currentStatusId === 42 ||
+          statusId === 42 ||
           /RETURN\s+PICK(?:ED)?\s*UP|PICKED\s*UP/i.test(normalizedStatus);
         const returnInTransit =
-          statusId === 18 ||
+          currentStatusId === 25 ||
           statusId === 25 ||
-          /IN\s*TRANSIT/i.test(normalizedStatus);
+          (statusId === 18 && isReverseEvent) ||
+          /RETURN\s+IN\s*TRANSIT|IN\s*TRANSIT/i.test(normalizedStatus);
+        const returnPickupScheduled =
+          [23, 28, 47].includes(currentStatusId) ||
+          [23, 28, 47].includes(statusId) ||
+          /RETURN\s+PICKUP\s+(?:QUEUED|GENERATED)|RETURN\s+OUT\s+FOR\s+PICKUP/i.test(normalizedStatus);
 
         let nextReturnStatus: ReturnStatus | null = null;
         if (returnDelivered) {
@@ -168,6 +179,8 @@ export class ShiprocketWebhookService {
           nextReturnStatus = ReturnStatus.PICKED_UP;
         } else if (returnInTransit) {
           nextReturnStatus = ReturnStatus.IN_TRANSIT;
+        } else if (returnPickupScheduled) {
+          nextReturnStatus = ReturnStatus.PICKUP_SCHEDULED;
         }
 
         const terminalReturnStatuses: ReturnStatus[] = [
