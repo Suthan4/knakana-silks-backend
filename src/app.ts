@@ -85,11 +85,13 @@ app.options("*", cors(corsOptions));
   /* --------------------------------------------------
    * Rate Limiter (EXCLUDE uploads)
    * -------------------------------------------------- */
-  app.use("/api",globalApiLimiter)
-
   app.use("/api", (req, res, next) => {
-    // 🚫 DO NOT rate-limit file uploads (multer needs raw stream)
-    if (req.path.startsWith("/upload")) {
+    // Shiprocket callbacks use a shared provider token and can be retried.
+    // Exempt this single callback path from the user API rate limit.
+    if (
+      req.path === "/webhooks/delivery-status" ||
+      req.path.startsWith("/upload")
+    ) {
       return next();
     }
     return globalApiLimiter(req, res, next);
