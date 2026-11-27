@@ -73,6 +73,11 @@ export class ShiprocketWebhookService {
       shipment_status_id !== "";
     const statusId = Number(shipment_status_id);
     const currentStatusId = Number(current_status_id);
+    const isReverseEvent =
+      is_return === true ||
+      is_return === 1 ||
+      String(is_return).toLowerCase() === "true" ||
+      String(is_return) === "1";
 
     console.info("Shiprocket delivery event received", {
       awb: awbCode || undefined,
@@ -116,7 +121,7 @@ export class ShiprocketWebhookService {
       });
 
       const returnRequest = matchingReturns[0];
-      if (!returnRequest && String(is_return) === "1") {
+      if (!returnRequest && isReverseEvent) {
         return {
           success: true,
           message: "Reverse shipment event acknowledged; no matching local return was found.",
@@ -145,7 +150,7 @@ export class ShiprocketWebhookService {
           statusId === 7 ||
           statusId === 26 ||
           /RETURN\s+DELIVERED|DELIVERED\s+TO\s+(?:SELLER|WAREHOUSE)/i.test(normalizedStatus) ||
-          (String(is_return) === "1" && normalizedStatus === "DELIVERED");
+          (isReverseEvent && normalizedStatus === "DELIVERED");
         const returnPickedUp =
           statusId === 42 ||
           currentStatusId === 42 ||
