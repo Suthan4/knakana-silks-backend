@@ -372,14 +372,41 @@ console.log("order",order);
       throw new Error("Shipment not found. Please create the shipment in Shiprocket first.");
     }
 
-    const shiprocketShipmentId = Number(shipment.shiprocketShipmentId);
-    if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0) {
-      throw new Error(
-        "Shiprocket shipment ID is missing. Recreate the Shiprocket shipment before scheduling pickup."
+    // Older shipment rows were created without persisting Shiprocket's shipment_id.
+    // Recover it from Shiprocket order details so those orders can still be picked up.
+    let shiprocketShipmentId = Number(shipment.shiprocketShipmentId);
+    let awbCode = shipment.awbCode;
+
+    if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0 || !awbCode) {
+      const shiprocketOrderDetails = await this.shiprocketRepository.getOrderDetails(
+        shipment.shiprocketOrderId
       );
+      const remoteShipment = shiprocketOrderDetails?.data?.shipments?.find(
+        (item) => Number.isSafeInteger(Number(item.id)) && Number(item.id) > 0
+      );
+
+      if (!remoteShipment) {
+        throw new Error(
+          "Shiprocket could not find the shipment for this order. Verify the order in Shiprocket before retrying."
+        );
+      }
+
+      shiprocketShipmentId = Number(remoteShipment.id);
+      awbCode = awbCode || remoteShipment.awb || undefined;
+
+      await this.shipmentRepository.update(shipment.id, {
+        shiprocketShipmentId: String(shiprocketShipmentId),
+        ...(awbCode
+          ? { awbCode, trackingNumber: awbCode }
+          : {}),
+      });
     }
 
-    if (!shipment.awbCode) {
+    if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0) {
+      throw new Error("A valid Shiprocket shipment ID is required to schedule pickup.");
+    }
+
+    if (!awbCode) {
       throw new Error("Please assign a courier and generate the AWB before scheduling pickup.");
     }
 
