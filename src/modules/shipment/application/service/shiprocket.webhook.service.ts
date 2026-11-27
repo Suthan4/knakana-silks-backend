@@ -41,6 +41,7 @@ export class ShiprocketWebhookService {
     const {
       awb,
       order_id,
+      sr_order_id,
       channel_order_id,
       shipment_id,
       current_status,
@@ -52,13 +53,14 @@ export class ShiprocketWebhookService {
     console.info("Shiprocket delivery event received", {
       awb,
       order_id,
+      sr_order_id,
       shipment_id,
       current_status,
       shipment_status,
       shipment_status_id,
     });
 
-    if (!awb && !order_id && !shipment_id && !channel_order_id) {
+    if (!awb && !order_id && !sr_order_id && !shipment_id && !channel_order_id) {
       throw new Error("Webhook is missing AWB, order ID, and shipment ID.");
     }
 
@@ -76,14 +78,14 @@ export class ShiprocketWebhookService {
       );
     }
 
-    if (!shipment && order_id !== undefined && order_id !== null) {
+    if (!shipment && sr_order_id !== undefined && sr_order_id !== null) {
       shipment = await this.shipmentRepository.findByShiprocketOrderId(
-        String(order_id)
+        String(sr_order_id)
       );
     }
 
-    // channel_order_id is the merchant's order number in Shiprocket. Retain
-    // order_id as a final compatibility fallback for older payload formats.
+    // Shiprocket's order_id is the merchant/channel order ID; sr_order_id is
+    // Shiprocket's internal order ID. The channel ID maps to our order number.
     const channelOrderNumber = channel_order_id ?? order_id;
     if (!shipment && channelOrderNumber !== undefined && channelOrderNumber !== null) {
       const orderByNumber = await this.orderRepository.findByOrderNumber(
@@ -98,6 +100,7 @@ export class ShiprocketWebhookService {
       console.warn("Shiprocket event did not match a local shipment", {
         awb,
         order_id,
+        sr_order_id,
         shipment_id,
         channel_order_id,
       });
@@ -253,7 +256,7 @@ export class ShiprocketWebhookService {
 
     // Shiprocket commonly sends "DD MM YYYY HH:mm:ss" in IST.
     const dmy = raw.match(
-      /^(\\d{1,2})\\s+(\\d{1,2})\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?$/
+      /^(\d{1,2})\s+(\d{1,2})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
     );
     if (dmy) {
       const [, day, month, year, hour = "0", minute = "0", second = "0"] = dmy;
