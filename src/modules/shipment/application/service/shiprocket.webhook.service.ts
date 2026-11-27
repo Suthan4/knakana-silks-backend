@@ -16,8 +16,9 @@ import { IReturnRepository } from "@/modules/return/infrastructure/interface/Ire
  * Shiprocket Status → Our OrderStatus mapping:
  * - "SHIPPED" → SHIPPED
  * - "OUT FOR DELIVERY" / "OUT_FOR_DELIVERY" → OUT_FOR_DELIVERY  
- * - "DELIVERED" → DELIVERED
- * - "RTO" / "CANCELLED" → CANCELLED (with refund)
+ * - "DELIVERED" → DELIVERED (buyer delivery only)
+ * - RTO events are stored as provider tracking state, not buyer delivery or cancellation.
+ * - Reverse-shipment events update the corresponding Return / ReturnShipment records.
  */
 
 @injectable()
@@ -440,33 +441,6 @@ export class ShiprocketWebhookService {
     return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   }
 
-  /**
-   * ✅ Map Shiprocket status to our OrderStatus enum
-   */
-  private mapShiprocketStatus(shiprocketStatus: string): OrderStatus | null {
-    const statusMap: Record<string, OrderStatus> = {
-      // Shipped
-      SHIPPED: OrderStatus.SHIPPED,
-      PICKED_UP: OrderStatus.SHIPPED,
-      IN_TRANSIT: OrderStatus.SHIPPED,
-
-      // Out for Delivery
-      "OUT FOR DELIVERY": OrderStatus.OUT_FOR_DELIVERY,
-      OUT_FOR_DELIVERY: OrderStatus.OUT_FOR_DELIVERY,
-      "OUT-FOR-DELIVERY": OrderStatus.OUT_FOR_DELIVERY,
-
-      // Delivered
-      DELIVERED: OrderStatus.DELIVERED,
-
-      // A real provider cancellation is not the same as RTO.
-      CANCELLED: OrderStatus.CANCELLED,
-      CANCELED: OrderStatus.CANCELLED,
-      LOST: OrderStatus.CANCELLED,
-    };
-
-    const normalized = shiprocketStatus?.toUpperCase().replace(/[_\s-]/g, "_");
-    return statusMap[normalized] || statusMap[shiprocketStatus?.toUpperCase()] || null;
-  }
 
   /**
    * Email template: Out for Delivery
