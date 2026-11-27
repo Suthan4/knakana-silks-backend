@@ -484,46 +484,6 @@ console.log("order",order);
   }
 
   /**
-   * Mark order as delivered
-   */
-  async markAsDelivered(orderId: string) {
-    const order = await this.orderRepository.findById(BigInt(orderId));
-
-    if (!order) {
-      throw new Error("Order not found");
-    }
-
-    const shipment = await this.shipmentRepository.findByOrderId(order.id);
-
-    if (!shipment) {
-      throw new Error("Shipment not found");
-    }
-
-    await this.shipmentRepository.update(shipment.id, {
-      deliveredAt: new Date(),
-    });
-
-    await this.orderRepository.update(order.id, {
-      status: OrderStatus.DELIVERED,
-    });
-
-    // Send delivery confirmation email
-    try {
-      await this.emailService.sendDeliveryConfirmation({
-        email: order.user.email,
-        firstName: order.user.firstName,
-        orderNumber: order.orderNumber,
-      });
-    } catch (error) {
-      console.error("Failed to send delivery email:", error);
-    }
-
-    console.log(`✅ Order ${order.orderNumber} marked as delivered`);
-
-    return this.orderRepository.findById(order.id);
-  }
-
-  /**
    * Generate shipping label
    */
   async generateLabel(orderId: string) {
