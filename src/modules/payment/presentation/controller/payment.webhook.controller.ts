@@ -195,10 +195,8 @@ export class PaymentWebhookController {
       return;
     }
 
-    await this.paymentRepository.update(payment.id, {
-      refundAmount: new Decimal(Number(data.amount || 0) / 100),
-    });
-
+    // Do not mark the payment or refund as completed at refund.created.
+    // Razorpay can still be processing the refund at this point.
     console.log("Refund created and awaiting processing:", data.id);
   }
 
@@ -217,7 +215,17 @@ export class PaymentWebhookController {
 
     await this.paymentRepository.update(payment.id, {
       status: PaymentStatus.REFUNDED,
+      refundAmount: new Decimal(Number(data.amount || 0) / 100),
     });
+
+    // Full cancellation refunds can move a previously cancelled order into
+    // REFUNDED. Item returns keep the original delivered order status.
+    const refundedOrder = await this.orderRepository.findById(payment.orderId);
+    if (refundedOrder?.status === OrderStatus.CANCELLED) {
+      await this.orderRepository.update(payment.orderId, {
+        status: OrderStatus.REFUNDED,
+      });
+    }
 
     const matchingReturn = await this.prisma.return.findFirst({
       where: { razorpayRefundId: data.id },
