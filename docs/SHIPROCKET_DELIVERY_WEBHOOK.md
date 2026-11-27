@@ -25,7 +25,7 @@ Shiprocket sends the configured security token in the `x-api-key` request header
 - Shipment status ID `7` (Delivered) updates the local order to `DELIVERED` and sets `Shipment.deliveredAt`.
 - Delivery confirmation email is sent only when the order changes into the delivered state.
 - Repeated webhook deliveries do not resend the delivery email.
-- RTO Initiated (shipment status ID `9`) and RTO Delivered (ID `10`) are stored as provider tracking states, not as buyer delivery or a customer cancellation.
+- RTO Initiated (shipment status ID `9`) is stored as provider tracking state. Once RTO Delivered (shipment status ID `10`, or order status ID `16`) is confirmed, the order becomes `RETURNED`—never buyer `DELIVERED` or customer `CANCELLED`. No refund is issued automatically for RTO.
 - Partial Delivered (ID `23`) is not treated as successful customer delivery.
 - Reverse shipment events update the linked return shipment and return record separately:
   - Return Pickup Queued / Return Pickup Generated (`23` / `28`) → `PICKUP_SCHEDULED`
