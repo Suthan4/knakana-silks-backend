@@ -1221,7 +1221,8 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
 
     if (
       status === OrderStatus.DELIVERED ||
-      (order.shipment?.deliveredAt && status !== OrderStatus.DELIVERED)
+      order.status === OrderStatus.DELIVERED ||
+      Boolean(order.shipment?.deliveredAt)
     ) {
       throw new Error(
         "Delivery status is controlled by Shiprocket tracking and cannot be changed manually."
