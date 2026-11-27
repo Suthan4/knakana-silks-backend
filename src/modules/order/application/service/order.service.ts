@@ -966,13 +966,17 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       throw new Error("Delivered orders cannot be cancelled. Please raise a return request instead");
     }
     if (
+      order.shipment?.shippedAt ||
       order.status === OrderStatus.SHIPPED ||
       order.status === OrderStatus.OUT_FOR_DELIVERY
     ) {
       throw new Error("Order has been shipped and cannot be cancelled. Please use the return policy after delivery.");
     }
 
-    if (![OrderStatus.PENDING, OrderStatus.PROCESSING].includes(order.status)) {
+    if (
+      order.status !== OrderStatus.PENDING &&
+      order.status !== OrderStatus.PROCESSING
+    ) {
       throw new Error("This order is no longer eligible for cancellation.");
     }
 
@@ -1091,6 +1095,7 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       return { canCancel: false, reason: "Please raise return request for delivered orders" };
     }
     if (
+      order.shipment?.shippedAt ||
       order.status === OrderStatus.SHIPPED ||
       order.status === OrderStatus.OUT_FOR_DELIVERY
     ) {
@@ -1100,7 +1105,10 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       };
     }
 
-    if (![OrderStatus.PENDING, OrderStatus.PROCESSING].includes(order.status)) {
+    if (
+      order.status !== OrderStatus.PENDING &&
+      order.status !== OrderStatus.PROCESSING
+    ) {
       return {
         canCancel: false,
         reason: "This order is no longer eligible for cancellation.",
