@@ -8,7 +8,9 @@ import { OrderStatus } from "@/generated/prisma/enums.js";
  * ✅ Shiprocket Webhook Service
  * Handles automatic status synchronization from Shiprocket to our database
  * 
- * Webhook URL: POST /api/webhooks/shiprocket (no auth required)
+ * Webhook URL: POST /api/webhooks/delivery-status
+ * Configure the Shiprocket webhook security token to match SHIPROCKET_WEBHOOK_SECRET.
+ * Shiprocket sends this value in the x-api-key header.
  * 
  * Shiprocket Status → Our OrderStatus mapping:
  * - "SHIPPED" → SHIPPED
@@ -36,87 +38,140 @@ export class ShiprocketWebhookService {
    * - Cancelled
    */
   async processWebhook(payload: any) {
-    console.log("📦 Shiprocket webhook received:", JSON.stringify(payload, null, 2));
+    const {
+      awb,
+      order_id,
+      channel_order_id,
+      shipment_id,
+      current_status,
+      shipment_status,
+      shipment_status_id,
+      delivered_date,
+    } = payload ?? {};
 
-    try {
-      // Extract data from webhook
-      const {
+    console.info("Shiprocket delivery event received", {
+      awb,
+      order_id,
+      shipment_id,
+      current_status,
+      shipment_status,
+      shipment_status_id,
+    });
+
+    if (!awb && !order_id && !shipment_id && !channel_order_id) {
+      throw new Error("Webhook is missing AWB, order ID, and shipment ID.");
+    }
+
+    // Match using the exact Shiprocket identifier columns. AWB lookup also
+    // checks both our trackingNumber and awbCode for older shipment records.
+    let shipment = null;
+
+    if (typeof awb === "string" && awb.trim()) {
+      shipment = await this.shipmentRepository.findByTrackingNumber(awb.trim());
+    }
+
+    if (!shipment && shipment_id !== undefined && shipment_id !== null) {
+      shipment = await this.shipmentRepository.findByShiprocketShipmentId(
+        String(shipment_id)
+      );
+    }
+
+    if (!shipment && order_id !== undefined && order_id !== null) {
+      shipment = await this.shipmentRepository.findByShiprocketOrderId(
+        String(order_id)
+      );
+    }
+
+    // channel_order_id is the merchant's order number in Shiprocket. Retain
+    // order_id as a final compatibility fallback for older payload formats.
+    const channelOrderNumber = channel_order_id ?? order_id;
+    if (!shipment && channelOrderNumber !== undefined && channelOrderNumber !== null) {
+      const orderByNumber = await this.orderRepository.findByOrderNumber(
+        String(channelOrderNumber)
+      );
+      if (orderByNumber) {
+        shipment = await this.shipmentRepository.findByOrderId(orderByNumber.id);
+      }
+    }
+
+    if (!shipment) {
+      console.warn("Shiprocket event did not match a local shipment", {
         awb,
         order_id,
         shipment_id,
-        current_status,
-        delivered_date,
-      } = payload;
-
-      if (!awb && !order_id && !shipment_id) {
-        throw new Error("Missing required identifiers (awb, order_id, or shipment_id)");
-      }
-
-      // ✅ Find shipment by AWB, Shiprocket Order ID, or Order Number
-      let shipment = null;
-
-      if (awb) {
-        shipment = await this.shipmentRepository.findByTrackingNumber(awb);
-      }
-
-      if (!shipment && shipment_id) {
-        shipment = await this.shipmentRepository.findByShiprocketOrderId(
-          shipment_id.toString()
-        );
-      }
-
-      if (!shipment && order_id) {
-        // Try to find order by order number
-        const order = await this.orderRepository.findByOrderNumber(order_id.toString());
-        if (order) {
-          shipment = await this.shipmentRepository.findByOrderId(order.id);
-        }
-      }
-
-      if (!shipment) {
-        console.warn(`⚠️ Shipment not found for webhook: ${JSON.stringify({ awb, order_id, shipment_id })}`);
-        return {
-          success: false,
-          message: "Shipment not found",
-        };
-      }
-
-      // ✅ Get order
-      const order = await this.orderRepository.findById(shipment.orderId);
-      if (!order) {
-        throw new Error("Order not found");
-      }
-
-      // ✅ Map Shiprocket status to our OrderStatus
-      const newStatus = this.mapShiprocketStatus(current_status);
-
-      if (!newStatus) {
-        console.warn(`⚠️ Unknown Shiprocket status: ${current_status}`);
-        return {
-          success: false,
-          message: `Unknown status: ${current_status}`,
-        };
-      }
-
-      console.log(`✅ Updating order ${order.orderNumber}: ${order.status} → ${newStatus}`);
-
-      // ✅ Update order status
-      await this.orderRepository.update(order.id, {
-        status: newStatus,
+        channel_order_id,
       });
+      return { success: true, message: "No matching shipment; event acknowledged." };
+    }
 
-      // ✅ Update shipment details
-      const shipmentUpdate: any = {};
+    const order = await this.orderRepository.findById(shipment.orderId);
+    if (!order) {
+      throw new Error("Order for Shiprocket shipment was not found.");
+    }
 
-      if (newStatus === OrderStatus.DELIVERED && delivered_date) {
-        shipmentUpdate.deliveredAt = new Date(delivered_date);
-      }
+    const shipmentStatusId = Number(shipment_status_id);
+    const statusText =
+      (typeof current_status === "string" && current_status.trim()
+        ? current_status
+        : shipment_status) || "";
 
-      if (Object.keys(shipmentUpdate).length > 0) {
-        await this.shipmentRepository.update(shipment.id, shipmentUpdate);
-      }
+    // Shiprocket's shipment_status_id 7 is the canonical Delivered code.
+    // Do not treat RTO Delivered (10) or Partial Delivered (23) as customer
+    // delivery. Exact string matching is retained as a fallback for payloads
+    // that omit shipment_status_id.
+    const newStatus =
+      shipmentStatusId === 7
+        ? OrderStatus.DELIVERED
+        : this.mapShiprocketStatus(statusText);
 
-      // ✅ Send email notifications
+    if (!newStatus) {
+      console.info("Ignoring unsupported Shiprocket status", { statusText, shipmentStatusId });
+      return { success: true, message: `Status ignored: ${statusText || "unknown"}` };
+    }
+
+    const oldStatus = order.status;
+
+    // Delivery is terminal for this forward-shipment workflow. Late in-transit
+    // events must never move a delivered order backwards.
+    if (oldStatus === OrderStatus.DELIVERED && newStatus !== OrderStatus.DELIVERED) {
+      return {
+        success: true,
+        message: "Order is already delivered; stale tracking event ignored.",
+        data: { orderNumber: order.orderNumber, oldStatus, newStatus: oldStatus },
+      };
+    }
+
+    const statusChanged = oldStatus !== newStatus;
+
+    if (statusChanged) {
+      await this.orderRepository.update(order.id, { status: newStatus });
+    }
+
+    const shipmentUpdate: {
+      awbCode?: string;
+      trackingNumber?: string;
+      deliveredAt?: Date;
+    } = {};
+
+    if (typeof awb === "string" && awb.trim() && !shipment.awbCode) {
+      shipmentUpdate.awbCode = awb.trim();
+      shipmentUpdate.trackingNumber = awb.trim();
+    }
+
+    // Even when Shiprocket omits delivered_date (it often sends an empty
+    // string), a confirmed Delivered event must set deliveredAt so the admin
+    // workflow and delivery timestamp remain consistent.
+    if (newStatus === OrderStatus.DELIVERED && !shipment.deliveredAt) {
+      shipmentUpdate.deliveredAt = this.parseDeliveredDate(delivered_date);
+    }
+
+    if (Object.keys(shipmentUpdate).length > 0) {
+      await this.shipmentRepository.update(shipment.id, shipmentUpdate);
+    }
+
+    // Webhooks are retried by providers. Send customer notifications only on
+    // an actual state transition, not for duplicate deliveries of the event.
+    if (statusChanged) {
       try {
         switch (newStatus) {
           case OrderStatus.SHIPPED:
@@ -124,7 +179,7 @@ export class ShiprocketWebhookService {
               email: order.user.email,
               firstName: order.user.firstName,
               orderNumber: order.orderNumber,
-              trackingNumber: shipment.awbCode ?? undefined,
+              trackingNumber: shipment.awbCode ?? (typeof awb === "string" ? awb : undefined),
               courierName: shipment.courierName ?? undefined,
             });
             break;
@@ -136,7 +191,7 @@ export class ShiprocketWebhookService {
               html: this.getOutForDeliveryEmailTemplate(
                 order.user.firstName,
                 order.orderNumber,
-                shipment.awbCode || "N/A"
+                shipment.awbCode || (typeof awb === "string" ? awb : "N/A")
               ),
             });
             break;
@@ -162,25 +217,60 @@ export class ShiprocketWebhookService {
             break;
         }
       } catch (error) {
-        console.error("Failed to send email notification:", error);
-        // Don't fail the webhook due to email error
+        console.error("Failed to send Shiprocket status email:", error);
+        // Email failures must not cause Shiprocket to retry a successful status update.
       }
-
-      console.log(`✅ Webhook processed successfully for order ${order.orderNumber}`);
-
-      return {
-        success: true,
-        message: "Webhook processed successfully",
-        data: {
-          orderNumber: order.orderNumber,
-          oldStatus: order.status,
-          newStatus,
-        },
-      };
-    } catch (error: any) {
-      console.error("❌ Webhook processing failed:", error);
-      throw error;
     }
+
+    console.info("Shiprocket status synchronized", {
+      orderNumber: order.orderNumber,
+      oldStatus,
+      newStatus,
+      statusChanged,
+    });
+
+    return {
+      success: true,
+      message: "Shiprocket status synchronized.",
+      data: {
+        orderNumber: order.orderNumber,
+        oldStatus,
+        newStatus,
+        deliveredAt:
+          newStatus === OrderStatus.DELIVERED
+            ? (shipmentUpdate.deliveredAt ?? shipment.deliveredAt)
+            : undefined,
+      },
+    };
+  }
+
+  private parseDeliveredDate(value: unknown): Date {
+    if (typeof value !== "string" || !value.trim() || value.trim().toUpperCase() === "NA") {
+      return new Date();
+    }
+
+    const raw = value.trim();
+
+    // Shiprocket commonly sends "DD MM YYYY HH:mm:ss" in IST.
+    const dmy = raw.match(
+      /^(\\d{1,2})\\s+(\\d{1,2})\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?$/
+    );
+    if (dmy) {
+      const [, day, month, year, hour = "0", minute = "0", second = "0"] = dmy;
+      return new Date(
+        Date.UTC(
+          Number(year),
+          Number(month) - 1,
+          Number(day),
+          Number(hour),
+          Number(minute),
+          Number(second)
+        ) - 330 * 60 * 1000
+      );
+    }
+
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   }
 
   /**
@@ -190,6 +280,7 @@ export class ShiprocketWebhookService {
     const statusMap: Record<string, OrderStatus> = {
       // Shipped
       SHIPPED: OrderStatus.SHIPPED,
+      PICKED_UP: OrderStatus.SHIPPED,
       IN_TRANSIT: OrderStatus.SHIPPED,
 
       // Out for Delivery
