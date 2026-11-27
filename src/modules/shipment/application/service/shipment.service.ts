@@ -246,10 +246,18 @@ console.log("order",order);
       shiprocketPayload
     );
 
+    if (!shiprocketOrder.order_id || !shiprocketOrder.shipment_id) {
+      throw new Error(
+        "Shiprocket did not return both order_id and shipment_id. Please verify the Shiprocket order before continuing."
+      );
+    }
+
     const shipment = await this.shipmentRepository.create({
       orderId: order.id,
-      shiprocketOrderId: shiprocketOrder.order_id?.toString(),
-      trackingNumber: shiprocketOrder.shipment_id?.toString(),
+      shiprocketOrderId: String(shiprocketOrder.order_id),
+      shiprocketShipmentId: String(shiprocketOrder.shipment_id),
+      // Preserve the existing tracking fallback until the AWB is assigned.
+      trackingNumber: String(shiprocketOrder.shipment_id),
     });
 
     console.log(
@@ -361,16 +369,30 @@ console.log("order",order);
     const shipment = await this.shipmentRepository.findByOrderId(order.id);
 
     if (!shipment || !shipment.shiprocketOrderId) {
-      throw new Error("Shipment not found");
+      throw new Error("Shipment not found. Please create the shipment in Shiprocket first.");
     }
 
-    if (!shipment.trackingNumber) {
-      throw new Error("Please assign courier and generate AWB first");
+    const shiprocketShipmentId = Number(shipment.shiprocketShipmentId);
+    if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0) {
+      throw new Error(
+        "Shiprocket shipment ID is missing. Recreate the Shiprocket shipment before scheduling pickup."
+      );
+    }
+
+    if (!shipment.awbCode) {
+      throw new Error("Please assign a courier and generate the AWB before scheduling pickup.");
     }
 
     const pickupResponse = await this.shiprocketRepository.schedulePickup([
-      parseInt(shipment.shiprocketOrderId),
+      shiprocketShipmentId,
     ]);
+
+    if (
+      pickupResponse?.pickup_status !== 1 &&
+      !pickupResponse?.response?.pickup_token_number
+    ) {
+      throw new Error("Shiprocket did not confirm the pickup request. Check Shiprocket before retrying.");
+    }
 
     await this.shipmentRepository.update(shipment.id, {
       shippedAt: new Date(),
@@ -486,7 +508,11 @@ console.log("order",order);
     const shipment = await this.shipmentRepository.findByOrderId(order.id);
 
     if (!shipment || !shipment.shiprocketShipmentId) {
-      throw new Error("Shipment not found");
+      throw new Error("Shiprocket shipment ID not found. Please recreate the shipment.");
+    }
+
+    if (!shipment.awbCode) {
+      throw new Error("Generate the AWB before requesting the shipping label.");
     }
 
     const labelResponse = await this.shiprocketRepository.generateLabel([
@@ -516,8 +542,21 @@ console.log("order",order);
       throw new Error("Shiprocket order id missing for this shipment");
     }
 
+    if (!shipment.awbCode) {
+      throw new Error("Generate the AWB before requesting the manifest.");
+    }
+
+    if (!shipment.shippedAt) {
+      throw new Error("Schedule the Shiprocket pickup before generating the manifest.");
+    }
+
+    const shiprocketShipmentId = Number(shipment.shiprocketShipmentId);
+    if (!Number.isSafeInteger(shiprocketShipmentId) || shiprocketShipmentId <= 0) {
+      throw new Error("Invalid Shiprocket shipment ID. Please recreate the shipment.");
+    }
+
     const manifestResponse = await this.shiprocketRepository.generateManifest([
-      parseInt(shipment.shiprocketShipmentId),
+      shiprocketShipmentId,
     ]);
 
     // Fast path: Shiprocket returned the PDF url immediately.
