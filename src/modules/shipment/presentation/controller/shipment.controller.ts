@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { ShipmentService } from "../../application/service/shipment.service.js";
+import { ShiprocketWebhookService } from "../../application/service/shiprocket.webhook.service.js";
 import { z } from "zod";
-import { ShiprocketService } from "../../infrastructure/services/shiprocket.service.js";
 
 const CreateShipmentDTOSchema = z.object({
   orderId: z.string(),
@@ -26,7 +27,8 @@ const CheckServiceabilityDTOSchema = z.object({
 export class ShipmentController {
   constructor(
     @inject(ShipmentService) private shipmentService: ShipmentService,
-    @inject(ShiprocketService) private shiprocketService: ShiprocketService
+    @inject(ShiprocketWebhookService)
+    private shiprocketWebhookService: ShiprocketWebhookService
   ) {}
 
   /**
@@ -178,28 +180,44 @@ export class ShipmentController {
   }
 
   /**
-   * Mark as delivered (Admin)
+   * Receive authenticated delivery tracking events from Shiprocket.
+   * Configure the provider's webhook URL as /api/webhooks/delivery-status.
    */
-  async markAsDelivered(req: Request, res: Response) {
-    try {
-      const { orderId } = req.body;
+  async receiveDeliveryStatusWebhook(req: Request, res: Response) {
+    const expectedSecret = process.env.SHIPROCKET_WEBHOOK_SECRET?.trim();
+    const suppliedSecret = req.get("x-api-key")?.trim() ?? "";
 
-      if (!orderId) {
-        res
-          .status(400)
-          .json({ success: false, message: "Order ID is required" });
-        return;
-      }
-
-      const order = await this.shipmentService.markAsDelivered(orderId);
-
-      res.json({
-        success: true,
-        message: "Order marked as delivered successfully",
-        data: order,
+    if (!expectedSecret) {
+      console.error("SHIPROCKET_WEBHOOK_SECRET is not configured");
+      res.status(503).json({
+        success: false,
+        message: "Delivery webhook is not configured.",
       });
+      return;
+    }
+
+    const expected = Buffer.from(expectedSecret, "utf8");
+    const supplied = Buffer.from(suppliedSecret, "utf8");
+    if (
+      supplied.length !== expected.length ||
+      !timingSafeEqual(supplied, expected)
+    ) {
+      res.status(401).json({
+        success: false,
+        message: "Invalid webhook authentication.",
+      });
+      return;
+    }
+
+    try {
+      const result = await this.shiprocketWebhookService.processWebhook(req.body);
+      res.status(200).json(result);
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      console.error("Delivery webhook processing failed:", error);
+      res.status(500).json({
+        success: false,
+        message: "Unable to process delivery status event.",
+      });
     }
   }
 
