@@ -63,10 +63,14 @@ export class ShiprocketWebhookService {
         ? String(shipment_id)
         : "";
     const statusText =
-      (typeof current_status === "string" && current_status.trim()
-        ? current_status
-        : shipment_status) || "";
+      (typeof shipment_status === "string" && shipment_status.trim()
+        ? shipment_status
+        : current_status) || "";
     const normalizedStatus = String(statusText).trim().toUpperCase();
+    const hasShipmentStatusId =
+      shipment_status_id !== undefined &&
+      shipment_status_id !== null &&
+      shipment_status_id !== "";
     const statusId = Number(shipment_status_id);
     const currentStatusId = Number(current_status_id);
 
@@ -112,6 +116,13 @@ export class ShiprocketWebhookService {
       });
 
       const returnRequest = matchingReturns[0];
+      if (!returnRequest && String(is_return) === "1") {
+        return {
+          success: true,
+          message: "Reverse shipment event acknowledged; no matching local return was found.",
+        };
+      }
+
       if (returnRequest?.returnShipment) {
         const latestScan = Array.isArray(scans) ? scans[0] : undefined;
         const location =
@@ -247,7 +258,7 @@ export class ShiprocketWebhookService {
       /\bRTO\b|RETURN\s+TO\s+ORIGIN/i.test(normalizedStatus);
     const isDelivered =
       statusId === 7 ||
-      (!Number.isFinite(statusId) && normalizedStatus === "DELIVERED");
+      (!hasShipmentStatusId && normalizedStatus === "DELIVERED");
 
     // Status IDs from Shiprocket's shipment status table are authoritative.
     // RTO Initiated (9) and RTO Delivered (10) are not buyer delivery.
