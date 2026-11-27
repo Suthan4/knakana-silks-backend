@@ -6,6 +6,8 @@ import { OrderStatus, PaymentStatus } from "@/generated/prisma/enums.js";
 import { RazorpayService } from "../../application/service/razorpay.service.js";
 import { EmailService } from "@/modules/notification/application/service/email.service.js";
 import { Decimal } from "@prisma/client/runtime/client";
+import { PrismaClient } from "@/generated/prisma/client.js";
+import { ReturnStatus } from "@/generated/prisma/enums.js";
 
 @injectable()
 export class PaymentWebhookController {
@@ -14,7 +16,8 @@ export class PaymentWebhookController {
     @inject("IPaymentRepository")
     private paymentRepository: IPaymentRepository,
     @inject("IOrderRepository") private orderRepository: IOrderRepository,
-    @inject(EmailService) private emailService: EmailService
+    @inject(EmailService) private emailService: EmailService,
+    @inject(PrismaClient) private prisma: PrismaClient
   ) {}
 
   /**
@@ -37,7 +40,14 @@ export class PaymentWebhookController {
       }
 
       const event = req.body.event;
-      const payloadData = req.body.payload.payment.entity;
+      const payloadData =
+        req.body.payload?.payment?.entity ??
+        req.body.payload?.refund?.entity;
+
+      if (!payloadData) {
+        res.status(400).json({ success: false, message: "Invalid webhook payload" });
+        return;
+      }
 
       console.log("Razorpay webhook received:", event);
 
@@ -173,7 +183,7 @@ export class PaymentWebhookController {
   }
 
   /**
-   * Handle refund created
+   * Handle refund created. This is not the final settled state.
    */
   private async handleRefundCreated(data: any) {
     const payment = await this.paymentRepository.findByRazorpayPaymentId(
@@ -181,23 +191,59 @@ export class PaymentWebhookController {
     );
 
     if (!payment) {
-      console.error("Payment not found:", data.payment_id);
+      console.error("Payment not found for refund:", data.payment_id);
+      return;
+    }
+
+    await this.paymentRepository.update(payment.id, {
+      refundAmount: new Decimal(Number(data.amount || 0) / 100),
+    });
+
+    console.log("Refund created and awaiting processing:", data.id);
+  }
+
+  /**
+   * Complete the return only after Razorpay confirms refund.processed.
+   */
+  private async handleRefundProcessed(data: any) {
+    const payment = await this.paymentRepository.findByRazorpayPaymentId(
+      data.payment_id
+    );
+
+    if (!payment) {
+      console.error("Payment not found for processed refund:", data.payment_id);
       return;
     }
 
     await this.paymentRepository.update(payment.id, {
       status: PaymentStatus.REFUNDED,
-      refundAmount: new Decimal(data.amount / 100), // Convert from paise to rupees
     });
 
-    console.log("Refund created:", data.id);
-  }
+    const matchingReturn = await this.prisma.return.findFirst({
+      where: { razorpayRefundId: data.id },
+      include: { user: true },
+    });
 
-  /**
-   * Handle refund processed
-   */
-  private async handleRefundProcessed(data: any) {
-    console.log("Refund processed:", data.id);
-    // Additional processing if needed
+    if (
+      matchingReturn &&
+      matchingReturn.status === ReturnStatus.REFUND_INITIATED
+    ) {
+      await this.prisma.return.update({
+        where: { id: matchingReturn.id },
+        data: { status: ReturnStatus.REFUND_COMPLETED },
+      });
+
+      try {
+        await this.emailService.sendEmail({
+          to: matchingReturn.user.email,
+          subject: `Refund Completed - ${matchingReturn.returnNumber}`,
+          html: `<p>Your refund for return ${matchingReturn.returnNumber} has been processed.</p><p>Refund amount: ₹${Number(matchingReturn.refundAmount).toFixed(2)}</p>`,
+        });
+      } catch (emailError) {
+        console.error("Refund completion email failed:", emailError);
+      }
+    }
+
+    console.log("Refund processed by Razorpay:", data.id);
   }
 }
