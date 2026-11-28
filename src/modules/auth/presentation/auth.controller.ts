@@ -127,7 +127,7 @@ export class AuthController {
 
   async verifyEmailOtp(req: Request, res: Response) {
     try {
-      const data = z.object({ email: z.string().email(), otp: z.string().regex(/^\\d{6}$/) }).parse(req.body);
+      const data = z.object({ email: z.string().email(), otp: z.string().regex(/^\d{6}$/) }).parse(req.body);
       const result = await this.authService.verifyEmailOtp(data.email, data.otp);
       res.json({ success: true, message: "Signed in successfully", data: result });
     } catch (error: any) {
