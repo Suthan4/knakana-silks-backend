@@ -1,27 +1,4 @@
-import nodemailer from "nodemailer";
-import axios from "axios";
-
-function createTransporter() {
-
-  return nodemailer.createTransport({
-    secure:true,
-    host: process.env.EMAIL_HOST!,
-    port: 465,
-    auth: {
-      user: "admin@kankanasilks.com", // ✅ from .env
-      pass: "LPG9crSHaS5q" // ✅ zoho App Password
-    },
-  });
-}
-const transporter = createTransporter();
-
-const FRONTEND_URL =
-  process.env.FRONTEND_URL ||
-  (process.env.NODE_ENV === "production"
-    ? "https://kankanasilks.com"
-    : process.env.NODE_ENV === "qa"
-    ? "https://qa.kankanasilks.com"
-    : "http://localhost:3001");
+import { sendSesEmail } from "@/modules/notification/infrastructure/ses-email.transport.js";
 
 export async function sendPasswordResetEmail(email: string, token: string) {
   const resetUrl = `${FRONTEND_URL}/reset-password?token=${token}`;
@@ -76,56 +53,38 @@ export async function sendPasswordResetEmail(email: string, token: string) {
   });
 }
 
-// Optional: Use external email API service (like SendGrid, Mailgun) via axios
-export async function sendEmailViaAPI(
-  to: string,
-  subject: string,
-  html: string
-) {
-  // Example using a hypothetical email API
-  const API_KEY = process.env.EMAIL_API_KEY;
-  const EMAIL_API_URL = process.env.EMAIL_API_URL;
-
-  if (!API_KEY || !EMAIL_API_URL) {
-    throw new Error("Email API not configured");
-  }
-
-  const response = await axios.post(
-    EMAIL_API_URL,
-    {
-      to,
-      subject,
-      html,
-      from: process.env.EMAIL_FROM || "noreply@kanganasilks.com",
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-
-  return response.data;
-}
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]!);
 
 export async function sendNewsletterSubscriptionEmail(subscriberEmail: string) {
-  await transporter.sendMail({
-    from: "no-reply@kankanasilks.com",
-    to: "admin@kankanasilks.com",
+  const safeEmail = escapeHtml(subscriberEmail);
+  const sender = process.env.SES_NEWSLETTER_FROM || process.env.SES_FROM_EMAIL || "notifications@kankanasilks.com";
+  const replyTo = process.env.SES_REPLY_TO_EMAIL || "support@kankanasilks.com";
+
+  await sendSesEmail({
+    from: sender,
+    replyTo,
+    to: process.env.ADMIN_EMAIL || "admin@kankanasilks.com",
     subject: "New Newsletter Subscriber - Kankana Silks",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>New Newsletter Subscriber</h2>
         <p>A new user has subscribed to the newsletter:</p>
-        <p><strong>Email:</strong> ${subscriberEmail}</p>
+        <p><strong>Email:</strong> ${safeEmail}</p>
         <p><strong>Time:</strong> ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
       </div>
     `,
   });
 
-  await transporter.sendMail({
-    from: "no-reply@kankanasilks.com",
+  await sendSesEmail({
+    from: sender,
+    replyTo,
     to: subscriberEmail,
     subject: "Welcome to Kankana Silks Newsletter!",
     html: `
