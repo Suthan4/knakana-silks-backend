@@ -424,14 +424,23 @@ export class ReturnRepository implements IReturnRepository {
 
   async createReturnShipment(data: {
     shiprocketOrderId: string;
-    awb: string;
+    shiprocketShipmentId?: string;
+    awb?: string | null;
     courierName: string;
     pickupDate: Date;
     trackingUrl?: string;
     status: string;
   }): Promise<any> {
     return this.prisma.returnShipment.create({
-      data,
+      data: {
+        shiprocketOrderId: data.shiprocketOrderId,
+        shiprocketShipmentId: data.shiprocketShipmentId,
+        awb: data.awb ?? null,
+        courierName: data.courierName,
+        pickupDate: data.pickupDate,
+        trackingUrl: data.trackingUrl,
+        status: data.status,
+      },
     });
   }
 

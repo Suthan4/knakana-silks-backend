@@ -26,6 +26,7 @@ enum OrderStatus {
   SHIPPED
   OUT_FOR_DELIVERY
   DELIVERED
+  RETURNED
   COMPLETED
   CANCELLED
   REFUNDED
@@ -826,6 +827,9 @@ model Shipment {
   estimatedDelivery DateTime?
   shippedAt         DateTime?
   deliveredAt       DateTime?
+  shiprocketStatus  String?
+  shiprocketStatusId Int?
+  statusUpdatedAt   DateTime?
 
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
@@ -1005,16 +1009,17 @@ model ReturnItem {
 }
 
 model ReturnShipment {
-  id                BigInt   @id @default(autoincrement())
-  shiprocketOrderId String   @unique
-  awb               String   @unique
-  courierName       String
-  pickupDate        DateTime
-  trackingUrl       String?
-  status            String
-  currentLocation   String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                    BigInt   @id @default(autoincrement())
+  shiprocketOrderId     String   @unique
+  shiprocketShipmentId  String?  @unique
+  awb                   String?  @unique
+  courierName           String
+  pickupDate            DateTime
+  trackingUrl            String?
+  status                 String
+  currentLocation        String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   return            Return?
 

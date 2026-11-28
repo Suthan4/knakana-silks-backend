@@ -949,9 +949,6 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
   async cancelOrder(userId: string, orderId: string, reason?: string) {
     const orderBigId = BigInt(orderId);
     const order = await this.orderRepository.findById(orderBigId);
-     // ✅ Get warehouse and order items BEFORE cancellation
-    const pickupWarehouse = await this.getPickupWarehouse();
-    const orderItems = order!.items;
 
     if (!order) throw new Error("Order not found");
     if (order.userId !== BigInt(userId)) {
@@ -968,18 +965,34 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
     if (order.status === OrderStatus.DELIVERED) {
       throw new Error("Delivered orders cannot be cancelled. Please raise a return request instead");
     }
-    if (order.status === OrderStatus.SHIPPED) {
-      throw new Error("Order has been shipped and cannot be cancelled. Please reject upon delivery or raise return request");
+    if (
+      order.shipment?.shippedAt ||
+      order.status === OrderStatus.SHIPPED ||
+      order.status === OrderStatus.OUT_FOR_DELIVERY
+    ) {
+      throw new Error("Order has been shipped and cannot be cancelled. Please use the return policy after delivery.");
     }
 
-    // ✅ Check 24-hour cancellation window
+    if (
+      order.status !== OrderStatus.PENDING &&
+      order.status !== OrderStatus.PROCESSING
+    ) {
+      throw new Error("This order is no longer eligible for cancellation.");
+    }
+
+    // Strictly enforce the published 24-hour cancellation window.
     const orderAge = Date.now() - order.createdAt.getTime();
-    const maxCancellationTime = this.ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
+    const maxCancellationTime =
+      this.ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
 
-    if (order.status === OrderStatus.PROCESSING && orderAge > maxCancellationTime) {
-      throw new Error(`Order can only be cancelled within ${this.ORDER_CANCELLATION_WINDOW_HOURS} hours of placement`);
+    if (orderAge < 0 || orderAge >= maxCancellationTime) {
+      throw new Error(
+        `Orders can only be cancelled before shipment and within ${this.ORDER_CANCELLATION_WINDOW_HOURS} hours of placement.`
+      );
     }
 
+    const pickupWarehouse = await this.getPickupWarehouse();
+    const orderItems = order.items;
 
     // ✅ Cancel in Shiprocket FIRST (if order exists)
     if (order.shipment?.shiprocketOrderId) {
@@ -1081,16 +1094,32 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
     if (order.status === OrderStatus.DELIVERED) {
       return { canCancel: false, reason: "Please raise return request for delivered orders" };
     }
-    if (order.status === OrderStatus.SHIPPED) {
-      return { canCancel: false, reason: "Order already shipped. Reject or return." };
+    if (
+      order.shipment?.shippedAt ||
+      order.status === OrderStatus.SHIPPED ||
+      order.status === OrderStatus.OUT_FOR_DELIVERY
+    ) {
+      return {
+        canCancel: false,
+        reason: "Order already shipped. Please use the return policy after delivery.",
+      };
     }
 
+    if (
+      order.status !== OrderStatus.PENDING &&
+      order.status !== OrderStatus.PROCESSING
+    ) {
+      return {
+        canCancel: false,
+        reason: "This order is no longer eligible for cancellation.",
+      };
+    }
 
-    // ✅ Check 24-hour window
+    // Match cancelOrder(): before shipment and strictly before the 24-hour cutoff.
     const orderAge = Date.now() - order.createdAt.getTime();
     const maxCancellationTime = this.ORDER_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
 
-    if (order.status === OrderStatus.PROCESSING && orderAge > maxCancellationTime) {
+    if (orderAge < 0 || orderAge >= maxCancellationTime) {
       return {
         canCancel: false,
         reason: `Cancellation window of ${this.ORDER_CANCELLATION_WINDOW_HOURS} hours has passed`,
@@ -1190,17 +1219,23 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
       throw new Error("Order not found");
     }
 
+    if (
+      status === OrderStatus.DELIVERED ||
+      status === OrderStatus.RETURNED ||
+      order.status === OrderStatus.DELIVERED ||
+      order.status === OrderStatus.RETURNED ||
+      Boolean(order.shipment?.deliveredAt)
+    ) {
+      throw new Error(
+        "Delivered and returned-to-origin statuses are controlled by Shiprocket tracking and cannot be changed manually."
+      );
+    }
+
     await this.orderRepository.update(order.id, { status });
 
     try {
       if (status === OrderStatus.SHIPPED) {
         await this.emailService.sendShippingNotification({
-          email: order.user.email,
-          firstName: order.user.firstName,
-          orderNumber: order.orderNumber,
-        });
-      } else if (status === OrderStatus.DELIVERED) {
-        await this.emailService.sendDeliveryConfirmation({
           email: order.user.email,
           firstName: order.user.firstName,
           orderNumber: order.orderNumber,
@@ -1274,10 +1309,8 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
         Math.round(Number(payment.amount) * 100)
       );
 
-      await this.paymentRepository.update(payment.id, {
-        status: PaymentStatus.REFUNDED,
-        refundAmount: payment.amount,
-      });
+      // Razorpay's refund API acceptance is not proof that the refund settled.
+      // PaymentStatus is moved to REFUNDED only by the refund.processed webhook.
     } catch (error) {
       console.error("Refund failed:", error);
       throw new Error("Failed to process refund");

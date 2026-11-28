@@ -6,6 +6,7 @@ import { IShiprocketRepository } from "./infrastructure/interface/IshiprocketRep
 import { ShiprocketRepository } from "./infrastructure/repository/ShiprocketRepository.js";
 import { ShiprocketService } from "./infrastructure/services/shiprocket.service.js";
 import { ShipmentService } from "./application/service/shipment.service.js";
+import { ShiprocketWebhookService } from "./application/service/shiprocket.webhook.service.js";
 import { ShipmentController } from "./presentation/controller/shipment.controller.js";
 import { ShippingCalculatorService } from "./application/service/shipping.calculator.service.js";
 import { ShippingCalculatorController } from "./presentation/controller/shipping.calculator.controller.js";
@@ -25,6 +26,7 @@ export function registerShipmentModule() {
 
   // Register Services
   container.registerSingleton(ShipmentService);
+  container.registerSingleton(ShiprocketWebhookService);
 
   // Register Controllers
   container.registerSingleton(ShipmentController);

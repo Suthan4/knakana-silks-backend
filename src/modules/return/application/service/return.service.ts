@@ -101,7 +101,7 @@ export class ReturnService {
     const hoursSinceDelivery =
       (now.getTime() - deliveredAt.getTime()) / (1000 * 60 * 60);
 
-    if (hoursSinceDelivery > this.RETURN_WINDOW_HOURS) {
+    if (hoursSinceDelivery < 0 || hoursSinceDelivery >= this.RETURN_WINDOW_HOURS) {
       return {
         eligible: false,
         reason: `Return window has expired. Returns must be initiated within ${this.RETURN_WINDOW_HOURS} hours of delivery.`,
@@ -439,13 +439,25 @@ export class ReturnService {
         returnOrderData
       );
 
-      // ✅ Create return shipment record
+      if (!shiprocketOrder.order_id) {
+        throw new Error("Shiprocket did not return a return order ID.");
+      }
+
+      if (!shiprocketOrder.shipment_id) {
+        throw new Error("Shiprocket did not return a return shipment ID.");
+      }
+
+      // Keep the Shiprocket shipment ID separate from the courier AWB.
+      // A return AWB can be assigned later in Shiprocket.
       const returnShipment = await this.returnRepository.createReturnShipment({
-        shiprocketOrderId: shiprocketOrder.order_id.toString(),
-        awb: shiprocketOrder.shipment_id?.toString() || "",
-        courierName: "Pending",
+        shiprocketOrderId: String(shiprocketOrder.order_id),
+        shiprocketShipmentId: String(shiprocketOrder.shipment_id),
+        awb: shiprocketOrder.awb_code
+          ? String(shiprocketOrder.awb_code)
+          : null,
+        courierName: shiprocketOrder.courier_name || "Pending",
         pickupDate: new Date(),
-        status: "PICKUP_SCHEDULED",
+        status: "RETURN_CREATED",
       });
 
       // ✅ Link shipment and approve return
@@ -621,28 +633,8 @@ export class ReturnService {
       `✅ Refund initiated: ${returnRequest.returnNumber} (₹${returnRequest.refundAmount})`
     );
 
-    // ✅ Auto-complete after 5 seconds
-    setTimeout(async () => {
-      try {
-        await this.returnRepository.update(returnRequest.id, {
-          status: ReturnStatus.REFUND_COMPLETED,
-        });
-
-        await this.emailService.sendEmail({
-          to: returnRequest.user.email,
-          subject: `Refund Completed - ${returnRequest.returnNumber}`,
-          html: this.getRefundCompletedEmailTemplate(
-            returnRequest.user.firstName,
-            returnRequest.returnNumber,
-            returnRequest.refundAmount
-          ),
-        });
-
-        console.log(`✅ Refund completed: ${returnRequest.returnNumber}`);
-      } catch (error) {
-        console.error("Auto-complete refund failed:", error);
-      }
-    }, 5000);
+    // Keep REFUND_INITIATED until Razorpay confirms refund.processed.
+    // Other refund methods remain pending until an operator verifies the transfer.
 
     return this.returnRepository.findById(returnRequest.id);
   }
@@ -787,7 +779,34 @@ export class ReturnService {
       throw new Error("Return shipment not found");
     }
 
-    return this.shiprocketService.trackByAwb(returnRequest.returnShipment.awb);
+    const returnShipment = returnRequest.returnShipment;
+    const tracking = returnShipment.awb
+      ? await this.shiprocketService.trackByAwb(returnShipment.awb)
+      : returnShipment.shiprocketShipmentId
+        ? await this.shiprocketService.trackShipment(
+            Number(returnShipment.shiprocketShipmentId)
+          )
+        : null;
+
+    if (!tracking) {
+      throw new Error("Shiprocket has not assigned a trackable AWB or shipment ID.");
+    }
+
+    const shipmentTrack = tracking?.tracking_data?.shipment_track?.[0];
+    const latestActivity = tracking?.tracking_data?.shipment_track_activities?.[0];
+    const latestStatus = String(
+      shipmentTrack?.current_status || latestActivity?.activity || ""
+    ).trim();
+
+    if (latestStatus) {
+      await this.returnRepository.updateReturnShipment(returnShipment.id, {
+        status: latestStatus,
+        currentLocation:
+          latestActivity?.location || shipmentTrack?.current_city || undefined,
+      });
+    }
+
+    return tracking;
   }
 
   /**

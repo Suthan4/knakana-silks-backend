@@ -15,6 +15,7 @@ export interface IShipmentRepository {
   findById(id: bigint): Promise<ShipmentWithOrder | null>;
   findByOrderId(orderId: bigint): Promise<Shipment | null>;
   findByShiprocketOrderId(shiprocketOrderId: string): Promise<Shipment | null>;
+  findByShiprocketShipmentId(shiprocketShipmentId: string): Promise<Shipment | null>;
   findByTrackingNumber(trackingNumber: string): Promise<Shipment | null>;
   create(data: {
     orderId: bigint;

@@ -10,6 +10,12 @@ const router = Router();
 
 const getShipmentController = () => container.resolve(ShipmentController);
 
+// Shiprocket webhook URLs must not contain provider-specific keywords.
+// The request is authenticated with the x-api-key header in the controller.
+router.post("/webhooks/delivery-status", (req, res) =>
+  getShipmentController().receiveDeliveryStatusWebhook(req, res)
+);
+
 // ==================== PUBLIC ROUTES ====================
 
 /**
@@ -118,18 +124,6 @@ router.post(
   authenticate,
   checkPermission("shipments", "create"),
   (req, res) => getShipmentController().generateManifest(req, res)
-);
-
-/**
- * Mark order as delivered
- * POST /api/admin/shipments/mark-delivered
- * Body: { orderId: string }
- */
-router.post(
-  "/admin/shipments/mark-delivered",
-  authenticate,
-  checkPermission("shipments", "update"),
-  (req, res) => getShipmentController().markAsDelivered(req, res)
 );
 
 /**

@@ -37,9 +37,19 @@ export class ShipmentRepository implements IShipmentRepository {
     });
   }
 
+  async findByShiprocketShipmentId(
+    shiprocketShipmentId: string
+  ): Promise<Shipment | null> {
+    return this.prisma.shipment.findUnique({
+      where: { shiprocketShipmentId },
+    });
+  }
+
   async findByTrackingNumber(trackingNumber: string): Promise<Shipment | null> {
     return this.prisma.shipment.findFirst({
-      where: { trackingNumber },
+      where: {
+        OR: [{ trackingNumber }, { awbCode: trackingNumber }],
+      },
     });
   }
 
