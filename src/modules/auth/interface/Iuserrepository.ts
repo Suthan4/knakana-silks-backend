@@ -10,7 +10,8 @@ export interface IUserRepository {
     lastName: string;
     phone?: string;
     role: UserRole;
-    termsAccepted?: boolean;\n    emailVerified?: boolean;
+    termsAccepted?: boolean;
+    emailVerified?: boolean;
   }): Promise<User>;
   update(id: bigint, data: Partial<User>): Promise<User>;
   findAll(skip: number, take: number): Promise<User[]>;

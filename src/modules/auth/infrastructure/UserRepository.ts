@@ -22,7 +22,8 @@ export class UserRepository implements IUserRepository {
     lastName: string;
     phone?: string;
     role: UserRole;
-    termsAccepted: boolean;\n    emailVerified?: boolean;
+    termsAccepted: boolean;
+    emailVerified?: boolean;
   }): Promise<User> {
     return this.prisma.user.create({ data });
   }
