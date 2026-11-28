@@ -53,12 +53,19 @@ export class ShiprocketWebhookService {
       shipment_status,
       shipment_status_id,
       delivered_date,
+      current_timestamp,
       current_location,
       is_return,
       scans,
     } = data;
 
-    const awbCode = typeof awb === "string" ? awb.trim() : "";
+    // Shiprocket examples may encode AWB as either a string or a number.
+    // Normalize both to the string representation stored in our database.
+    const awbCode =
+      (typeof awb === "string" || typeof awb === "number") &&
+      String(awb).trim()
+        ? String(awb).trim()
+        : "";
     const shipmentId =
       shipment_id !== undefined && shipment_id !== null
         ? String(shipment_id)
@@ -240,15 +247,25 @@ export class ShiprocketWebhookService {
       );
     }
 
-    const channelOrderNumber = channel_order_id ?? order_id;
-    if (
-      !shipment &&
-      channelOrderNumber !== undefined &&
-      channelOrderNumber !== null
-    ) {
-      const orderByNumber = await this.orderRepository.findByOrderNumber(
-        String(channelOrderNumber)
-      );
+    // In the Shiprocket create-order request, order_id is populated with our
+    // local Order.orderNumber. sr_order_id (handled above) is Shiprocket's
+    // internal order ID. Some webhook test payloads also include a literal
+    // placeholder in channel_order_id, so never let that mask order_id.
+    const orderNumberCandidates = [order_id, channel_order_id]
+      .filter(
+        (value): value is string | number =>
+          (typeof value === "string" || typeof value === "number") &&
+          String(value).trim().length > 0 &&
+          !/^enter your\b/i.test(String(value).trim())
+      )
+      .map((value) => String(value).trim());
+
+    for (const orderNumber of new Set(orderNumberCandidates)) {
+      if (shipment) break;
+
+      const orderByNumber =
+        await this.orderRepository.findByOrderNumber(orderNumber);
+
       if (orderByNumber) {
         shipment = await this.shipmentRepository.findByOrderId(orderByNumber.id);
       }
@@ -355,7 +372,14 @@ export class ShiprocketWebhookService {
     }
 
     if (isDelivered && !shipment.deliveredAt) {
-      shipmentUpdate.deliveredAt = this.parseDeliveredDate(delivered_date);
+      const deliveryTimestamp =
+        typeof delivered_date === "string" &&
+        delivered_date.trim() &&
+        delivered_date.trim().toUpperCase() !== "NA"
+          ? delivered_date
+          : current_timestamp;
+
+      shipmentUpdate.deliveredAt = this.parseDeliveredDate(deliveryTimestamp);
     }
 
     await this.shipmentRepository.update(shipment.id, shipmentUpdate);
