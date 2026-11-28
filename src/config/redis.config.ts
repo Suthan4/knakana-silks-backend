@@ -17,14 +17,17 @@ const getRedisConfig = (): { url?: string; options: RedisOptions } => {
   const url = process.env.REDIS_URL;
 
   const commonOptions: RedisOptions = {
-    maxRetriesPerRequest: 1, // Fail fast on cache operations so DB fallback is instantaneous
+    // Fail commands promptly, but keep the Redis client reconnecting after transient outages.
+    maxRetriesPerRequest: 2,
     enableReadyCheck: true,
+    connectTimeout: 10_000,
+    keepAlive: 10_000,
     lazyConnect: process.env.NODE_ENV === "test",
     retryStrategy: (times: number) => {
-      if (process.env.NODE_ENV === "test" || times > 3) return null;
-      // Exponential backoff with 2000ms max delay
-      const delay = Math.min(times * 50, 2000);
-      return delay;
+      if (process.env.NODE_ENV === "test") return null;
+      // Do not permanently end the singleton after a few failed attempts.
+      // Keep retrying with capped exponential backoff until Redis is healthy.
+      return Math.min(250 * 2 ** Math.min(times - 1, 5), 10_000);
     },
     reconnectOnError: (err: Error) => {
       const targetErrors = ["READONLY", "ETIMEDOUT", "ECONNRESET"];

@@ -3,6 +3,12 @@ import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { AuthService } from "../application/services/auth.service.js";
 import { DriveService } from "@/modules/media/infrastructure/drive.service.js";
+import { logger } from "@/shared/logger/logger.js";
+
+const isRedisConnectionError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /connection is closed|stream isn.t writeable|max retries per request|econnrefused|econnreset|etimedout|nr_closed/i.test(message);
+};
 
 // Validation schemas
 const registerSchema = z.object({
@@ -121,17 +127,44 @@ export class AuthController {
       const result = await this.authService.sendEmailOtp(data.email);
       res.json({ success: true, message: result.message, data: { isNewAccount: result.isNewAccount } });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message || "Unable to send verification code" });
+      if (isRedisConnectionError(error)) {
+        logger.error("Email OTP unavailable because Redis is not connected", error);
+        res.status(503).json({
+          success: false,
+          message: "Verification is temporarily unavailable. Please try again in a moment.",
+        });
+        return;
+      }
+      logger.error("Unable to send email OTP", error);
+      res.status(error instanceof z.ZodError ? 400 : 502).json({
+        success: false,
+        message: error.message || "Unable to send verification code",
+      });
     }
   }
 
   async verifyEmailOtp(req: Request, res: Response) {
     try {
-      const data = z.object({ email: z.string().email(), otp: z.string().regex(/^\d{6}$/) }).parse(req.body);
-      const result = await this.authService.verifyEmailOtp(data.email, data.otp);
+      const data = z.object({
+        email: z.string().email(),
+        otp: z.string().regex(/^\d{6}$/),
+        termsAccepted: z.boolean().optional().default(false),
+      }).parse(req.body);
+      const result = await this.authService.verifyEmailOtp(data.email, data.otp, data.termsAccepted);
       res.json({ success: true, message: "Signed in successfully", data: result });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message || "Verification failed" });
+      if (isRedisConnectionError(error)) {
+        logger.error("Email OTP verification unavailable because Redis is not connected", error);
+        res.status(503).json({
+          success: false,
+          message: "Verification is temporarily unavailable. Please try again in a moment.",
+        });
+        return;
+      }
+      res.status(400).json({
+        success: false,
+        message: error.message || "Verification failed",
+      });
     }
   }
 
