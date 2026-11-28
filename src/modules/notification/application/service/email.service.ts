@@ -1,53 +1,32 @@
-import nodemailer, { Transporter } from "nodemailer";
 import { injectable } from "tsyringe";
+import { sendSesEmail, type SesAttachment } from "@/modules/notification/infrastructure/ses-email.transport.js";
 
 interface EmailOptions {
   to: string;
   subject: string;
   html: string;
-  attachments?: Array<{
-    filename: string;
-    path?: string;
-    content?: string;
-  }>;
+  text?: string;
+  attachments?: SesAttachment[];
 }
 
 @injectable()
 export class EmailService {
-  private transporter: Transporter;
-
-  constructor() {
-    this.transporter = nodemailer.createTransport({
-        secure:true,
-        host: process.env.EMAIL_HOST!,
-        port: 465,
-        auth: {
-          user: process.env.EMAIL_USER!, // ✅ from .env
-          pass: process.env.EMAIL_PASS!, // ✅ Gmail App Password
-        },
-    });
-  }
-
   /**
-   * Send email
+   * All application emails use Amazon SES in ap-south-1.
+   * The shared database-backed email worker continues to handle retries.
    */
   async sendEmail(options: EmailOptions) {
-    try {
-      const info = await this.transporter.sendMail({
-        from: "Kankana Silks <notifications@kankanasilks.com>",
-        replyTo: "support@kankanasilks.com",
-        to: options.to,
-        subject: options.subject,
-        html: options.html,
-        attachments: options.attachments,
-      });
+    const messageId = await sendSesEmail({
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      attachments: options.attachments,
+      from: process.env.SES_NOTIFICATIONS_FROM || process.env.SES_FROM_EMAIL || "notifications@kankanasilks.com",
+      replyTo: process.env.SES_REPLY_TO_EMAIL || "support@kankanasilks.com",
+    });
 
-      console.log("Email sent:", info.messageId);
-      return info;
-    } catch (error) {
-      console.error("Failed to send email:", error);
-      throw new Error("Failed to send email");
-    }
+    return { messageId };
   }
 
   /**
