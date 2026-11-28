@@ -92,7 +92,15 @@ export class AuthService {
 
     const tokens = this.generateTokens({ userId: user.id.toString(), email: user.email, role: user.role });
     await this.saveRefreshToken(user.id, tokens.refreshToken);
-    const { password: _password, ...safeUser } = user;
+    const safeUser = {
+      id: user.id.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      role: user.role,
+      isActive: user.isActive,
+    };
     return { user: safeUser, ...tokens };
   }
 
