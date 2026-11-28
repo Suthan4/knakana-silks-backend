@@ -30,8 +30,6 @@ const encodeHeader = (value: string): string =>
 const encodeMimeBody = (value: string | Buffer): string =>
   Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n").replace(/\r\n$/, "");
 
-const htmlToText = (html: string): string =>\\r\\n").replace(/\\r\\n$/, "");
-
 const htmlToText = (html: string): string =>
   html
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
