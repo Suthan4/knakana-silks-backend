@@ -1,1 +1,0 @@
-ALTER TABLE "section_media" ADD COLUMN "linkUrl" TEXT;

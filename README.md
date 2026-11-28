@@ -50,3 +50,8 @@ Infrastructure: COMPLETE
 Module Implementation: PENDING
 
 Ready for business logic implementation!
+
+
+## Storefront email OTP
+
+Customer login uses email OTP; password login remains admin-only and public registration is disabled. Configure required values from `.env.example`. Back up the database before applying the migration. Keep `disposable-email-domains` and `mailchecker` updated (Dependabot recommended). See `PRODUCTION_CHECKLIST.md` before production rollout.

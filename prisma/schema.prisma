@@ -178,7 +178,8 @@ enum CourierPreference {
 model User {
   id             BigInt           @id @default(autoincrement())
   email          String           @unique
-  password       String
+  emailNormalized String          @unique
+  password       String?
   firstName      String
   lastName       String
   phone          String?
@@ -207,8 +208,8 @@ model User {
   driveOAuth          DriveOAuth?
   bulkImportDrafts   BulkImportDraft[]
 
-
   @@index([email])
+  @@index([emailNormalized])
   @@index([role])
   @@map("users")
 }
@@ -248,15 +249,66 @@ model Permission {
 model RefreshToken {
   id        BigInt    @id @default(autoincrement())
   userId    BigInt
-  token     String    @unique
+  tokenHash String    @unique
+  familyId  String    @db.Uuid
   expiresAt DateTime
+  rotatedAt DateTime?
+  revokedAt DateTime?
   createdAt DateTime  @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
-  @@index([token])
+  @@index([familyId])
+  @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+enum EmailSuppressionReason {
+  BOUNCE
+  COMPLAINT
+}
+
+model EmailSuppression {
+  id        BigInt @id @default(autoincrement())
+  email     String @unique
+  reason    EmailSuppressionReason
+  createdAt DateTime @default(now())
+  @@map("email_suppressions")
+}
+
+model AuthEvent {
+  id        BigInt @id @default(autoincrement())
+  userId    BigInt?
+  emailHash String
+  event     String
+  ip        String?
+  userAgent String?
+  result    String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([emailHash])
+  @@map("auth_events")
+}
+
+model Blocklist {
+  id        BigInt @id @default(autoincrement())
+  type      String
+  value     String @unique
+  reason    String?
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  @@map("blocklist")
+}
+
+model RiskEvent {
+  id          BigInt @id @default(autoincrement())
+  userId      BigInt?
+  rule        String
+  decision    String
+  orderDraft  Json?
+  createdAt   DateTime @default(now())
+  @@index([createdAt])
+  @@index([rule])
+  @@map("risk_events")
 }
 
 model Category {
