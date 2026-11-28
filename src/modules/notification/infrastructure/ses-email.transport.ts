@@ -21,18 +21,18 @@ export interface SesEmail {
 const region = process.env.AWS_SES_REGION || "ap-south-1";
 const client = new SESv2Client({ region });
 
-const cleanHeader = (value: string): string => value.replace(/[\\r\\n]+/g, " ").trim();
+const cleanHeader = (value: string): string => value.replace(/[\r\n]+/g, " ").trim();
 const encodeHeader = (value: string): string =>
-  /^[\\x00-\\x7F]*$/.test(value)
+  /^[\x00-\x7F]*$/.test(value)
     ? cleanHeader(value)
     : `=?UTF-8?B?${Buffer.from(cleanHeader(value), "utf8").toString("base64")}?=`;
 
 const htmlToText = (html: string): string =>
   html
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-    .replace(/<\\/(p|div|h[1-6]|tr|li)>/gi, "\\n")
-    .replace(/<br\\s*\\/?\\s*>/gi, "\\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<\/(p|div|h[1-6]|tr|li)>/gi, "\n")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -40,8 +40,8 @@ const htmlToText = (html: string): string =>
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/[ \\t]+/g, " ")
-    .replace(/\\n\\s+/g, "\\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s+/g, "\n")
     .trim();
 
 async function buildRawMessage(email: SesEmail, from: string, recipients: string[]): Promise<Buffer> {
@@ -75,20 +75,20 @@ async function buildRawMessage(email: SesEmail, from: string, recipients: string
     const bytes = attachment.path
       ? await readFile(attachment.path)
       : Buffer.from(attachment.content || "", "utf8");
-    const filename = cleanHeader(attachment.filename).replace(/["\\\\]/g, "_");
+    const filename = cleanHeader(attachment.filename).replace(/["\\]/g, "_");
     lines.push(
       `--${mixedBoundary}`,
       `Content-Type: application/octet-stream; name="${filename}"`,
       "Content-Transfer-Encoding: base64",
       `Content-Disposition: attachment; filename="${filename}"`,
       "",
-      bytes.toString("base64").replace(/.{1,76}/g, "$&\\r\\n"),
+      bytes.toString("base64").replace(/.{1,76}/g, "$&\r\n"),
       "",
     );
   }
 
   lines.push(`--${mixedBoundary}--`, "");
-  return Buffer.from(lines.join("\\r\\n"), "utf8");
+  return Buffer.from(lines.join("\r\n"), "utf8");
 }
 
 /**
