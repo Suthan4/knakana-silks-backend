@@ -1240,12 +1240,6 @@ console.log("✅ Shiprocket createOrder response:", JSON.stringify(shiprocketOrd
           firstName: order.user.firstName,
           orderNumber: order.orderNumber,
         });
-      } else if (status === OrderStatus.DELIVERED) {
-        await this.emailService.sendDeliveryConfirmation({
-          email: order.user.email,
-          firstName: order.user.firstName,
-          orderNumber: order.orderNumber,
-        });
       }
     } catch (error) {
       console.error("Failed to send status update email:", error);
