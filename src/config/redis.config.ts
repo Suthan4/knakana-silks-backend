@@ -17,14 +17,21 @@ const getRedisConfig = (): { url?: string; options: RedisOptions } => {
   const url = process.env.REDIS_URL;
 
   const commonOptions: RedisOptions = {
-    maxRetriesPerRequest: 1, // Fail fast on cache operations so DB fallback is instantaneous
+    // Fail individual commands quickly, but keep the client alive so it can
+    // reconnect and recover automatically when Redis has a temporary outage.
+    maxRetriesPerRequest: 2,
     enableReadyCheck: true,
+    connectTimeout: 10_000,
+    keepAlive: 10_000,
     lazyConnect: process.env.NODE_ENV === "test",
     retryStrategy: (times: number) => {
-      if (process.env.NODE_ENV === "test" || times > 3) return null;
-      // Exponential backoff with 2000ms max delay
-      const delay = Math.min(times * 50, 2000);
-      return delay;
+      // Tests intentionally use isolated/mock Redis clients and must not keep
+      // reconnecting after the test runner has finished.
+      if (process.env.NODE_ENV === "test") return null;
+
+      // Returning null permanently ends the ioredis client. Keep reconnecting
+      // with capped exponential backoff so OTP can recover after Redis returns.
+      return Math.min(250 * 2 ** Math.min(times - 1, 5), 10_000);
     },
     reconnectOnError: (err: Error) => {
       const targetErrors = ["READONLY", "ETIMEDOUT", "ECONNRESET"];
