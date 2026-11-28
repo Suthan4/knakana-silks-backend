@@ -119,7 +119,7 @@ export class AuthController {
     try {
       const data = z.object({ email: z.string().email() }).parse(req.body);
       const result = await this.authService.sendEmailOtp(data.email);
-      res.json({ success: true, message: result.message });
+      res.json({ success: true, message: result.message, data: { isNewAccount: result.isNewAccount } });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message || "Unable to send verification code" });
     }

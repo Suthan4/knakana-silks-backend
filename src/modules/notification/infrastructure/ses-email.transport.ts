@@ -1,6 +1,7 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import nodemailer from "nodemailer";
 
 export interface SesAttachment {
   filename: string;
@@ -105,6 +106,34 @@ export async function sendSesEmail(email: SesEmail): Promise<string | undefined>
     throw new Error("At least one valid email recipient is required");
   }
 
+  const provider = (process.env.EMAIL_PROVIDER || (process.env.APP_ENV === "qa" ? "nodemailer" : "ses")).toLowerCase();
+  if (provider === "nodemailer" || provider === "smtp") {
+    const host = process.env.SMTP_HOST;
+    const port = Number(process.env.SMTP_PORT || 587);
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    if (!host || !user || !pass) throw new Error("SMTP_HOST, SMTP_USER and SMTP_PASS are required when EMAIL_PROVIDER=nodemailer");
+    const transporter = nodemailer.createTransport({
+      host, port,
+      secure: process.env.SMTP_SECURE === "true" || port === 465,
+      auth: { user, pass },
+      connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 20000,
+    });
+    const result = await transporter.sendMail({
+      from: process.env.SMTP_FROM_EMAIL || from,
+      to: recipients,
+      replyTo: email.replyTo,
+      subject: email.subject,
+      text: email.text || htmlToText(email.html),
+      html: email.html,
+      attachments: (email.attachments || []).map((attachment) => ({
+        filename: attachment.filename,
+        ...(attachment.path ? { path: attachment.path } : { content: attachment.content || "" }),
+      })),
+    });
+    return result.messageId;
+  }
+  if (provider !== "ses") throw new Error(`Unsupported EMAIL_PROVIDER: ${provider}`);
   const configurationSet = process.env.SES_CONFIGURATION_SET;
   const common = {
     FromEmailAddress: from,

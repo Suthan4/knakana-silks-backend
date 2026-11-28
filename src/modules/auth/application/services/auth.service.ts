@@ -35,6 +35,8 @@ export class AuthService {
 
   async sendEmailOtp(rawEmail: string) {
     const email = rawEmail.trim().toLowerCase();
+    const existingUser = await this.userRepository.findByEmail(email);
+    const isNewAccount = !existingUser;
     const cooldownKey = `auth:email-otp-cooldown:${email}`;
     const otpKey = `auth:email-otp:${email}`;
     const attemptsKey = `auth:email-otp-attempts:${email}`;
@@ -50,10 +52,10 @@ export class AuthService {
       await redisClient.del(otpKey, cooldownKey);
       throw error;
     }
-    return { message: "Verification code sent" };
+    return { message: "Verification code sent", isNewAccount };
   }
 
-  async verifyEmailOtp(rawEmail: string, rawOtp: string) {
+  async verifyEmailOtp(rawEmail: string, rawOtp: string, termsAccepted = false) {
     const email = rawEmail.trim().toLowerCase();
     const otpKey = `auth:email-otp:${email}`;
     const attemptsKey = `auth:email-otp-attempts:${email}`;
@@ -70,9 +72,12 @@ export class AuthService {
       throw new Error("Invalid or expired verification code");
     }
 
-    await redisClient.del(otpKey, attemptsKey, `auth:email-otp-cooldown:${email}`);
     let user = await this.userRepository.findByEmail(email);
     if (user && user.role !== UserRole.USER) throw new Error("Please use the admin sign-in page");
+    if (!user && !termsAccepted) {
+      throw new Error("Please accept the Terms of Service and Privacy Policy to create your account");
+    }
+    await redisClient.del(otpKey, attemptsKey, `auth:email-otp-cooldown:${email}`);
     if (!user) {
       const randomPassword = await bcrypt.hash(randomUUID(), 10);
       const firstName = email.split("@")[0].replace(/[._-]+/g, " ").trim().slice(0, 50) || "Customer";
@@ -82,7 +87,7 @@ export class AuthService {
         firstName,
         lastName: "",
         role: UserRole.USER,
-        termsAccepted: false,
+        termsAccepted: true,
         emailVerified: true,
       });
     } else {
