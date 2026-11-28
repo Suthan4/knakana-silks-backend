@@ -59,7 +59,8 @@
     "tsyringe": "^4.10.0",
     "uuid": "^10.0.0",
     "winston": "^3.14.2",
-    "zod": "^4.2.1"
+    "zod": "^4.2.1",
+    "@aws-sdk/client-sesv2": "^3.958.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
