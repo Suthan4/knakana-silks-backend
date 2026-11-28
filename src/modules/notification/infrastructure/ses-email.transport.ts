@@ -28,7 +28,9 @@ const encodeHeader = (value: string): string =>
     : `=?UTF-8?B?${Buffer.from(cleanHeader(value), "utf8").toString("base64")}?=`;
 
 const encodeMimeBody = (value: string | Buffer): string =>
-  Buffer.from(value).toString("base64").replace(/.{1,76}/g, "const htmlToText = (html: string): string =>\\r\\n").replace(/\\r\\n$/, "");
+  Buffer.from(value).toString("base64").replace(/.{1,76}/g, "$&\r\n").replace(/\r\n$/, "");
+
+const htmlToText = (html: string): string =>\\r\\n").replace(/\\r\\n$/, "");
 
 const htmlToText = (html: string): string =>
   html
