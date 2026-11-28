@@ -27,6 +27,9 @@ const encodeHeader = (value: string): string =>
     ? cleanHeader(value)
     : `=?UTF-8?B?${Buffer.from(cleanHeader(value), "utf8").toString("base64")}?=`;
 
+const encodeMimeBody = (value: string | Buffer): string =>
+  Buffer.from(value).toString("base64").replace(/.{1,76}/g, "const htmlToText = (html: string): string =>\\r\\n").replace(/\\r\\n$/, "");
+
 const htmlToText = (html: string): string =>
   html
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -61,12 +64,12 @@ async function buildRawMessage(email: SesEmail, from: string, recipients: string
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
     "",
-    Buffer.from(email.text || htmlToText(email.html), "utf8").toString("base64"),
+    encodeMimeBody(email.text || htmlToText(email.html)),
     `--${alternativeBoundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
     "",
-    Buffer.from(email.html, "utf8").toString("base64"),
+    encodeMimeBody(email.html),
     `--${alternativeBoundary}--`,
     "",
   ];
