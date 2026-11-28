@@ -1,5 +1,13 @@
 import { sendSesEmail } from "@/modules/notification/infrastructure/ses-email.transport.js";
 
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "https://kankanasilks.com"
+    : process.env.NODE_ENV === "qa"
+      ? "https://qa.kankanasilks.com"
+      : "http://localhost:3001");
+
 export async function sendPasswordResetEmail(email: string, token: string) {
   const resetUrl = `${FRONTEND_URL}/reset-password?token=${token}`;
 
@@ -44,11 +52,11 @@ export async function sendPasswordResetEmail(email: string, token: string) {
       </html>
     `;
 
-  await transporter.sendMail({
-    // from: process.env.EMAIL_FROM!,
-    from: "no-reply@kankanasilks.com",
+  await sendSesEmail({
+    from: process.env.SES_NO_REPLY_FROM || "no-reply@kankanasilks.com",
+    replyTo: process.env.SES_REPLY_TO_EMAIL || "support@kankanasilks.com",
     to: email,
-    subject: "Reset Your Password - Kankanasilks",
+    subject: "Reset Your Password - Kankana Silks",
     html,
   });
 }
