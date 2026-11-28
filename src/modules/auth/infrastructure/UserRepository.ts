@@ -22,7 +22,7 @@ export class UserRepository implements IUserRepository {
     lastName: string;
     phone?: string;
     role: UserRole;
-    termsAccepted: boolean;
+    termsAccepted: boolean;\n    emailVerified?: boolean;
   }): Promise<User> {
     return this.prisma.user.create({ data });
   }

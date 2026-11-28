@@ -109,3 +109,15 @@ export async function sendNewsletterSubscriptionEmail(subscriberEmail: string) {
     `,
   });
 }
+
+
+export async function sendLoginOtpEmail(email: string, otp: string) {
+  await sendSesEmail({
+    from: process.env.SES_NO_REPLY_FROM || process.env.SES_FROM_EMAIL || "notifications@kankanasilks.com",
+    replyTo: process.env.SES_REPLY_TO_EMAIL || "support@kankanasilks.com",
+    to: email,
+    subject: "Your Kankana Silks verification code",
+    text: `Your Kankana Silks verification code is ${otp}. It expires in 5 minutes. If you did not request this code, ignore this email.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#222"><h2>Kankana Silks</h2><p>Use this code to sign in or create your account.</p><div style="font-size:32px;font-weight:700;letter-spacing:8px;padding:18px 0">${otp}</div><p>This code expires in 5 minutes. If you did not request it, ignore this email.</p></div>`,
+  });
+}

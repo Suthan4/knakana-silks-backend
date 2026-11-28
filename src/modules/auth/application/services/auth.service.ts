@@ -1,6 +1,9 @@
 import { injectable, inject } from "tsyringe";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { randomInt, randomUUID } from "node:crypto";
+import { redisClient } from "@/config/redis.config.js";
+import { sendLoginOtpEmail } from "./email.service.js";
 import { IRefreshTokenRepository } from "../../interface/Irefreshtokenrepository.js";
 import { UserRole } from "../../../../generated/prisma/enums.js";
 import { sendPasswordResetEmail } from "./email.service.js";
@@ -29,6 +32,69 @@ export class AuthService {
     @inject("IRefreshTokenRepository")
     private refreshTokenRepository: IRefreshTokenRepository
   ) {}
+
+  async sendEmailOtp(rawEmail: string) {
+    const email = rawEmail.trim().toLowerCase();
+    const cooldownKey = `auth:email-otp-cooldown:${email}`;
+    const otpKey = `auth:email-otp:${email}`;
+    const attemptsKey = `auth:email-otp-attempts:${email}`;
+    const cooldown = await redisClient.set(cooldownKey, "1", "EX", 60, "NX");
+    if (cooldown !== "OK") throw new Error("Please wait 60 seconds before requesting another code");
+
+    const otp = randomInt(100000, 1000000).toString();
+    await redisClient.set(otpKey, otp, "EX", 300);
+    await redisClient.del(attemptsKey);
+    try {
+      await sendLoginOtpEmail(email, otp);
+    } catch (error) {
+      await redisClient.del(otpKey, cooldownKey);
+      throw error;
+    }
+    return { message: "Verification code sent" };
+  }
+
+  async verifyEmailOtp(rawEmail: string, rawOtp: string) {
+    const email = rawEmail.trim().toLowerCase();
+    const otpKey = `auth:email-otp:${email}`;
+    const attemptsKey = `auth:email-otp-attempts:${email}`;
+    const attempts = Number(await redisClient.get(attemptsKey) || "0");
+    if (attempts >= 5) {
+      await redisClient.del(otpKey, attemptsKey);
+      throw new Error("Too many incorrect attempts. Please request a new code");
+    }
+
+    const storedOtp = await redisClient.get(otpKey);
+    if (!storedOtp || storedOtp !== rawOtp) {
+      await redisClient.incr(attemptsKey);
+      await redisClient.expire(attemptsKey, 300);
+      throw new Error("Invalid or expired verification code");
+    }
+
+    await redisClient.del(otpKey, attemptsKey, `auth:email-otp-cooldown:${email}`);
+    let user = await this.userRepository.findByEmail(email);
+    if (user && user.role !== UserRole.USER) throw new Error("Please use the admin sign-in page");
+    if (!user) {
+      const randomPassword = await bcrypt.hash(randomUUID(), 10);
+      const firstName = email.split("@")[0].replace(/[._-]+/g, " ").trim().slice(0, 50) || "Customer";
+      user = await this.userRepository.create({
+        email,
+        password: randomPassword,
+        firstName,
+        lastName: "",
+        role: UserRole.USER,
+        termsAccepted: false,
+        emailVerified: true,
+      });
+    } else {
+      if (!user.isActive) throw new Error("Account is deactivated");
+      if (!user.emailVerified) user = await this.userRepository.update(user.id, { emailVerified: true });
+    }
+
+    const tokens = this.generateTokens({ userId: user.id.toString(), email: user.email, role: user.role });
+    await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const { password: _password, ...safeUser } = user;
+    return { user: safeUser, ...tokens };
+  }
 
   // Register
   async register(
@@ -137,6 +203,7 @@ export class AuthService {
   async login(email: string, password: string) {
     const user = await this.userRepository.findByEmail(email);
     if (!user) throw new Error("Invalid credentials");
+    if (user.role === UserRole.USER) throw new Error("Customers must sign in using email verification");
     if (!user.isActive) throw new Error("Account is deactivated");
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
