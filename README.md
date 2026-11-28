@@ -50,3 +50,10 @@ Infrastructure: COMPLETE
 Module Implementation: PENDING
 
 Ready for business logic implementation!
+
+
+## Email delivery (Amazon SES)
+
+Application email delivery uses Amazon SES in `ap-south-1` through the AWS SDK default credential provider chain (use an EC2 IAM role in production). Order/notification emails, password-reset emails, and newsletter emails share one SES transport. The existing PostgreSQL-backed email job worker and retry handling are retained.
+
+See [docs/SES_SETUP.md](docs/SES_SETUP.md) and `.env.ses.example` for required environment variables and the least-privilege EC2 IAM policy. SNS is optional for sending; SES event feedback can be integrated separately.
