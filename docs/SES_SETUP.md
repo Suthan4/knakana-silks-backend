@@ -4,6 +4,13 @@ This backend sends application emails through Amazon SES in **Asia Pacific (Mumb
 
 ## 1. Environment
 
+The shared email transport supports two providers. Set `EMAIL_PROVIDER` explicitly per deployment:
+
+- QA: `EMAIL_PROVIDER=nodemailer` and configure the SMTP variables below.
+- Production: `EMAIL_PROVIDER=ses` and use the EC2 IAM role; no SMTP credentials are needed.
+
+For QA SMTP, configure `SMTP_HOST`, `SMTP_PORT` (usually `587`), `SMTP_SECURE` (`false` for STARTTLS on 587, `true` for implicit TLS on 465), `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM_EMAIL`. Keep SMTP credentials only in the QA server environment/secrets, never in Git. Nodemailer is only selected when explicitly configured or when `APP_ENV=qa`.
+
 Copy the relevant values from `.env.ses.example` into the backend environment:
 
 - `AWS_SES_REGION=ap-south-1`
@@ -50,8 +57,8 @@ SNS is not required to send messages. SNS event handling (bounce/complaint/deliv
 
 ## 4. Email routing
 
-- Order and notification emails are sent by the existing `EmailService` through SES.
-- Password-reset emails and newsletter notification/welcome emails are sent through the same SES transport.
+- Order and notification emails use the shared email transport and follow `EMAIL_PROVIDER`.
+- Password-reset emails, OTP emails, and newsletter notification/welcome emails use the same transport.
 - The existing PostgreSQL-backed email job worker and retry behavior are retained.
 - `admin@kankanasilks.com` receives newsletter subscription alerts and any existing admin notifications already routed by application workflows.
 - `support@kankanasilks.com` is the default Reply-To address.
