@@ -21,10 +21,9 @@ const getAuthController = () => container.resolve(AuthController);
 const getAdminController = () => container.resolve(AdminController);
 
 // ============ Auth Routes ============
-router.post("/auth/register", (req, res) =>
-  getAuthController().register(req, res)
-);
 router.post("/auth/login", (req, res) => getAuthController().login(req, res));
+router.post("/auth/email-otp/send", (req, res) => getAuthController().sendEmailOtp(req, res));
+router.post("/auth/email-otp/verify", (req, res) => getAuthController().verifyEmailOtp(req, res));
 router.post("/auth/refresh-token", (req, res) =>
   getAuthController().refreshToken(req, res)
 );

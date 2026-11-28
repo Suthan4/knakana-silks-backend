@@ -115,6 +115,26 @@ export class AuthController {
     }
   }
 
+  async sendEmailOtp(req: Request, res: Response) {
+    try {
+      const data = z.object({ email: z.string().email() }).parse(req.body);
+      const result = await this.authService.sendEmailOtp(data.email);
+      res.json({ success: true, message: result.message, data: { isNewAccount: result.isNewAccount } });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message || "Unable to send verification code" });
+    }
+  }
+
+  async verifyEmailOtp(req: Request, res: Response) {
+    try {
+      const data = z.object({ email: z.string().email(), otp: z.string().regex(/^\d{6}$/) }).parse(req.body);
+      const result = await this.authService.verifyEmailOtp(data.email, data.otp);
+      res.json({ success: true, message: "Signed in successfully", data: result });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error.message || "Verification failed" });
+    }
+  }
+
   async login(req: Request, res: Response) {
     try {
       const data = loginSchema.parse(req.body);
